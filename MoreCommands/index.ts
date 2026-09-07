@@ -404,14 +404,45 @@ function resolveCtx(opts, other) {
     return other || opts;
 }
 
+function makeNonce() {
+    var S = findByProps("fromTimestamp", "extractTimestamp") || findByProps("fromTimestamp");
+    if (S && typeof S.fromTimestamp === "function") {
+        try { return String(S.fromTimestamp(Date.now())); } catch (_e) {}
+    }
+    return String(Date.now());
+}
+
 function messageBody(msg) {
     const content = typeof msg === "string" ? msg : (msg && msg.content) || "";
     return Object.assign({
         content: content,
         tts: false,
+        nonce: makeNonce(),
         invalidEmojis: [],
         validNonShortcutEmojis: []
     }, typeof msg === "object" && msg ? msg : {});
+}
+
+function sendViaApi(channelId, content) {
+    var auth = findByProps("getToken");
+    var token = auth && typeof auth.getToken === "function" && auth.getToken();
+    if (!token || typeof fetch !== "function") return Promise.resolve(false);
+    var url = "https://discord.com/api/v9/channels/" + channelId + "/messages";
+    try { console.log("[MoreCommands] API POST", url); } catch (_e0) {}
+    return fetch(url, {
+        method: "POST",
+        headers: {
+            Authorization: token,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ content: content })
+    }).then(function (res) {
+        try { console.log("[MoreCommands] API status", res.status); } catch (_e1) {}
+        return res.status >= 200 && res.status < 300;
+    }).catch(function (err) {
+        try { console.log("[MoreCommands] API fetch failed", err && err.message); } catch (_e2) {}
+        return false;
+    });
 }
 
 function sendUserMessage(channelId, msg) {
@@ -429,6 +460,7 @@ function sendUserMessage(channelId, msg) {
         const attempts = [
             function () { return util.sendMessage(channelId, body); },
             function () { return util.sendMessage(channelId, body, true); },
+            function () { return util.sendMessage(channelId, body, void 0, { location: "slash_command" }); },
             function () { return util.sendMessage(channelId, body.content); }
         ];
         for (let i = 0; i < attempts.length; i++) {
@@ -460,6 +492,25 @@ function sendUserMessage(channelId, msg) {
     return false;
 }
 
+function sendGifToChannel(channelId, url) {
+    var auth = findByProps("getToken");
+    var token = auth && typeof auth.getToken === "function" && auth.getToken();
+    if (token && typeof fetch === "function") {
+        return sendViaApi(channelId, url).then(function (ok) {
+            if (ok) {
+                try { console.log("[MoreCommands] gif sent via API"); } catch (_e) {}
+                return true;
+            }
+            var sent = sendUserMessage(channelId, { content: url });
+            try { console.log("[MoreCommands] gif fallback sendMessage", sent); } catch (_e2) {}
+            return sent;
+        });
+    }
+    var sentNow = sendUserMessage(channelId, { content: url });
+    try { console.log("[MoreCommands] gif sendMessage (no token)", sentNow); } catch (_e3) {}
+    return Promise.resolve(sentNow);
+}
+
 function getUserStore() {
     return findByStoreName("UserStore") || findByProps("getCurrentUser", "getUser") || (getMod()._test && getMod()._test.UserStore);
 }
@@ -482,10 +533,27 @@ function getUploadAttachmentStore() {
     return findByStoreName("UploadAttachmentStore") || findByProps("getUpload") || (getMod()._test && getMod()._test.UploadAttachmentStore);
 }
 
+function unwrapDiscordProxy(url) {
+    if (!url || typeof url !== "string") return url;
+    var m = url.match(/\/external\/[^/]+\/(https?)\/([^?]+)/);
+    if (m) return m[1] + "://" + decodeURIComponent(m[2]);
+    if (url.indexOf("images-ext-") >= 0) {
+        var q = url.indexOf("?");
+        return q >= 0 ? url.slice(0, q) : url;
+    }
+    return url;
+}
+
+function isWeakGifUrl(u) {
+    if (!u) return true;
+    return u.indexOf("images-ext-") >= 0 || u.indexOf("format=webp") >= 0;
+}
+
 function gifUrlFrom(entry) {
     if (!entry) return null;
-    if (typeof entry === "string") return /^https?:\/\//.test(entry) ? entry : null;
-    return entry.src || entry.url || entry.gif || entry.uri || entry.video || entry.sourceURI || null;
+    if (typeof entry === "string") return /^https?:\/\//.test(entry) ? unwrapDiscordProxy(entry) : null;
+    var raw = entry.url || entry.gif || entry.uri || entry.src || entry.video || entry.sourceURI || null;
+    return raw ? unwrapDiscordProxy(raw) : null;
 }
 
 function favoriteGifsMapFrom(value) {
@@ -533,8 +601,8 @@ function collectGifUrls(gifs) {
     if (!gifs) return urls;
     if (typeof gifs.forEach === "function" && typeof gifs.keys === "function" && !Array.isArray(gifs)) {
         gifs.forEach(function (val, key) {
-            if (typeof key === "string" && /^https?:\/\//.test(key)) push(key);
-            push(gifUrlFrom(val));
+            if (typeof key === "string" && /^https?:\/\//.test(key)) push(unwrapDiscordProxy(key));
+            else push(gifUrlFrom(val));
         });
         return urls;
     }
@@ -545,8 +613,8 @@ function collectGifUrls(gifs) {
     const keys = Object.keys(gifs);
     for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
-        if (/^https?:\/\//.test(key)) push(key);
-        push(gifUrlFrom(gifs[key]));
+        if (/^https?:\/\//.test(key)) push(unwrapDiscordProxy(key));
+        else push(gifUrlFrom(gifs[key]));
     }
     return urls;
 }
@@ -611,7 +679,12 @@ function getFavoriteGif(_opts, _other) {
         if (urls.length) break;
     }
     if (!urls.length) return null;
-    return urls[Math.floor(Math.random() * urls.length)];
+    var strong = [];
+    for (var s = 0; s < urls.length; s++) {
+        if (!isWeakGifUrl(urls[s])) strong.push(urls[s]);
+    }
+    var pool = strong.length ? strong : urls;
+    return pool[Math.floor(Math.random() * pool.length)];
 }
 
 function calculateAffinityScore(affinity) {
@@ -1508,7 +1581,7 @@ const commands = [
                 return;
             }
             try {
-                const url = getFavoriteGif(opts, ctx);
+                const url = unwrapDiscordProxy(getFavoriteGif(opts, ctx));
                 try { console.log("[MoreCommands] gifroulette url=", url); } catch (_e1) {}
                 if (!url) {
                     sendBotMessage(channelId, {
@@ -1516,10 +1589,10 @@ const commands = [
                     });
                     return;
                 }
-                const payload = messageBody({ content: url });
-                const sent = sendUserMessage(channelId, payload);
-                try { console.log("[MoreCommands] gifroulette sent=", sent); } catch (_e2) {}
-                if (!sent) return payload;
+                return sendGifToChannel(channelId, url).then(function (sent) {
+                    try { console.log("[MoreCommands] gifroulette sent=", sent); } catch (_e2) {}
+                    if (!sent) return { content: url };
+                });
             } catch (err) {
                 try { console.error("[MoreCommands] gifroulette threw", err); } catch (_e3) {}
                 sendBotMessage(channelId, {
