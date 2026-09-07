@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.spotifypreview",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "display": {
     "name": "SpotifyPreview",
     "description": "Lets you preview (30s of audio) Spotify songs by pressing the links.",
