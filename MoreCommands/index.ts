@@ -43,13 +43,66 @@ function findOption(args, name, fallback) {
 }
 
 function getMod() {
-    var mod = null;
-    try { if (typeof snow !== "undefined" && snow) mod = snow; } catch (_e) { /* unbound */ }
-    if (mod && (mod.api || mod.plugin || mod.metro || mod._test)) return mod;
-    try { if (typeof bunny !== "undefined" && bunny) mod = bunny; } catch (_e2) { /* unbound */ }
-    if (mod && (mod.api || mod.plugin || mod.metro || mod._test)) return mod;
+    var list = [];
+    try { if (typeof snow !== "undefined" && snow) list.push(snow); } catch (_e) { /* unbound */ }
+    try { if (typeof bunny !== "undefined" && bunny) list.push(bunny); } catch (_e2) { /* unbound */ }
     var g = typeof globalThis !== "undefined" ? globalThis : {};
-    return g.snow || g.bunny || g.vendetta || {};
+    if (g.snow) list.push(g.snow);
+    if (g.bunny) list.push(g.bunny);
+    if (g.vendetta) list.push(g.vendetta);
+    function canRegister(m) {
+        return !!(m && (
+            (m.api && m.api.commands && m.api.commands.registerCommand) ||
+            (m.commands && m.commands.registerCommand)
+        ));
+    }
+    var i;
+    for (i = 0; i < list.length; i++) if (canRegister(list[i])) return list[i];
+    for (i = 0; i < list.length; i++) {
+        if (list[i] && (list[i].api || list[i].plugin || list[i].metro || list[i]._test)) return list[i];
+    }
+    return list[0] || {};
+}
+
+function getRegisterCommand() {
+    var mod = getMod();
+    if (mod.api && mod.api.commands && typeof mod.api.commands.registerCommand === "function") {
+        return function (cmd) { return mod.api.commands.registerCommand(cmd); };
+    }
+    if (mod.commands && typeof mod.commands.registerCommand === "function") {
+        return function (cmd) { return mod.commands.registerCommand(cmd); };
+    }
+    return null;
+}
+
+function prepareOption(opt) {
+    if (!opt || typeof opt !== "object") return opt;
+    var out = Object.assign({}, opt);
+    out.displayName = out.displayName || out.name;
+    out.displayDescription = out.displayDescription || out.description || out.name;
+    out.untranslatedName = out.untranslatedName || out.name;
+    out.untranslatedDescription = out.untranslatedDescription || out.description || out.name;
+    if (out.choices && out.choices.length) {
+        out.choices = out.choices.map(function (c) {
+            var ch = Object.assign({}, c);
+            ch.displayName = ch.displayName || ch.name || String(ch.value);
+            return ch;
+        });
+    }
+    return out;
+}
+
+function prepareCommand(cmd) {
+    var out = Object.assign({}, cmd);
+    out.displayName = out.displayName || out.name;
+    out.displayDescription = out.displayDescription || out.description;
+    out.untranslatedName = out.untranslatedName || out.name;
+    out.untranslatedDescription = out.untranslatedDescription || out.description;
+    out.applicationId = out.applicationId || "-1";
+    out.type = out.type != null ? out.type : 1;
+    if (out.inputType == null) out.inputType = 0;
+    out.options = (out.options || []).map(prepareOption);
+    return out;
 }
 
 const SETTINGS_META = {
@@ -1755,13 +1808,15 @@ function patchSendEdit() {
 function start() {
     stop();
     started = true;
-    const register = getMod().api && getMod().api.commands && getMod().api.commands.registerCommand;
+    const register = getRegisterCommand();
     if (register) {
         for (const cmd of commands) {
-            unregisters.push(register(cmd));
+            try {
+                unregisters.push(register(prepareCommand(cmd)));
+            } catch (_e) { /* keep remaining commands */ }
         }
     }
-    patchSendEdit();
+    try { patchSendEdit(); } catch (_e2) { /* commands still stay registered */ }
 }
 
 function stop() {
