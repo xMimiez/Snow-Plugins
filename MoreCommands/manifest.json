@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.morecommands",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "display": {
     "name": "MoreCommands",
     "description": "Adds various fun and useful commands",
