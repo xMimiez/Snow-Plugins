@@ -1,0 +1,24 @@
+{
+  "spec": 3,
+  "type": "plugin",
+  "id": "mime.nitrosniper",
+  "version": "1.0.0",
+  "display": {
+    "name": "NitroSniper",
+    "description": "Automatically redeems Nitro gift links sent in chat. Against Discord ToS — use at your own risk.",
+    "authors": [
+      {
+        "name": "neoarz",
+        "id": "218675193592283137"
+      },
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.ts",
+  "extras": {
+    "bunny": {}
+  }
+}
