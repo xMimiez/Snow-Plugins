@@ -1,0 +1,24 @@
+{
+  "spec": 3,
+  "type": "plugin",
+  "id": "mime.previewfile",
+  "version": "1.0.0",
+  "display": {
+    "name": "PreviewFile",
+    "description": "Allow previewing text files attached in chat.",
+    "authors": [
+      {
+        "name": "mafu",
+        "id": "519760564755365888"
+      },
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.ts",
+  "extras": {
+    "bunny": {}
+  }
+}
