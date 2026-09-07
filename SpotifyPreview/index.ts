@@ -70,7 +70,9 @@ function isSpotifyHref(href) {
 }
 
 function toEmbedUrl(href) {
-    return String(href).replace(/https?:\/\/open\.spotify\.com/i, "https://open.spotify.com/embed");
+    var u = String(href).replace(/https?:\/\/open\.spotify\.com/i, "https://open.spotify.com/embed");
+    if (u.indexOf("theme=") < 0) u += (u.indexOf("?") >= 0 ? "&" : "?") + "theme=0";
+    return u;
 }
 
 function extractHref(arg) {
@@ -118,15 +120,40 @@ function showPreview(href) {
     function PreviewSheet(props) {
         var link = extractHref(props) || (props && props.url) || embed;
         var uri = toEmbedUrl(link);
+        var RN = findByProps("View", "Text") || findByProps("View", "ScrollView");
+        var View = RN && RN.View;
+        var SPOTIFY_BG = "#121212";
         var web = React.createElement(WebView, {
             source: { uri: uri },
-            style: { marginTop: 20, backgroundColor: "#2b2d31", height: 152, width: "100%" }
+            originWhitelist: ["*"],
+            opaque: false,
+            backgroundColor: SPOTIFY_BG,
+            containerStyle: { backgroundColor: SPOTIFY_BG, borderRadius: 12, overflow: "hidden" },
+            style: { backgroundColor: SPOTIFY_BG, height: 152, width: "100%", borderRadius: 12 },
+            injectedJavaScript: "document.documentElement.style.background='#121212';document.body.style.background='#121212';true;"
         });
-        var inner = web;
+        var player = View
+            ? React.createElement(View, {
+                style: {
+                    marginTop: 8,
+                    marginHorizontal: 12,
+                    marginBottom: 28,
+                    height: 152,
+                    borderRadius: 12,
+                    overflow: "hidden",
+                    backgroundColor: SPOTIFY_BG
+                }
+            }, web)
+            : web;
+        var inner = player;
         if (scrollMod && scrollMod.BottomSheetScrollView) {
             inner = React.createElement(scrollMod.BottomSheetScrollView, {
-                contentContainerStyle: { marginBottom: 100 }
-            }, web);
+                contentContainerStyle: {
+                    paddingTop: 4,
+                    paddingBottom: 180,
+                    paddingHorizontal: 0
+                }
+            }, player);
         }
         if (Sheet) return React.createElement(Sheet, null, inner);
         return inner;
