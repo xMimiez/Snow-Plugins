@@ -1,0 +1,20 @@
+{
+  "spec": 3,
+  "type": "plugin",
+  "id": "mime.debugconsole",
+  "version": "1.0.0",
+  "display": {
+    "name": "Debug Console",
+    "description": "In-app console overlay and /console dump of log/error output",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.ts",
+  "extras": {
+    "bunny": {}
+  }
+}
