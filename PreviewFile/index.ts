@@ -21,7 +21,7 @@ var TEXT_EXT = {
     gradle: 1, properties: 1, gitignore: 1, dockerfile: 1, makefile: 1
 };
 
-function getMod() {
+function eachClient(fn) {
     var list = [];
     try { if (typeof snow !== "undefined" && snow) list.push(snow); } catch (_e) {}
     try { if (typeof bunny !== "undefined" && bunny) list.push(bunny); } catch (_e2) {}
@@ -29,21 +29,30 @@ function getMod() {
     if (g.snow) list.push(g.snow);
     if (g.bunny) list.push(g.bunny);
     if (g.vendetta) list.push(g.vendetta);
-    function ok(m) {
-        return m && ((m.api && (m.api.flux || m.api.patcher)) || m.plugin || m.metro);
-    }
-    var i;
-    for (i = 0; i < list.length; i++) if (ok(list[i]) && list[i].api) return list[i];
-    for (i = 0; i < list.length; i++) if (ok(list[i])) return list[i];
-    return list[0] || {};
+    for (var i = 0; i < list.length; i++) if (list[i]) fn(list[i]);
+}
+
+function getMod() {
+    var found = null;
+    eachClient(function (m) {
+        if (found) return;
+        if (m.api && (m.api.patcher || m.api.flux)) found = m;
+    });
+    if (found) return found;
+    eachClient(function (m) {
+        if (found) return;
+        if (m.patcher || m.metro || m.plugin) found = m;
+    });
+    return found || {};
 }
 
 function metroRoots() {
     var roots = [];
-    var mod = getMod();
-    var g = typeof globalThis !== "undefined" ? globalThis : {};
-    [mod.metro, mod.metro && mod.metro.common, g.vendetta && g.vendetta.metro, g.snow && g.snow.metro].forEach(function (r) {
-        if (r && roots.indexOf(r) < 0) roots.push(r);
+    function add(r) { if (r && roots.indexOf(r) < 0) roots.push(r); }
+    eachClient(function (m) {
+        add(m.metro);
+        add(m.api && m.api.metro);
+        add(m.metro && m.metro.common);
     });
     return roots;
 }
@@ -89,16 +98,81 @@ function findByStoreName(name) {
 }
 
 function getReact() {
-    var mod = getMod();
-    return (mod.metro && mod.metro.common && mod.metro.common.React)
+    var found = null;
+    eachClient(function (m) {
+        if (found) return;
+        var c = m.metro && m.metro.common;
+        if (c && c.React) found = c.React;
+    });
+    return found
         || findByProps("createElement", "useState")
         || (typeof globalThis !== "undefined" && globalThis.React);
 }
 
 function getRN() {
+    var found = null;
+    eachClient(function (m) {
+        if (found) return;
+        var c = m.metro && m.metro.common;
+        if (c && c.ReactNative) found = c.ReactNative;
+    });
+    if (found) return found;
+    try {
+        var rn = require("react-native");
+        if (rn && rn.View) return rn;
+    } catch (_e) {}
     return findByProps("View", "Text", "NativeModules")
-        || findByProps("View", "Text")
-        || (getMod().metro && getMod().metro.common && getMod().metro.common.ReactNative);
+        || findByProps("NativeModules")
+        || findByProps("View", "Text");
+}
+
+function getNativeModules() {
+    var RN = getRN();
+    if (RN && RN.NativeModules) return RN.NativeModules;
+    try {
+        var rn = require("react-native");
+        if (rn && rn.NativeModules) return rn.NativeModules;
+    } catch (_e) {}
+    return findByProps("DCDChatManager") || {};
+}
+
+function getPatcher() {
+    var mod = getMod();
+    if (mod.api && mod.api.patcher) return mod.api.patcher;
+    if (mod.patcher) return mod.patcher;
+    var found = null;
+    eachClient(function (m) {
+        if (found) return;
+        if (m.api && m.api.patcher) found = m.api.patcher;
+        else if (m.patcher) found = m.patcher;
+    });
+    return found;
+}
+
+function patchMethod(kind, obj, method, cb) {
+    var patcher = getPatcher();
+    if (!patcher || typeof patcher[kind] !== "function") return null;
+    if (!obj || typeof obj[method] !== "function") return null;
+    var orig = obj[method];
+    try {
+        var un = patcher[kind](method, obj, cb);
+        if (obj[method] !== orig || typeof un === "function") {
+            log("patched", kind, method, "name-first");
+            return typeof un === "function" ? un : function () {};
+        }
+    } catch (err) {
+        logError("patch name-first", method, err && err.message);
+    }
+    try {
+        var un2 = patcher[kind](obj, method, cb);
+        if (obj[method] !== orig || typeof un2 === "function") {
+            log("patched", kind, method, "obj-first");
+            return typeof un2 === "function" ? un2 : function () {};
+        }
+    } catch (err2) {
+        logError("patch obj-first", method, err2 && err2.message);
+    }
+    return null;
 }
 
 function getStorage() {
@@ -386,36 +460,40 @@ function fluxHandler(event) {
 }
 
 function patchNativeRows() {
-    var patcher = getMod().api && getMod().api.patcher;
-    if (!patcher) return false;
-    var RN = getRN();
-    var DCD = RN && RN.NativeModules && RN.NativeModules.DCDChatManager;
     var ok = false;
-    if (DCD && typeof DCD.updateRows === "function" && typeof patcher.before === "function") {
-        unpatches.push(patcher.before("updateRows", DCD, function (args) {
-            try {
-                if (args && args[1]) args[1] = transformRowsJson(args[1]);
-            } catch (err) {
-                logError("updateRows", err);
+    var NM = getNativeModules() || {};
+    var names = [];
+    try { names = Object.keys(NM); } catch (_e) {}
+    for (var i = 0; i < names.length; i++) {
+        var nativeMod = NM[names[i]];
+        if (nativeMod && typeof nativeMod.updateRows === "function") {
+            var un = patchMethod("before", nativeMod, "updateRows", function (args) {
+                try { if (args && args[1] != null) args[1] = transformRowsJson(args[1]); } catch (err) { logError("updateRows", err); }
+            });
+            if (un) {
+                unpatches.push(un);
+                ok = true;
+                log("updateRows on", names[i]);
             }
-        }));
-        log("patched DCDChatManager.updateRows");
-        ok = true;
+        }
     }
     var RowManager = findByName("RowManager");
     var proto = RowManager && (RowManager.prototype || RowManager);
-    if (proto && typeof proto.generate === "function" && typeof patcher.after === "function") {
-        unpatches.push(patcher.after("generate", proto, function (_args, row) {
-            try { handleRow(row); } catch (err) { logError("RowManager.generate", err); }
-        }));
-        log("patched RowManager.generate");
-        ok = true;
+    if (proto && typeof proto.generate === "function") {
+        var unRm = patchMethod("after", proto, "generate", function (_args, row) {
+            try { handleRow(row); } catch (err2) { logError("RowManager.generate", err2); }
+            return row;
+        });
+        if (unRm) {
+            unpatches.push(unRm);
+            ok = true;
+        }
     }
     return ok;
 }
 
 function patchStore() {
-    var patcher = getMod().api && getMod().api.patcher;
+    var patcher = getPatcher();
     if (!patcher || typeof patcher.before !== "function") return false;
     var handlers = getStoreHandlers("MessageStore");
     if (!handlers) return false;
