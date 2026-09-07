@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.debugconsole",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "display": {
     "name": "Debug Console",
     "description": "In-app console overlay and /console dump of log/error output",
