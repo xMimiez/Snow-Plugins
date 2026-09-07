@@ -319,7 +319,12 @@ function fetchAttachmentText(att) {
     });
 }
 
-function refreshMessage(message) {
+var bumpedIds = {};
+
+function bumpOnce(message) {
+    if (!message || !message.id) return false;
+    if (bumpedIds[message.id]) return false;
+    bumpedIds[message.id] = true;
     try {
         var Flux = getFluxDispatcher();
         var channelId = message.channel_id || message.channelId;
@@ -330,24 +335,28 @@ function refreshMessage(message) {
         var payload = live || message;
         if (Flux && typeof Flux.dispatch === "function") {
             Flux.dispatch({ type: "MESSAGE_UPDATE", message: payload, log_edit: false });
+            log("bump", message.id);
+            return true;
         }
     } catch (err) {
         logError("refresh", err);
+        bumpedIds[message.id] = false;
     }
+    return false;
 }
 
 function ensureCached(att, message) {
     var url = urlOf(att);
     if (!url) return;
-    if (previewCache[url] && previewCache[url].status === "ok") return;
+    if (previewCache[url] && (previewCache[url].status === "ok" || previewCache[url].status === "err")) return;
     if (fetchInflight[url]) return;
     fetchInflight[url] = true;
-    previewCache[url] = previewCache[url] || { status: "loading" };
+    previewCache[url] = { status: "loading" };
     log("fetch", filenameOf(att), url);
     fetchAttachmentText(att).then(function (text) {
         previewCache[url] = { status: "ok", text: clipText(text), filename: filenameOf(att), ext: extOf(att) };
         log("cached", filenameOf(att), (text || "").length);
-        if (message) refreshMessage(message);
+        if (message) bumpOnce(message);
     }).catch(function (err) {
         previewCache[url] = { status: "err", error: String(err && err.message || err) };
         logError("fetch failed", filenameOf(att), err);
@@ -357,7 +366,8 @@ function ensureCached(att, message) {
 }
 
 function injectBlocks(message, blocks) {
-    if (!blocks.length) return false;
+    if (!blocks.length || !message || message._pf) return false;
+    message._pf = true;
     if (Array.isArray(message.content)) {
         for (var i = 0; i < blocks.length; i++) {
             var b = blocks[i];
@@ -381,7 +391,7 @@ function injectBlocks(message, blocks) {
     return true;
 }
 
-function handleMessageRecord(message) {
+function handleMessageRecord(message, allowFetch) {
     if (!message) return false;
     var atts = listAttachments(message).filter(isPreviewableAttachment);
     if (!atts.length) return false;
@@ -395,7 +405,7 @@ function handleMessageRecord(message) {
                 ext: cached.ext || extOf(atts[i]),
                 text: cached.text
             });
-        } else {
+        } else if (allowFetch) {
             ensureCached(atts[i], message);
         }
     }
@@ -405,7 +415,7 @@ function handleMessageRecord(message) {
 
 function handleRow(row) {
     if (!row || !row.message) return;
-    handleMessageRecord(row.message);
+    handleMessageRecord(row.message, true);
 }
 
 function transformRowsJson(json) {
@@ -421,7 +431,10 @@ function parseMessage(message) {
     if (!atts.length) return Promise.resolve(false);
     var pending = atts.map(function (att) {
         var url = urlOf(att);
-        if (previewCache[url] && previewCache[url].status === "ok") return Promise.resolve(true);
+        if (previewCache[url] && previewCache[url].status === "ok") return Promise.resolve(false);
+        if (previewCache[url] && previewCache[url].status === "err") return Promise.resolve(false);
+        if (fetchInflight[url]) return Promise.resolve(false);
+        fetchInflight[url] = true;
         return fetchAttachmentText(att).then(function (text) {
             previewCache[url] = { status: "ok", text: clipText(text), filename: filenameOf(att), ext: extOf(att) };
             return true;
@@ -429,21 +442,25 @@ function parseMessage(message) {
             previewCache[url] = { status: "err", error: String(err && err.message || err) };
             logError("parseMessage fetch", err);
             return false;
+        }).then(function (v) {
+            fetchInflight[url] = false;
+            return v;
         });
     });
-    return Promise.all(pending).then(function (oks) {
-        var any = oks.some(Boolean);
-        if (any) {
-            handleMessageRecord(message);
-            refreshMessage(message);
-        }
-        return any;
+    return Promise.all(pending).then(function (news) {
+        if (news.some(Boolean)) bumpOnce(message);
+        return atts.some(function (att) {
+            var c = previewCache[urlOf(att)];
+            return c && c.status === "ok";
+        });
     });
 }
 
 function handlePayload(payload) {
     if (!payload) return;
-    if (payload.type === "LOAD_MESSAGES_SUCCESS" || (payload.messages && !payload.message)) {
+    var type = payload.type;
+    if (type && type !== "MESSAGE_CREATE" && type !== "LOAD_MESSAGES_SUCCESS") return;
+    if (type === "LOAD_MESSAGES_SUCCESS" || (payload.messages && !payload.message && type !== "MESSAGE_CREATE")) {
         var messages = payload.messages || [];
         for (var i = 0; i < messages.length; i++) {
             var m = messages[i];
@@ -451,8 +468,10 @@ function handlePayload(payload) {
         }
         return;
     }
-    var message = payload.message || ((payload.content || payload.attachments) && payload);
-    if (message && listAttachments(message).length) parseMessage(message);
+    if (type === "MESSAGE_CREATE" || (!type && payload.message)) {
+        var message = payload.message || payload;
+        if (message && listAttachments(message).length) parseMessage(message);
+    }
 }
 
 function fluxHandler(event) {
@@ -516,6 +535,7 @@ function patchStore() {
 
 function start() {
     stop();
+    bumpedIds = {};
     patchNativeRows();
     patchStore();
     var mod = getMod();
