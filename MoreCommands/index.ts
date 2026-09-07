@@ -1932,10 +1932,13 @@ function start() {
     started = true;
     const register = getRegisterCommand();
     if (register) {
-        for (const cmd of commands) {
+        var nextId = -910000;
+        for (var ci = 0; ci < commands.length; ci++) {
             try {
-                const prepared = prepareCommand(cmd);
+                const prepared = prepareCommand(commands[ci]);
                 const orig = prepared.execute;
+                const uniqueId = String(nextId - ci);
+                prepared.id = uniqueId;
                 if (typeof orig === "function") {
                     prepared.execute = function (args, ctx) {
                         try { console.log("[MoreCommands] /" + prepared.name + " execute", "channel", getChannelId(ctx) || getChannelId(args)); } catch (_log) {}
@@ -1948,6 +1951,7 @@ function start() {
                     };
                 }
                 unregisters.push(register(prepared));
+                prepared.id = uniqueId;
             } catch (_e) { /* keep remaining commands */ }
         }
     }
