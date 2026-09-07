@@ -391,32 +391,70 @@ function sendBotMessage(channelId, message) {
 function getChannelId(ctx) {
     if (!ctx) return null;
     if (typeof ctx === "string") return ctx;
-    if (ctx.channel && ctx.channel.id) return ctx.channel.id;
+    if (ctx.channel && (ctx.channel.id || ctx.channel.channelId)) return ctx.channel.id || ctx.channel.channelId;
     if (ctx.channelId) return ctx.channelId;
-    if (ctx.id && (ctx.guild_id !== undefined || ctx.guildId !== undefined || ctx.recipients)) return ctx.id;
+    if (ctx.channel_id) return ctx.channel_id;
+    if (ctx.id && (ctx.guild_id !== undefined || ctx.guildId !== undefined || ctx.recipients || ctx.type !== undefined)) return ctx.id;
     return null;
 }
 
+function resolveCtx(opts, other) {
+    if (other && getChannelId(other)) return other;
+    if (opts && getChannelId(opts)) return opts;
+    return other || opts;
+}
+
+function messageBody(msg) {
+    const content = typeof msg === "string" ? msg : (msg && msg.content) || "";
+    return Object.assign({
+        content: content,
+        tts: false,
+        invalidEmojis: [],
+        validNonShortcutEmojis: []
+    }, typeof msg === "object" && msg ? msg : {});
+}
+
 function sendUserMessage(channelId, msg) {
-    if (!channelId || !msg) return false;
+    if (!channelId || !msg) {
+        try { console.log("[MoreCommands] sendUserMessage skip, channelId=", channelId); } catch (_e0) {}
+        return false;
+    }
+    const body = messageBody(msg);
     const mod = getMod();
     const util = findByProps("sendMessage", "receiveMessage")
         || findByProps("sendMessage", "sendBotMessage")
-        || findByProps("sendMessage")
-        || (mod.metro && mod.metro.common && mod.metro.common.messageUtil);
+        || (mod.metro && mod.metro.common && mod.metro.common.messageUtil)
+        || findByProps("sendMessage");
     if (util && typeof util.sendMessage === "function") {
-        try {
-            util.sendMessage(channelId, msg);
-            return true;
-        } catch (_e) {
+        const attempts = [
+            function () { return util.sendMessage(channelId, body); },
+            function () { return util.sendMessage(channelId, body, true); },
+            function () { return util.sendMessage(channelId, body.content); }
+        ];
+        for (let i = 0; i < attempts.length; i++) {
             try {
-                util.sendMessage(channelId, typeof msg === "string" ? msg : msg.content);
+                attempts[i]();
+                try { console.log("[MoreCommands] sendMessage ok via", i, "channel", channelId, "content", body.content); } catch (_e1) {}
                 return true;
-            } catch (_e2) { /* fall through */ }
+            } catch (err) {
+                try { console.log("[MoreCommands] sendMessage attempt", i, "failed", err && err.message); } catch (_e2) {}
+            }
+        }
+    } else {
+        try { console.log("[MoreCommands] no sendMessage module"); } catch (_e3) {}
+    }
+    const http = findByProps("getAPIBaseURL");
+    if (http && typeof http.post === "function") {
+        try {
+            http.post({ url: "/channels/" + channelId + "/messages", body: { content: body.content } });
+            try { console.log("[MoreCommands] HTTP post message ok", channelId); } catch (_e4) {}
+            return true;
+        } catch (err2) {
+            try { console.log("[MoreCommands] HTTP post failed", err2 && err2.message); } catch (_e5) {}
         }
     }
     if (mod._test && mod._test.sendMessage) {
-        mod._test.sendMessage(channelId, msg);
+        mod._test.sendMessage(channelId, body);
         return true;
     }
     return false;
@@ -1460,27 +1498,32 @@ const commands = [
         name: "gifroulette",
         description: "Tempt fate and send a gif",
         execute: (opts, other) => {
-            const channelId = getChannelId(other);
-            if (GUILD_IDS.includes((other && other.guild && other.guild.id) || "")) {
+            const ctx = resolveCtx(opts, other);
+            const channelId = getChannelId(ctx);
+            try { console.log("[MoreCommands] gifroulette run channel=", channelId, "ctxKeys=", ctx && Object.keys(ctx)); } catch (_e0) {}
+            if (GUILD_IDS.includes((ctx && ctx.guild && ctx.guild.id) || (other && other.guild && other.guild.id) || "")) {
                 sendBotMessage(channelId, {
                     content: "This command is restricted in this server."
                 });
                 return;
             }
             try {
-                const url = getFavoriteGif(opts, other);
+                const url = getFavoriteGif(opts, ctx);
+                try { console.log("[MoreCommands] gifroulette url=", url); } catch (_e1) {}
                 if (!url) {
                     sendBotMessage(channelId, {
                         content: "No favorite GIFs found. Star a GIF in the GIF picker first."
                     });
                     return;
                 }
-                const payload = { content: url };
+                const payload = messageBody({ content: url });
                 const sent = sendUserMessage(channelId, payload);
+                try { console.log("[MoreCommands] gifroulette sent=", sent); } catch (_e2) {}
                 if (!sent) return payload;
             } catch (err) {
+                try { console.error("[MoreCommands] gifroulette threw", err); } catch (_e3) {}
                 sendBotMessage(channelId, {
-                    content: "Couldn't pick a favorite GIF."
+                    content: "Couldn't pick a favorite GIF: " + (err && err.message ? err.message : String(err))
                 });
             }
         }
@@ -1891,7 +1934,20 @@ function start() {
     if (register) {
         for (const cmd of commands) {
             try {
-                unregisters.push(register(prepareCommand(cmd)));
+                const prepared = prepareCommand(cmd);
+                const orig = prepared.execute;
+                if (typeof orig === "function") {
+                    prepared.execute = function (args, ctx) {
+                        try { console.log("[MoreCommands] /" + prepared.name + " execute", "channel", getChannelId(ctx) || getChannelId(args)); } catch (_log) {}
+                        try {
+                            return orig.call(this, args, ctx);
+                        } catch (err) {
+                            try { console.error("[MoreCommands] /" + prepared.name + " threw", err); } catch (_e3) {}
+                            throw err;
+                        }
+                    };
+                }
+                unregisters.push(register(prepared));
             } catch (_e) { /* keep remaining commands */ }
         }
     }
