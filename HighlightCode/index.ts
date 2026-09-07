@@ -345,72 +345,42 @@ function highlightText(text, lang) {
     return contents;
 }
 
-function langMeta(lang) {
-    var raw = String(lang || "");
-    var known = Object.keys(LANG_LIST).indexOf(raw) >= 0 || Object.keys(LANG_LIST).indexOf(langKey(raw)) >= 0;
-    var entry = LANG_LIST[raw] || LANG_LIST[langKey(raw)];
-    var title = entry ? entry[0] : raw || "Code";
-    var logo = entry && entry[1] ? entry[0] : "Code";
-    return { known: known, title: title, logo: logo };
-}
-
-function makeEmbed(lang, colored) {
-    var meta = langMeta(lang);
-    var iconURL = "https://raw.githubusercontent.com/m4fn3/HighlightCode/master/logos/" + meta.logo + ".png";
-    return {
-        type: "rich",
-        description: [
-            { content: colored, type: "paragraph" },
-            { content: "-- By CodeHighlight", type: "text" }
-        ],
-        author: { name: meta.title, iconURL: iconURL, iconProxyURL: iconURL },
-        borderLeftColor: processColor("#e0e0ff"),
-        providerColor: processColor("#e0e0ff"),
-        headerTextColor: 4294967295,
-        bodyTextColor: 4292599521
-    };
-}
-
 function highlightCodeNode(obj) {
     var lang = blockLang(obj);
-    if (!lang || !isSupportedLang(lang)) return null;
+    if (!lang || !isSupportedLang(lang)) return false;
     var src = nodeText(obj.content);
-    var colored = highlightText(src, lang);
     obj.type = "paragraph";
-    obj.content = colored;
-    if (obj.lang) obj.lang = undefined;
-    if (obj.language) obj.language = undefined;
-    return makeEmbed(lang, colored);
+    obj.content = highlightText(src, lang);
+    try { delete obj.lang; } catch (_e) { obj.lang = undefined; }
+    try { delete obj.language; } catch (_e2) { obj.language = undefined; }
+    try { delete obj.syntax; } catch (_e3) {}
+    return true;
 }
 
 function walkContent(content) {
-    var embeds = [];
     if (typeof content === "string") {
         var converted = transformStringContent(content);
-        return converted || [content, embeds];
+        return converted || [content, []];
     }
-    if (!Array.isArray(content)) return [content, embeds];
+    if (!Array.isArray(content)) return [content, []];
     content = content.map(function (obj) {
         if (!obj) return obj;
-        if (obj.content != null && typeof obj.content === "object") {
-            var nested = walkContent(obj.content);
-            obj.content = nested[0];
-            embeds.push.apply(embeds, nested[1]);
-        }
         var type = obj.type;
         if (type === "codeBlock" || type === "code" || type === "blockCode") {
-            var embed = highlightCodeNode(obj);
-            if (embed) embeds.push(embed);
+            highlightCodeNode(obj);
+            return obj;
+        }
+        if (obj.content != null && typeof obj.content === "object") {
+            obj.content = walkContent(obj.content)[0];
         }
         return obj;
     });
-    return [content, embeds];
+    return [content, []];
 }
 
 function transformStringContent(str) {
     var re = /```([A-Za-z0-9_+-]+)\r?\n([\s\S]*?)```/g;
     var parts = [];
-    var embeds = [];
     var last = 0;
     var m;
     var found = false;
@@ -422,9 +392,7 @@ function transformStringContent(str) {
         var lang = m[1];
         var code = m[2];
         if (isSupportedLang(lang)) {
-            var colored = highlightText(code, lang);
-            parts.push({ type: "paragraph", content: colored });
-            embeds.push(makeEmbed(lang, colored));
+            parts.push({ type: "paragraph", content: highlightText(code, lang) });
         } else {
             parts.push({ type: "codeBlock", lang: lang, content: code });
         }
@@ -434,16 +402,12 @@ function transformStringContent(str) {
     if (last < str.length) {
         parts.push({ type: "paragraph", content: [{ type: "text", content: str.slice(last) }] });
     }
-    return [parts, embeds];
+    return [parts, []];
 }
 
 function handleRow(row) {
     if (!row || !row.message || row.message.content == null) return;
-    var res = walkContent(row.message.content);
-    row.message.content = res[0];
-    if (res[1].length) {
-        row.message.embeds = row.message.embeds ? row.message.embeds.concat(res[1]) : res[1];
-    }
+    row.message.content = walkContent(row.message.content)[0];
 }
 
 function transformRowsJson(json) {
