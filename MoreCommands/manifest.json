@@ -1,0 +1,20 @@
+{
+  "spec": 3,
+  "type": "plugin",
+  "id": "mime.morecommands",
+  "version": "1.0.0",
+  "display": {
+    "name": "MoreCommands",
+    "description": "Adds various fun and useful commands",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.ts",
+  "extras": {
+    "bunny": {}
+  }
+}
