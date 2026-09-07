@@ -72,25 +72,14 @@ var KW = {
     json: "\\b(?:true|false|null)\\b"
 };
 
-function langKey(lang) {
-    var l = String(lang || "").toLowerCase();
-    if (l === "js" || l === "jsx") return "javascript";
-    if (l === "ts" || l === "tsx") return "typescript";
-    if (l === "py") return "python";
-    if (l === "sh" || l === "shell") return "bash";
-    if (l === "rb") return "ruby";
-    if (l === "kt" || l === "kts") return "kotlin";
-    if (l === "md") return "markdown";
-    if (l === "objc" || l === "objectivec") return "c";
-    return l;
+function log() {
+    try { console.log.apply(console, ["[HighlightCode]"].concat([].slice.call(arguments))); } catch (_e) {}
+}
+function logError() {
+    try { console.error.apply(console, ["[HighlightCode]"].concat([].slice.call(arguments))); } catch (_e) {}
 }
 
-function isSupportedLang(lang) {
-    var k = langKey(lang);
-    return !!(LANG_LIST[lang] || LANG_LIST[k] || KW[k]);
-}
-
-function getMod() {
+function eachClient(fn) {
     var list = [];
     try { if (typeof snow !== "undefined" && snow) list.push(snow); } catch (_e) {}
     try { if (typeof bunny !== "undefined" && bunny) list.push(bunny); } catch (_e2) {}
@@ -98,21 +87,31 @@ function getMod() {
     if (g.snow) list.push(g.snow);
     if (g.bunny) list.push(g.bunny);
     if (g.vendetta) list.push(g.vendetta);
-    var i;
-    function ok(m) {
-        return m && ((m.api && m.api.patcher) || m.plugin || m.metro);
-    }
-    for (i = 0; i < list.length; i++) if (ok(list[i]) && list[i].api && list[i].api.patcher) return list[i];
-    for (i = 0; i < list.length; i++) if (ok(list[i])) return list[i];
-    return list[0] || {};
+    for (var i = 0; i < list.length; i++) if (list[i]) fn(list[i]);
+}
+
+function getMod() {
+    var found = null;
+    eachClient(function (m) {
+        if (found) return;
+        if (m.api && m.api.patcher && (m.api.patcher.before || m.api.patcher.after)) found = m;
+    });
+    if (found) return found;
+    eachClient(function (m) {
+        if (found) return;
+        if (m.patcher || m.metro || m.plugin) found = m;
+    });
+    return found || {};
 }
 
 function metroRoots() {
     var roots = [];
-    var mod = getMod();
-    var g = typeof globalThis !== "undefined" ? globalThis : {};
-    [mod.metro, mod.metro && mod.metro.common, g.vendetta && g.vendetta.metro].forEach(function (r) {
-        if (r && roots.indexOf(r) < 0) roots.push(r);
+    function add(r) { if (r && roots.indexOf(r) < 0) roots.push(r); }
+    eachClient(function (m) {
+        add(m.metro);
+        add(m.api && m.api.metro);
+        add(m.metro && m.metro.common);
+        add(m.metro && m.metro.filters);
     });
     return roots;
 }
@@ -131,17 +130,95 @@ function findByProps() {
     return null;
 }
 
+function findByName(name) {
+    var roots = metroRoots();
+    for (var i = 0; i < roots.length; i++) {
+        var fn = roots[i].findByName;
+        if (!fn) continue;
+        try {
+            var found = fn.call(roots[i], name);
+            if (found) return found;
+        } catch (_e) {}
+    }
+    return null;
+}
+
 function getReact() {
-    var mod = getMod();
-    return (mod.metro && mod.metro.common && mod.metro.common.React)
+    var found = null;
+    eachClient(function (m) {
+        if (found) return;
+        var c = m.metro && m.metro.common;
+        if (c && c.React) found = c.React;
+    });
+    return found
         || findByProps("createElement", "useState")
         || (typeof globalThis !== "undefined" && globalThis.React);
 }
 
 function getRN() {
+    var found = null;
+    eachClient(function (m) {
+        if (found) return;
+        var c = m.metro && m.metro.common;
+        if (c && c.ReactNative) found = c.ReactNative;
+    });
+    if (found) return found;
+    try {
+        var rn = require("react-native");
+        if (rn && rn.View) return rn;
+    } catch (_e) {}
     return findByProps("View", "Text", "NativeModules")
-        || findByProps("View", "Text")
-        || (getMod().metro && getMod().metro.common && getMod().metro.common.ReactNative);
+        || findByProps("NativeModules")
+        || findByProps("View", "Text");
+}
+
+function getNativeModules() {
+    var RN = getRN();
+    if (RN && RN.NativeModules) return RN.NativeModules;
+    try {
+        var rn = require("react-native");
+        if (rn && rn.NativeModules) return rn.NativeModules;
+    } catch (_e) {}
+    return findByProps("DCDChatManager") || {};
+}
+
+function getPatcher() {
+    var mod = getMod();
+    if (mod.api && mod.api.patcher) return mod.api.patcher;
+    if (mod.patcher) return mod.patcher;
+    var found = null;
+    eachClient(function (m) {
+        if (found) return;
+        if (m.api && m.api.patcher) found = m.api.patcher;
+        else if (m.patcher) found = m.patcher;
+    });
+    return found;
+}
+
+function patchMethod(kind, obj, method, cb) {
+    var patcher = getPatcher();
+    if (!patcher || typeof patcher[kind] !== "function") return null;
+    if (!obj || typeof obj[method] !== "function") return null;
+    var orig = obj[method];
+    try {
+        var un = patcher[kind](method, obj, cb);
+        if (obj[method] !== orig || typeof un === "function") {
+            log("patched", kind, method, "name-first");
+            return typeof un === "function" ? un : function () {};
+        }
+    } catch (err) {
+        logError("patch name-first", method, err && err.message);
+    }
+    try {
+        var un2 = patcher[kind](obj, method, cb);
+        if (obj[method] !== orig || typeof un2 === "function") {
+            log("patched", kind, method, "obj-first");
+            return typeof un2 === "function" ? un2 : function () {};
+        }
+    } catch (err2) {
+        logError("patch obj-first", method, err2 && err2.message);
+    }
+    return null;
 }
 
 function getStorage() {
@@ -156,7 +233,46 @@ function processColor(color) {
     if (RN && typeof RN.processColor === "function") {
         try { return RN.processColor(color); } catch (_e) {}
     }
+    if (typeof color === "string" && color.charAt(0) === "#" && color.length === 7) {
+        var n = parseInt(color.slice(1), 16);
+        if (!isNaN(n)) return (n | 0xff000000) >>> 0;
+    }
     return color;
+}
+
+function langKey(lang) {
+    var l = String(lang || "").toLowerCase();
+    if (l === "js" || l === "jsx") return "javascript";
+    if (l === "ts" || l === "tsx") return "typescript";
+    if (l === "py") return "python";
+    if (l === "sh" || l === "shell") return "bash";
+    if (l === "rb") return "ruby";
+    if (l === "kt" || l === "kts") return "kotlin";
+    if (l === "md") return "markdown";
+    if (l === "objc" || l === "objectivec") return "c";
+    return l;
+}
+
+function isSupportedLang(lang) {
+    var k = langKey(lang);
+    return !!(LANG_LIST[lang] || LANG_LIST[k] || KW[k]);
+}
+
+function blockLang(obj) {
+    if (!obj) return "";
+    return obj.lang || obj.language || obj.syntax || "";
+}
+
+function nodeText(n) {
+    if (n == null) return "";
+    if (typeof n === "string" || typeof n === "number") return String(n);
+    if (Array.isArray(n)) {
+        var s = "";
+        for (var i = 0; i < n.length; i++) s += nodeText(n[i]);
+        return s;
+    }
+    if (typeof n === "object") return nodeText(n.content) || nodeText(n.text) || "";
+    return String(n);
 }
 
 function highlight(text, lang) {
@@ -219,13 +335,9 @@ function highlightText(text, lang) {
         var part = res[i];
         if (typeof part === "object") {
             var style = part.alias || part.type;
-            if (THEME[style]) {
-                contents.push(colorNode(part.content, THEME[style]));
-            } else if (DECORATOR[style]) {
-                contents.push({ type: DECORATOR[style], content: part.content });
-            } else {
-                contents.push({ type: "text", content: part.content });
-            }
+            if (THEME[style]) contents.push(colorNode(part.content, THEME[style]));
+            else if (DECORATOR[style]) contents.push({ type: DECORATOR[style], content: part.content });
+            else contents.push({ type: "text", content: part.content });
         } else {
             contents.push({ type: "text", content: part });
         }
@@ -233,80 +345,158 @@ function highlightText(text, lang) {
     return contents;
 }
 
+function langMeta(lang) {
+    var raw = String(lang || "");
+    var known = Object.keys(LANG_LIST).indexOf(raw) >= 0 || Object.keys(LANG_LIST).indexOf(langKey(raw)) >= 0;
+    var entry = LANG_LIST[raw] || LANG_LIST[langKey(raw)];
+    var title = entry ? entry[0] : raw || "Code";
+    var logo = entry && entry[1] ? entry[0] : "Code";
+    return { known: known, title: title, logo: logo };
+}
+
+function makeEmbed(lang, colored) {
+    var meta = langMeta(lang);
+    var iconURL = "https://raw.githubusercontent.com/m4fn3/HighlightCode/master/logos/" + meta.logo + ".png";
+    return {
+        type: "rich",
+        description: [
+            { content: colored, type: "paragraph" },
+            { content: "-- By CodeHighlight", type: "text" }
+        ],
+        author: { name: meta.title, iconURL: iconURL, iconProxyURL: iconURL },
+        borderLeftColor: processColor("#e0e0ff"),
+        providerColor: processColor("#e0e0ff"),
+        headerTextColor: 4294967295,
+        bodyTextColor: 4292599521
+    };
+}
+
+function highlightCodeNode(obj) {
+    var lang = blockLang(obj);
+    if (!lang || !isSupportedLang(lang)) return null;
+    var src = nodeText(obj.content);
+    var colored = highlightText(src, lang);
+    obj.type = "paragraph";
+    obj.content = colored;
+    if (obj.lang) obj.lang = undefined;
+    if (obj.language) obj.language = undefined;
+    return makeEmbed(lang, colored);
+}
+
 function walkContent(content) {
     var embeds = [];
+    if (typeof content === "string") {
+        var converted = transformStringContent(content);
+        return converted || [content, embeds];
+    }
     if (!Array.isArray(content)) return [content, embeds];
     content = content.map(function (obj) {
         if (!obj) return obj;
-        if (typeof obj.content === "object") {
+        if (obj.content != null && typeof obj.content === "object") {
             var nested = walkContent(obj.content);
             obj.content = nested[0];
             embeds.push.apply(embeds, nested[1]);
         }
-        if (obj.type === "codeBlock" && obj.lang && isSupportedLang(obj.lang)) {
-            var known = Object.keys(LANG_LIST).indexOf(obj.lang) >= 0;
-            var meta = known && LANG_LIST[obj.lang][1] ? LANG_LIST[obj.lang][0] : "Code";
-            var iconURL = "https://raw.githubusercontent.com/m4fn3/HighlightCode/master/logos/" + meta + ".png";
-            var rawContent = [
-                { content: highlightText(obj.content, obj.lang), type: "paragraph" },
-                { content: "-- By CodeHighlight", type: "text" }
-            ];
-            embeds.push({
-                type: "rich",
-                description: rawContent,
-                author: {
-                    name: known ? LANG_LIST[obj.lang][0] : obj.lang,
-                    iconURL: iconURL,
-                    iconProxyURL: iconURL
-                },
-                borderLeftColor: processColor("#e0e0ff"),
-                providerColor: processColor("#e0e0ff"),
-                headerTextColor: 4294967295,
-                bodyTextColor: 4292599521
-            });
-            obj.type = "text";
-            obj.content = "";
+        var type = obj.type;
+        if (type === "codeBlock" || type === "code" || type === "blockCode") {
+            var embed = highlightCodeNode(obj);
+            if (embed) embeds.push(embed);
         }
         return obj;
     });
     return [content, embeds];
 }
 
+function transformStringContent(str) {
+    var re = /```([A-Za-z0-9_+-]+)\r?\n([\s\S]*?)```/g;
+    var parts = [];
+    var embeds = [];
+    var last = 0;
+    var m;
+    var found = false;
+    while ((m = re.exec(str))) {
+        found = true;
+        if (m.index > last) {
+            parts.push({ type: "paragraph", content: [{ type: "text", content: str.slice(last, m.index) }] });
+        }
+        var lang = m[1];
+        var code = m[2];
+        if (isSupportedLang(lang)) {
+            var colored = highlightText(code, lang);
+            parts.push({ type: "paragraph", content: colored });
+            embeds.push(makeEmbed(lang, colored));
+        } else {
+            parts.push({ type: "codeBlock", lang: lang, content: code });
+        }
+        last = m.index + m[0].length;
+    }
+    if (!found) return null;
+    if (last < str.length) {
+        parts.push({ type: "paragraph", content: [{ type: "text", content: str.slice(last) }] });
+    }
+    return [parts, embeds];
+}
+
+function handleRow(row) {
+    if (!row || !row.message || row.message.content == null) return;
+    var res = walkContent(row.message.content);
+    row.message.content = res[0];
+    if (res[1].length) {
+        row.message.embeds = row.message.embeds ? row.message.embeds.concat(res[1]) : res[1];
+    }
+}
+
 function transformRowsJson(json) {
     var rows = typeof json === "string" ? JSON.parse(json) : json;
     if (!Array.isArray(rows)) return json;
-    for (var i = 0; i < rows.length; i++) {
-        var row = rows[i];
-        if (row && row.message && row.message.content) {
-            var res = walkContent(row.message.content);
-            row.message.content = res[0];
-            row.message.embeds = row.message.embeds ? row.message.embeds.concat(res[1]) : res[1];
-        }
-    }
+    for (var i = 0; i < rows.length; i++) handleRow(rows[i]);
     return typeof json === "string" ? JSON.stringify(rows) : rows;
 }
 
 function start() {
     stop();
-    var patcher = getMod().api && getMod().api.patcher;
-    if (!patcher || typeof patcher.before !== "function") {
-        try { console.log("[HighlightCode] no patcher"); } catch (_e) {}
+    var patcher = getPatcher();
+    if (!patcher) {
+        log("no patcher");
         return;
     }
-    var RN = getRN();
-    var DCD = RN && RN.NativeModules && RN.NativeModules.DCDChatManager;
-    if (DCD && typeof DCD.updateRows === "function") {
-        unpatches.push(patcher.before("updateRows", DCD, function (args) {
-            try {
-                if (args && args[1]) args[1] = transformRowsJson(args[1]);
-            } catch (err) {
-                try { console.error("[HighlightCode] updateRows", err); } catch (_e2) {}
+    var NM = getNativeModules() || {};
+    var patchedRows = false;
+    var names = [];
+    try { names = Object.keys(NM); } catch (_e) {}
+    for (var i = 0; i < names.length; i++) {
+        var nativeMod = NM[names[i]];
+        if (nativeMod && typeof nativeMod.updateRows === "function") {
+            var un = patchMethod("before", nativeMod, "updateRows", function (args) {
+                try { if (args && args[1] != null) args[1] = transformRowsJson(args[1]); } catch (err) { logError("updateRows", err); }
+            });
+            if (un) {
+                unpatches.push(un);
+                patchedRows = true;
+                log("updateRows on", names[i]);
             }
-        }));
-        try { console.log("[HighlightCode] patched DCDChatManager.updateRows"); } catch (_e3) {}
-    } else {
-        try { console.log("[HighlightCode] DCDChatManager.updateRows not found (Android or new iOS)"); } catch (_e4) {}
+        }
     }
+    var dcd = NM.DCDChatManager;
+    if (!patchedRows && dcd && typeof dcd.updateRows === "function") {
+        var unDcd = patchMethod("before", dcd, "updateRows", function (args) {
+            try { if (args && args[1] != null) args[1] = transformRowsJson(args[1]); } catch (err2) { logError("updateRows", err2); }
+        });
+        if (unDcd) {
+            unpatches.push(unDcd);
+            patchedRows = true;
+        }
+    }
+    var RowManager = findByName("RowManager");
+    var proto = RowManager && (RowManager.prototype || RowManager);
+    if (proto && typeof proto.generate === "function") {
+        var unRm = patchMethod("after", proto, "generate", function (_args, row) {
+            try { handleRow(row); } catch (err3) { logError("RowManager.generate", err3); }
+            return row;
+        });
+        if (unRm) unpatches.push(unRm);
+    }
+    log("started", "nativeKeys=" + names.slice(0, 12).join(","), "rows=" + patchedRows);
 }
 
 function stop() {
@@ -350,5 +540,6 @@ const plugin = definePlugin({
     transformRowsJson: transformRowsJson,
     isSupportedLang: isSupportedLang,
     langKey: langKey,
-    getStorage: getStorage
+    getStorage: getStorage,
+    nodeText: nodeText
 });
