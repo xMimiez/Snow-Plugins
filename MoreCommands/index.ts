@@ -1,4 +1,4 @@
-/* MoreCommands — Bunny/Snow spec-3 port of Equicord moreCommands. Author is manifest-only. */
+/* MoreCommands — Snow spec-3 port of Equicord moreCommands (Bunny-compatible eval). Author is manifest-only. */
 const ApplicationCommandOptionType = {
     SUB_COMMAND: 1,
     SUB_COMMAND_GROUP: 2,
@@ -42,6 +42,16 @@ function findOption(args, name, fallback) {
     return (found && found.value !== undefined && found.value !== null) ? found.value : fallback;
 }
 
+function getMod() {
+    var mod = null;
+    try { if (typeof snow !== "undefined" && snow) mod = snow; } catch (_e) { /* unbound */ }
+    if (mod && (mod.api || mod.plugin || mod.metro || mod._test)) return mod;
+    try { if (typeof bunny !== "undefined" && bunny) mod = bunny; } catch (_e2) { /* unbound */ }
+    if (mod && (mod.api || mod.plugin || mod.metro || mod._test)) return mod;
+    var g = typeof globalThis !== "undefined" ? globalThis : {};
+    return g.snow || g.bunny || g.vendetta || {};
+}
+
 const SETTINGS_META = {
     addFreakyEnding: {
         type: "boolean",
@@ -66,7 +76,7 @@ let _storage;
 function getStorage() {
     if (_storage) return _storage;
     try {
-        _storage = bunny.plugin.createStorage();
+        _storage = getMod().plugin.createStorage();
     } catch (_e) {
         _storage = {};
     }
@@ -246,32 +256,72 @@ function onSend(msg) {
     }
 }
 
-function metroFind() {
-    const metro = (typeof bunny !== "undefined" && bunny.metro)
-        || (typeof globalThis !== "undefined" && globalThis.snow && globalThis.snow.metro)
-        || (typeof globalThis !== "undefined" && globalThis.vendetta && globalThis.vendetta.metro)
-        || {};
-    return metro;
+function metroRoots() {
+    const roots = [];
+    const seen = [];
+    function add(m) {
+        if (!m || seen.indexOf(m) >= 0) return;
+        seen.push(m);
+        roots.push(m);
+    }
+    const mod = getMod();
+    add(mod.metro);
+    add(mod.metro && mod.metro.common);
+    const g = typeof globalThis !== "undefined" ? globalThis : {};
+    add(g.snow && g.snow.metro);
+    add(g.bunny && g.bunny.metro);
+    add(g.vendetta && g.vendetta.metro);
+    return roots;
 }
 
 function findByProps() {
-    const metro = metroFind();
-    const fn = metro.findByProps || (metro.common && metro.common.findByProps);
-    if (!fn) return null;
-    try { return fn.apply(metro, arguments); } catch (_e) { return null; }
+    const args = arguments;
+    for (let i = 0; i < metroRoots().length; i++) {
+        const metro = metroRoots()[i];
+        const fn = metro.findByProps || (metro.common && metro.common.findByProps);
+        if (!fn) continue;
+        try {
+            const found = fn.apply(metro, args);
+            if (found) return found;
+        } catch (_e) { /* try next */ }
+    }
+    return null;
 }
 
 function findByStoreName(name) {
-    const metro = metroFind();
-    const fn = metro.findByStoreName;
-    if (!fn) return null;
-    try { return fn(name); } catch (_e) { return null; }
+    const roots = metroRoots();
+    for (let i = 0; i < roots.length; i++) {
+        const metro = roots[i];
+        const fn = metro.findByStoreName;
+        if (!fn) continue;
+        try {
+            const found = fn.call(metro, name);
+            if (found) return found;
+        } catch (_e) { /* try next */ }
+    }
+    return null;
+}
+
+function findProtoSettings(suffix) {
+    const roots = metroRoots();
+    for (let i = 0; i < roots.length; i++) {
+        const metro = roots[i];
+        const find = metro.find || metro.findExports;
+        if (typeof find !== "function") continue;
+        try {
+            const found = find(function (x) {
+                return x && x.ProtoClass && String(x.ProtoClass.typeName || "").indexOf(suffix) >= 0;
+            });
+            if (found) return found;
+        } catch (_e) { /* try next */ }
+    }
+    return null;
 }
 
 function sendBotMessage(channelId, message) {
+    const mod = getMod();
     const util = findByProps("sendBotMessage")
-        || (metroFind().common && metroFind().common.messageUtil)
-        || (typeof bunny !== "undefined" && bunny.metro && bunny.metro.common && bunny.metro.common.messageUtil);
+        || (mod.metro && mod.metro.common && mod.metro.common.messageUtil);
     const content = typeof message === "string" ? message : (message && message.content) || "";
     if (util && util.sendBotMessage) {
         try {
@@ -280,21 +330,23 @@ function sendBotMessage(channelId, message) {
             try { return util.sendBotMessage(channelId, content); } catch (_e2) { /* ignore */ }
         }
     }
-    if (typeof bunny !== "undefined" && bunny._test && bunny._test.sendBotMessage) {
-        return bunny._test.sendBotMessage(channelId, typeof message === "string" ? { content: message } : message);
+    if (mod._test && mod._test.sendBotMessage) {
+        return mod._test.sendBotMessage(channelId, typeof message === "string" ? { content: message } : message);
     }
 }
 
 function sendUserMessage(channelId, msg) {
-    const util = findByProps("sendMessage", "sendBotMessage") || findByProps("sendMessage");
+    const mod = getMod();
+    const util = findByProps("sendMessage", "sendBotMessage") || findByProps("sendMessage")
+        || (mod.metro && mod.metro.common && mod.metro.common.messageUtil);
     if (util && util.sendMessage) return util.sendMessage(channelId, msg);
-    if (typeof bunny !== "undefined" && bunny._test && bunny._test.sendMessage) {
-        return bunny._test.sendMessage(channelId, msg);
+    if (mod._test && mod._test.sendMessage) {
+        return mod._test.sendMessage(channelId, msg);
     }
 }
 
 function getUserStore() {
-    return findByStoreName("UserStore") || findByProps("getCurrentUser", "getUser") || (bunny._test && bunny._test.UserStore);
+    return findByStoreName("UserStore") || findByProps("getCurrentUser", "getUser") || (getMod()._test && getMod()._test.UserStore);
 }
 
 function getDraftType() {
@@ -304,26 +356,95 @@ function getDraftType() {
 }
 
 function getUploadHandler() {
-    return findByProps("promptToUpload") || (bunny._test && bunny._test.UploadHandler);
+    return findByProps("promptToUpload") || (getMod()._test && getMod()._test.UploadHandler);
 }
 
 function getUploadManager() {
-    return findByProps("clearAll") || (bunny._test && bunny._test.UploadManager);
+    return findByProps("clearAll") || (getMod()._test && getMod()._test.UploadManager);
 }
 
 function getUploadAttachmentStore() {
-    return findByStoreName("UploadAttachmentStore") || findByProps("getUpload") || (bunny._test && bunny._test.UploadAttachmentStore);
+    return findByStoreName("UploadAttachmentStore") || findByProps("getUpload") || (getMod()._test && getMod()._test.UploadAttachmentStore);
+}
+
+function gifUrlFrom(entry) {
+    if (!entry) return null;
+    if (typeof entry === "string") return /^https?:\/\//.test(entry) ? entry : null;
+    return entry.src || entry.url || entry.gif || entry.uri || entry.video || null;
+}
+
+function favoriteGifsMapFrom(value) {
+    if (!value) return null;
+    if (value.favoriteGifs && value.favoriteGifs.gifs) return value.favoriteGifs.gifs;
+    if (value.favorite_gifs && value.favorite_gifs.gifs) return value.favorite_gifs.gifs;
+    if (value.gifs && typeof value.gifs === "object" && !Array.isArray(value.gifs)) return value.gifs;
+    if (value.favoriteGifs && typeof value.favoriteGifs === "object") return value.favoriteGifs;
+    return null;
+}
+
+function readFavoriteGifsFromModule(mod) {
+    if (!mod) return null;
+    const inner = mod.FrecencyUserSettingsActionCreators || mod;
+    if (typeof inner.loadIfNecessary === "function") {
+        try { inner.loadIfNecessary(); } catch (_e) { /* ignore */ }
+    }
+    const getters = ["getCurrentValue", "getState", "getFavoriteGifs", "getSavedGifs"];
+    for (let i = 0; i < getters.length; i++) {
+        const g = getters[i];
+        if (typeof inner[g] !== "function") continue;
+        try {
+            const value = inner[g]();
+            const map = favoriteGifsMapFrom(value)
+                || favoriteGifsMapFrom(value && value.frecencyUserSettings)
+                || favoriteGifsMapFrom(value && value.settings);
+            if (map) return map;
+        } catch (_e2) { /* next getter */ }
+    }
+    return favoriteGifsMapFrom(inner.favoriteGifs) || favoriteGifsMapFrom(inner);
+}
+
+function collectGifUrls(gifs) {
+    const urls = [];
+    if (!gifs) return urls;
+    if (Array.isArray(gifs)) {
+        for (let i = 0; i < gifs.length; i++) {
+            const u = gifUrlFrom(gifs[i]);
+            if (u) urls.push(u);
+        }
+        return urls;
+    }
+    const keys = Object.keys(gifs);
+    for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        if (/^https?:\/\//.test(key)) urls.push(key);
+        const u = gifUrlFrom(gifs[key]);
+        if (u && urls.indexOf(u) < 0) urls.push(u);
+    }
+    return urls;
 }
 
 function getFavoriteGif(_opts, _other) {
-    const creators = findByProps("FrecencyUserSettingsActionCreators")
-        || (bunny._test && bunny._test.UserSettingsActionCreators);
-    const frecencyStore = (creators && creators.FrecencyUserSettingsActionCreators
-        ? creators.FrecencyUserSettingsActionCreators
-        : creators).getCurrentValue();
-    const gifsArray = Object.keys(frecencyStore.favoriteGifs.gifs);
-    const chosenGifUrl = gifsArray[Math.floor(Math.random() * gifsArray.length)];
-    return "" + chosenGifUrl;
+    const mod = getMod();
+    const modules = [
+        findByProps("FrecencyUserSettingsActionCreators"),
+        findByStoreName("FrecencyUserSettingsStore"),
+        findByStoreName("UserSettingsProtoStore"),
+        findByProps("favoriteGifs"),
+        findByProps("getFavoriteGifs"),
+        findByProps("loadIfNecessary", "getCurrentValue"),
+        findByProps("ProtoClass", "getCurrentValue"),
+        findProtoSettings("FrecencyUserSettings"),
+        mod._test && mod._test.UserSettingsActionCreators,
+        mod._test && mod._test.FrecencyUserSettingsStore
+    ];
+    let urls = [];
+    for (let i = 0; i < modules.length; i++) {
+        const map = readFavoriteGifsFromModule(modules[i]);
+        urls = collectGifUrls(map);
+        if (urls.length) break;
+    }
+    if (!urls.length) return null;
+    return urls[Math.floor(Math.random() * urls.length)];
 }
 
 function calculateAffinityScore(affinity) {
@@ -820,7 +941,7 @@ function promptUpload(file, channel) {
         handler.promptToUpload([file], channel, DraftType.ChannelMessage);
         return;
     }
-    if (bunny._test && bunny._test.promptToUpload) bunny._test.promptToUpload([file], channel);
+    if (getMod()._test && getMod()._test.promptToUpload) getMod()._test.promptToUpload([file], channel);
 }
 
 const commands = [
@@ -1211,11 +1332,25 @@ const commands = [
         description: "Tempt fate and send a gif",
         execute: (opts, other) => {
             if (GUILD_IDS.includes((other && other.guild && other.guild.id) || "")) {
-                return sendBotMessage(other.channel.id, {
+                sendBotMessage(other.channel.id, {
                     content: "This command is restricted in this server."
                 });
+                return;
             }
-            return { content: getFavoriteGif(opts, other) };
+            try {
+                const url = getFavoriteGif(opts, other);
+                if (!url) {
+                    sendBotMessage(other.channel.id, {
+                        content: "No favorite GIFs found. Star a GIF in the GIF picker first."
+                    });
+                    return;
+                }
+                return { content: url };
+            } catch (err) {
+                sendBotMessage(other.channel.id, {
+                    content: "Couldn't pick a favorite GIF."
+                });
+            }
         }
     },
     {
@@ -1236,7 +1371,7 @@ const commands = [
             try {
                 const AffStore = findByStoreName("UserAffinitiesStore")
                     || findByProps("getUserAffinities")
-                    || (bunny._test && bunny._test.UserAffinitiesStore);
+                    || (getMod()._test && getMod()._test.UserAffinitiesStore);
                 const affinities = AffStore && AffStore.getUserAffinities && AffStore.getUserAffinities();
                 if (!(affinities && affinities.length)) {
                     return sendBotMessage(cmdCtx.channel.id, {
@@ -1581,23 +1716,24 @@ let sendUnpatch = [];
 let started = false;
 
 function getReact() {
-    return (bunny.metro && bunny.metro.common && bunny.metro.common.React)
+    const mod = getMod();
+    return (mod.metro && mod.metro.common && mod.metro.common.React)
         || (typeof window !== "undefined" && window.React)
         || (typeof globalThis !== "undefined" && globalThis.React);
 }
 
 function patchSendEdit() {
-    const patcher = bunny.api && bunny.api.patcher;
+    const patcher = getMod().api && getMod().api.patcher;
     const msgUtil = findByProps("sendMessage", "sendBotMessage")
         || findByProps("sendMessage")
-        || (metroFind().common && metroFind().common.messageUtil);
+        || (getMod().metro && getMod().metro.common && getMod().metro.common.messageUtil);
     if (patcher && msgUtil && msgUtil.sendMessage) {
         sendUnpatch.push(patcher.before("sendMessage", msgUtil, function (args) {
             const msg = args[1];
             if (msg && typeof msg === "object") onSend(msg);
         }));
-    } else if (bunny._test) {
-        bunny._test.onSend = onSend;
+    } else if (getMod()._test) {
+        getMod()._test.onSend = onSend;
     }
     const editMod = findByProps("editMessage") || msgUtil;
     if (patcher && editMod && editMod.editMessage) {
@@ -1619,7 +1755,7 @@ function patchSendEdit() {
 function start() {
     stop();
     started = true;
-    const register = bunny.api && bunny.api.commands && bunny.api.commands.registerCommand;
+    const register = getMod().api && getMod().api.commands && getMod().api.commands.registerCommand;
     if (register) {
         for (const cmd of commands) {
             unregisters.push(register(cmd));
@@ -1645,7 +1781,7 @@ function SettingsComponent() {
     if (!React) return null;
     const [, bump] = React.useState(0);
     const store = getStorage();
-    const comps = (bunny.metro && bunny.metro.common && bunny.metro.common.components) || {};
+    const comps = (getMod().metro && getMod().metro.common && getMod().metro.common.components) || {};
     const TableSwitchRow = comps.TableSwitchRow || comps.FormSwitchRow;
     const TableRowGroup = comps.TableRowGroup || comps.FormSection;
     const rows = [
