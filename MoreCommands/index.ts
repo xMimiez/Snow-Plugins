@@ -388,14 +388,38 @@ function sendBotMessage(channelId, message) {
     }
 }
 
+function getChannelId(ctx) {
+    if (!ctx) return null;
+    if (typeof ctx === "string") return ctx;
+    if (ctx.channel && ctx.channel.id) return ctx.channel.id;
+    if (ctx.channelId) return ctx.channelId;
+    if (ctx.id && (ctx.guild_id !== undefined || ctx.guildId !== undefined || ctx.recipients)) return ctx.id;
+    return null;
+}
+
 function sendUserMessage(channelId, msg) {
+    if (!channelId || !msg) return false;
     const mod = getMod();
-    const util = findByProps("sendMessage", "sendBotMessage") || findByProps("sendMessage")
+    const util = findByProps("sendMessage", "receiveMessage")
+        || findByProps("sendMessage", "sendBotMessage")
+        || findByProps("sendMessage")
         || (mod.metro && mod.metro.common && mod.metro.common.messageUtil);
-    if (util && util.sendMessage) return util.sendMessage(channelId, msg);
-    if (mod._test && mod._test.sendMessage) {
-        return mod._test.sendMessage(channelId, msg);
+    if (util && typeof util.sendMessage === "function") {
+        try {
+            util.sendMessage(channelId, msg);
+            return true;
+        } catch (_e) {
+            try {
+                util.sendMessage(channelId, typeof msg === "string" ? msg : msg.content);
+                return true;
+            } catch (_e2) { /* fall through */ }
+        }
     }
+    if (mod._test && mod._test.sendMessage) {
+        mod._test.sendMessage(channelId, msg);
+        return true;
+    }
+    return false;
 }
 
 function getUserStore() {
@@ -423,25 +447,31 @@ function getUploadAttachmentStore() {
 function gifUrlFrom(entry) {
     if (!entry) return null;
     if (typeof entry === "string") return /^https?:\/\//.test(entry) ? entry : null;
-    return entry.src || entry.url || entry.gif || entry.uri || entry.video || null;
+    return entry.src || entry.url || entry.gif || entry.uri || entry.video || entry.sourceURI || null;
 }
 
 function favoriteGifsMapFrom(value) {
     if (!value) return null;
+    if (Array.isArray(value)) return value;
+    if (Array.isArray(value.favorites)) return value.favorites;
     if (value.favoriteGifs && value.favoriteGifs.gifs) return value.favoriteGifs.gifs;
     if (value.favorite_gifs && value.favorite_gifs.gifs) return value.favorite_gifs.gifs;
-    if (value.gifs && typeof value.gifs === "object" && !Array.isArray(value.gifs)) return value.gifs;
+    if (value.gifs && typeof value.gifs === "object") return value.gifs;
     if (value.favoriteGifs && typeof value.favoriteGifs === "object") return value.favoriteGifs;
+    if (value.favoriteGIFs && typeof value.favoriteGIFs === "object") return value.favoriteGIFs;
     return null;
 }
 
 function readFavoriteGifsFromModule(mod) {
     if (!mod) return null;
-    const inner = mod.FrecencyUserSettingsActionCreators || mod;
+    const inner = mod.FrecencyUserSettingsActionCreators || mod.default || mod;
     if (typeof inner.loadIfNecessary === "function") {
         try { inner.loadIfNecessary(); } catch (_e) { /* ignore */ }
     }
-    const getters = ["getCurrentValue", "getState", "getFavoriteGifs", "getSavedGifs"];
+    const getters = [
+        "getCurrentValue", "getState", "getFavoriteGifs", "getFavoriteGIFs",
+        "getSavedGifs", "getFavorites", "getFavoriteGIFsMobile"
+    ];
     for (let i = 0; i < getters.length; i++) {
         const g = getters[i];
         if (typeof inner[g] !== "function") continue;
@@ -450,46 +480,92 @@ function readFavoriteGifsFromModule(mod) {
             const map = favoriteGifsMapFrom(value)
                 || favoriteGifsMapFrom(value && value.frecencyUserSettings)
                 || favoriteGifsMapFrom(value && value.settings);
-            if (map) return map;
+            if (map && collectGifUrls(map).length) return map;
         } catch (_e2) { /* next getter */ }
     }
+    if (Array.isArray(inner.favorites) && inner.favorites.length) return inner.favorites;
     return favoriteGifsMapFrom(inner.favoriteGifs) || favoriteGifsMapFrom(inner);
 }
 
 function collectGifUrls(gifs) {
     const urls = [];
+    function push(u) {
+        if (u && urls.indexOf(u) < 0) urls.push(u);
+    }
     if (!gifs) return urls;
+    if (typeof gifs.forEach === "function" && typeof gifs.keys === "function" && !Array.isArray(gifs)) {
+        gifs.forEach(function (val, key) {
+            if (typeof key === "string" && /^https?:\/\//.test(key)) push(key);
+            push(gifUrlFrom(val));
+        });
+        return urls;
+    }
     if (Array.isArray(gifs)) {
-        for (let i = 0; i < gifs.length; i++) {
-            const u = gifUrlFrom(gifs[i]);
-            if (u) urls.push(u);
-        }
+        for (let i = 0; i < gifs.length; i++) push(gifUrlFrom(gifs[i]));
         return urls;
     }
     const keys = Object.keys(gifs);
     for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
-        if (/^https?:\/\//.test(key)) urls.push(key);
-        const u = gifUrlFrom(gifs[key]);
-        if (u && urls.indexOf(u) < 0) urls.push(u);
+        if (/^https?:\/\//.test(key)) push(key);
+        push(gifUrlFrom(gifs[key]));
     }
     return urls;
+}
+
+function walkMetroExports(check) {
+    const found = [];
+    const buckets = [];
+    const g = typeof globalThis !== "undefined" ? globalThis : {};
+    const mod = getMod();
+    buckets.push(mod.metro && mod.metro.modules);
+    buckets.push(g.vendetta && g.vendetta.metro && g.vendetta.metro.modules);
+    buckets.push(g.modules);
+    for (let b = 0; b < buckets.length; b++) {
+        const modules = buckets[b];
+        if (!modules) continue;
+        for (const k in modules) {
+            try {
+                const rec = modules[k];
+                const exp = (rec && rec.publicModule && rec.publicModule.exports) || (rec && rec.exports) || rec;
+                if (!exp) continue;
+                if (check(exp)) found.push(exp);
+                if (exp.default && check(exp.default)) found.push(exp.default);
+            } catch (_e) { /* skip bad module */ }
+        }
+        if (found.length) return found;
+    }
+    return found;
 }
 
 function getFavoriteGif(_opts, _other) {
     const mod = getMod();
     const modules = [
+        findByProps("addFavoriteGIF"),
+        findByProps("useFavoriteGIFsMobile"),
         findByProps("FrecencyUserSettingsActionCreators"),
         findByStoreName("FrecencyUserSettingsStore"),
+        findByStoreName("FavoriteGIFStore"),
         findByStoreName("UserSettingsProtoStore"),
         findByProps("favoriteGifs"),
         findByProps("getFavoriteGifs"),
+        findByProps("getFavoriteGIFs"),
         findByProps("loadIfNecessary", "getCurrentValue"),
         findByProps("ProtoClass", "getCurrentValue"),
         findProtoSettings("FrecencyUserSettings"),
         mod._test && mod._test.UserSettingsActionCreators,
         mod._test && mod._test.FrecencyUserSettingsStore
     ];
+    const walked = walkMetroExports(function (exp) {
+        return !!(exp && (
+            typeof exp.addFavoriteGIF === "function" ||
+            typeof exp.useFavoriteGIFsMobile === "function" ||
+            typeof exp.getFavoriteGIFs === "function" ||
+            (exp.ProtoClass && String(exp.ProtoClass.typeName || "").indexOf("FrecencyUserSettings") >= 0)
+        ));
+    });
+    for (let w = 0; w < walked.length; w++) modules.push(walked[w]);
+
     let urls = [];
     for (let i = 0; i < modules.length; i++) {
         const map = readFavoriteGifsFromModule(modules[i]);
@@ -1384,8 +1460,9 @@ const commands = [
         name: "gifroulette",
         description: "Tempt fate and send a gif",
         execute: (opts, other) => {
+            const channelId = getChannelId(other);
             if (GUILD_IDS.includes((other && other.guild && other.guild.id) || "")) {
-                sendBotMessage(other.channel.id, {
+                sendBotMessage(channelId, {
                     content: "This command is restricted in this server."
                 });
                 return;
@@ -1393,14 +1470,16 @@ const commands = [
             try {
                 const url = getFavoriteGif(opts, other);
                 if (!url) {
-                    sendBotMessage(other.channel.id, {
+                    sendBotMessage(channelId, {
                         content: "No favorite GIFs found. Star a GIF in the GIF picker first."
                     });
                     return;
                 }
-                return { content: url };
+                const payload = { content: url };
+                const sent = sendUserMessage(channelId, payload);
+                if (!sent) return payload;
             } catch (err) {
-                sendBotMessage(other.channel.id, {
+                sendBotMessage(channelId, {
                     content: "Couldn't pick a favorite GIF."
                 });
             }
