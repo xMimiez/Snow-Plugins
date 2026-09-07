@@ -1,0 +1,24 @@
+{
+  "spec": 3,
+  "type": "plugin",
+  "id": "mime.highlightcode",
+  "version": "1.0.0",
+  "display": {
+    "name": "HighlightCode",
+    "description": "Syntax highlighting for Discord code blocks on iOS.",
+    "authors": [
+      {
+        "name": "mafu",
+        "id": "519760564755365888"
+      },
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.ts",
+  "extras": {
+    "bunny": {}
+  }
+}
