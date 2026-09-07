@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.highlightcode",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "display": {
     "name": "HighlightCode",
     "description": "Syntax highlighting for Discord code blocks on iOS.",
