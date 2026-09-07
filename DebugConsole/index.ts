@@ -142,30 +142,13 @@ function openWindow() {
     var RN = getRN();
     var text = dumpText();
     var shown = false;
+    var snippet = text.length > 1500 ? text.slice(-1500) : text;
 
-    var alerts = (getMod().ui && getMod().ui.alerts)
-        || (typeof globalThis !== "undefined" && globalThis.vendetta && globalThis.vendetta.ui && globalThis.vendetta.ui.alerts);
-    if (alerts && alerts.showCustomAlert && React) {
+    if (RN && RN.Alert && typeof RN.Alert.alert === "function") {
         try {
-            var View = RN && RN.View;
-            var Text = RN && RN.Text;
-            var ScrollView = RN && RN.ScrollView;
-            var body = ScrollView
-                ? React.createElement(ScrollView, { style: { maxHeight: 420 } },
-                    React.createElement(Text, { selectable: true, style: { color: "#d4d4d4", fontFamily: "monospace", fontSize: 11 } }, text))
-                : React.createElement(Text, { selectable: true }, text);
-            alerts.showCustomAlert("Debug Console", function () { return body; });
-            shown = true;
-        } catch (e) {
-            pushLine("ERROR", ["showCustomAlert failed", e]);
-        }
-    }
-
-    if (!shown && RN && RN.Alert && RN.Alert.alert) {
-        try {
-            RN.Alert.alert("Debug Console", text.slice(-1500), [
+            RN.Alert.alert("Debug logs", snippet, [
                 { text: "Copy", onPress: function () { copyText(text); } },
-                { text: "Close" }
+                { text: "OK" }
             ]);
             shown = true;
         } catch (e2) {
@@ -173,19 +156,21 @@ function openWindow() {
         }
     }
 
-    var lazy = metroFindByProps("openLazy", "hideActionSheet");
-    if (!shown && lazy && lazy.openLazy && React) {
+    var alerts = (getMod().ui && getMod().ui.alerts)
+        || (typeof globalThis !== "undefined" && globalThis.vendetta && globalThis.vendetta.ui && globalThis.vendetta.ui.alerts);
+    if (!shown && alerts && typeof alerts.showCustomAlert === "function" && React && RN && RN.Text) {
         try {
-            lazy.openLazy({
-                importer: function () { return Promise.resolve(function Sheet() {
-                    var Text = RN && RN.Text;
-                    return React.createElement(Text, { selectable: true }, text.slice(-2500));
-                }); },
-                key: "DebugConsole"
-            });
+            function ConsolePanel() {
+                var ScrollView = RN.ScrollView;
+                var Text = RN.Text;
+                var inner = React.createElement(Text, { selectable: true, style: { color: "#d4d4d4", fontSize: 11 } }, text);
+                if (ScrollView) return React.createElement(ScrollView, { style: { maxHeight: 420 } }, inner);
+                return inner;
+            }
+            alerts.showCustomAlert(ConsolePanel);
             shown = true;
-        } catch (e3) {
-            pushLine("ERROR", ["ActionSheet failed", e3]);
+        } catch (e) {
+            pushLine("ERROR", ["showCustomAlert failed", e]);
         }
     }
 
@@ -257,19 +242,19 @@ function SettingsComponent() {
     var React = getReact();
     if (!React) return null;
     var RN = getRN() || {};
-    var ScrollView = RN.ScrollView || "div";
-    var Text = RN.Text || "div";
-    var View = RN.View || "div";
+    var Text = RN.Text;
+    var View = RN.View;
+    var ScrollView = RN.ScrollView;
+    if (!Text || !View) return null;
     var [, bump] = React.useState(0);
+    var logNode = React.createElement(Text, { selectable: true, style: { color: "#c0c0c0", fontSize: 11 } }, dumpText());
     return React.createElement(View, { style: { padding: 12 } },
         React.createElement(Text, { style: { color: "#fff", marginBottom: 8 } }, "Debug Console — /console dumps logs. Tap refresh after errors."),
         React.createElement(Text, {
             onPress: function () { bump(function (n) { return n + 1; }); },
             style: { color: "#5865F2", marginBottom: 8 }
         }, "Refresh"),
-        React.createElement(ScrollView, { style: { maxHeight: 480 } },
-            React.createElement(Text, { selectable: true, style: { color: "#c0c0c0", fontSize: 11 } }, dumpText())
-        )
+        ScrollView ? React.createElement(ScrollView, { style: { maxHeight: 480 } }, logNode) : logNode
     );
 }
 
