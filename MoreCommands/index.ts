@@ -1889,6 +1889,64 @@ const commands = [
 let unregisters = [];
 let sendUnpatch = [];
 let started = false;
+let preparedCommands = [];
+
+function wrapExecute(cmd) {
+    var name = cmd.name;
+    var orig = cmd.execute;
+    if (typeof orig !== "function") return cmd;
+    cmd.execute = function (args, ctx) {
+        try { console.log("[MoreCommands] /" + name + " execute", "id=" + cmd.id, "channel", getChannelId(ctx) || getChannelId(args)); } catch (_log) {}
+        try {
+            var ret = orig.apply(this, arguments);
+            return Promise.resolve(ret).then(function (value) {
+                if (value && typeof value === "object" && typeof value.content === "string") {
+                    var cid = getChannelId(ctx) || getChannelId(args);
+                    if (sendUserMessage(cid, value)) return;
+                }
+                return value;
+            });
+        } catch (err) {
+            try { console.error("[MoreCommands] /" + name + " threw", err); } catch (_e3) {}
+            throw err;
+        }
+    };
+    return cmd;
+}
+
+function injectBuiltInCommands() {
+    var commandsModule = findByProps("getBuiltInCommands");
+    var patcher = getMod().api && getMod().api.patcher;
+    if (!commandsModule || !patcher || typeof patcher.after !== "function") {
+        try { console.log("[MoreCommands] skip getBuiltInCommands patch"); } catch (_e) {}
+        return;
+    }
+    var byName = {};
+    for (var i = 0; i < preparedCommands.length; i++) byName[preparedCommands[i].name] = preparedCommands[i];
+    sendUnpatch.push(patcher.after("getBuiltInCommands", commandsModule, function (_args, res) {
+        var list = Array.isArray(res) ? res : [];
+        var seen = {};
+        var out = [];
+        for (var j = 0; j < list.length; j++) {
+            var c = list[j];
+            var n = c && (c.name || c.untranslatedName);
+            if (n && byName[n]) {
+                if (seen[n]) continue;
+                seen[n] = true;
+                out.push(byName[n]);
+            } else out.push(c);
+        }
+        for (var k = 0; k < preparedCommands.length; k++) {
+            var pc = preparedCommands[k];
+            if (!seen[pc.name]) {
+                out.push(pc);
+                seen[pc.name] = true;
+            }
+        }
+        return out;
+    }));
+    try { console.log("[MoreCommands] patched getBuiltInCommands count=" + preparedCommands.length); } catch (_e2) {}
+}
 
 function getReact() {
     const mod = getMod();
@@ -1930,32 +1988,28 @@ function patchSendEdit() {
 function start() {
     stop();
     started = true;
-    const register = getRegisterCommand();
+    preparedCommands = [];
+    var nextId = -910000;
+    var ci;
+    for (ci = 0; ci < commands.length; ci++) {
+        var prepared = wrapExecute(prepareCommand(commands[ci]));
+        prepared.id = String(nextId - ci);
+        prepared.applicationId = "-1";
+        preparedCommands.push(prepared);
+    }
+    var register = getRegisterCommand();
     if (register) {
-        var nextId = -910000;
-        for (var ci = 0; ci < commands.length; ci++) {
+        for (ci = 0; ci < preparedCommands.length; ci++) {
             try {
-                const prepared = prepareCommand(commands[ci]);
-                const orig = prepared.execute;
-                const uniqueId = String(nextId - ci);
-                prepared.id = uniqueId;
-                if (typeof orig === "function") {
-                    prepared.execute = function (args, ctx) {
-                        try { console.log("[MoreCommands] /" + prepared.name + " execute", "channel", getChannelId(ctx) || getChannelId(args)); } catch (_log) {}
-                        try {
-                            return orig.call(this, args, ctx);
-                        } catch (err) {
-                            try { console.error("[MoreCommands] /" + prepared.name + " threw", err); } catch (_e3) {}
-                            throw err;
-                        }
-                    };
-                }
-                unregisters.push(register(prepared));
-                prepared.id = uniqueId;
-            } catch (_e) { /* keep remaining commands */ }
+                unregisters.push(register(preparedCommands[ci]));
+            } catch (_e) { /* keep remaining */ }
+            preparedCommands[ci].id = String(nextId - ci);
         }
     }
-    try { patchSendEdit(); } catch (_e2) { /* commands still stay registered */ }
+    try { injectBuiltInCommands(); } catch (eInj) {
+        try { console.error("[MoreCommands] injectBuiltInCommands", eInj); } catch (_e2) {}
+    }
+    try { patchSendEdit(); } catch (_e3) { /* commands still stay registered */ }
 }
 
 function stop() {
