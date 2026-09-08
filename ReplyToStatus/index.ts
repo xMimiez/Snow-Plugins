@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.1.2
+  build: 1.1.3
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -1132,38 +1132,59 @@ function isScrollName(name) {
     return /ScrollView|BottomSheetScrollView|FlashList|FlatList/i.test(String(name || ""));
 }
 
-function injectInlineInScroll(node, userId, status) {
-    if (!node || typeof node !== "object") return { node: node, did: false };
+function pinButtonOver(children, userId, status) {
+    var RN = getRN() || {};
+    var View = RN.View;
+    if (!View) return children;
+    var btn = makeReplyButton(userId, status, {
+        position: "absolute",
+        top: 152,
+        right: 12,
+        zIndex: 80,
+        elevation: 12
+    });
+    if (!btn) return children;
+    return h(View, {
+        pointerEvents: "box-none",
+        style: { position: "relative" }
+    }, children, btn);
+}
+
+function injectOnceInNamedScroll(node, userId, status, depth) {
+    if (depth == null) depth = 0;
+    if (!node || typeof node !== "object" || depth > 14 || didPlaceButton) return { node: node, did: false };
     if (Array.isArray(node)) {
         var any = false;
         var arr = [];
-        for (var i = 0; i < node.length; i++) {
-            var r = injectInlineInScroll(node[i], userId, status);
+        var i;
+        for (i = 0; i < node.length; i++) {
+            var r = injectOnceInNamedScroll(node[i], userId, status, depth + 1);
             if (r.did) any = true;
             arr.push(r.node);
+            if (any) {
+                for (i = i + 1; i < node.length; i++) arr.push(node[i]);
+                break;
+            }
         }
         return { node: any ? arr : node, did: any };
     }
     var props = node.props || {};
     var name = getTypeName(node.type);
-    var isScroll = isScrollName(name)
-        || typeof props.onScroll === "function"
-        || props.scrollEventThrottle != null
-        || !!props.contentContainerStyle;
-    if (isScroll) {
-        var ch = props.children;
-        var list = Array.isArray(ch) ? ch.slice() : (ch != null ? [ch] : []);
-        var insertAt = list.length > 2 ? 3 : list.length;
-        list.splice(insertAt, 0, makeInlineReplyRow(userId, status));
-        return { node: h(node.type, Object.assign({}, props, { children: list })), did: true };
+    if (isScrollName(name)) {
+        var over = pinButtonOver(props.children, userId, status);
+        return { node: h(node.type, Object.assign({}, props, { children: over })), did: !!didPlaceButton };
     }
     if (typeof props.children !== "undefined") {
-        var inner = injectInlineInScroll(props.children, userId, status);
+        var inner = injectOnceInNamedScroll(props.children, userId, status, depth + 1);
         if (inner.did) {
             return { node: h(node.type, Object.assign({}, props, { children: inner.node })), did: true };
         }
     }
     return { node: node, did: false };
+}
+
+function injectInlineInScroll(node, userId, status) {
+    return injectOnceInNamedScroll(node, userId, status, 0);
 }
 
 function wrapWithReplyArrow(el, userId, status) {
@@ -1318,6 +1339,18 @@ function afterProfileRender(args, res) {
         if (!didPlaceButton) {
             try { res = decorateTree(res, userId, status); } catch (err2) { logError("decorate", err2); }
         }
+        if (!didPlaceButton) {
+            try {
+                var injected = injectOnceInNamedScroll(res, userId, status, 0);
+                if (injected && injected.did && injected.node) res = injected.node;
+            } catch (err3) { logError("injectScroll", err3); }
+        }
+        if (!didPlaceButton) {
+            try { res = forceInjectReply(res, userId, status); } catch (err4) { logError("forceInject", err4); }
+        }
+        if (!didPlaceButton) {
+            try { res = pinButtonOver(res, userId, status) || res; } catch (err5) { logError("pin", err5); }
+        }
     }
     var Ctx = getProfileFlagContext();
     if (Ctx) res = h(Ctx.Provider, { value: true }, res) || res;
@@ -1338,6 +1371,7 @@ var profileSheetOpen = false;
 var profileUserId = null;
 var didPlaceButton = false;
 var profileDidRender = false;
+var lastProfileOpenAt = 0;
 var ProfileFlagContext = null;
 
 function getProfileFlagContext() {
@@ -1385,6 +1419,7 @@ function enterProfile(args) {
     profileSheetOpen = true;
     didPlaceButton = false;
     profileDidRender = false;
+    lastProfileOpenAt = Date.now();
     var id = userIdFromProps(args && args[0]);
     if (!id && args && args[0] && args[0].user) id = args[0].user.id;
     if (id) profileUserId = String(id);
@@ -1395,6 +1430,14 @@ function leaveProfile() {
     profileUserId = null;
     didPlaceButton = false;
     profileDidRender = false;
+}
+
+function armProfile(userId) {
+    profileSheetOpen = true;
+    profileDidRender = true;
+    didPlaceButton = false;
+    lastProfileOpenAt = Date.now();
+    if (userId) profileUserId = String(userId);
 }
 
 function wrapExport(obj, key, afterFn, opts) {
@@ -1583,7 +1626,8 @@ function shouldAttachToCreated(type, props, el, status) {
 }
 
 function maybeDecorateCreated(type, el) {
-    if (!el || !profileSheetOpen || !profileDidRender || didPlaceButton) return el;
+    if (!el || !profileSheetOpen || didPlaceButton) return el;
+    if (!profileDidRender && !isInsideProfileTree()) return el;
     var props = el.props || {};
     if (isMemberListContext(props, type)) return el;
     var userId = userIdFromProps(props) || profileUserId;
@@ -1704,7 +1748,12 @@ function patchProfileComponents() {
         "UserProfileTopSection",
         "ProfileHeader",
         "ProfilePrimaryInfo",
-        "UserProfileBannerInfo"
+        "UserProfileBannerInfo",
+        "UserProfileBottomSheet",
+        "UserProfileV2",
+        "ProfileSheet",
+        "FullUserProfile",
+        "UserInfoModal"
     ];
     var opts = { gateProfile: true };
     var total = 0;
@@ -1782,10 +1831,7 @@ function wrapFactory(factory) {
     return wrapProfileModule(factory);
 }
 
-function patchActionSheetOpen() {
-    var sheet = findByProps("openLazy", "hideActionSheet")
-        || findByProps("openLazy")
-        || findByProps("open", "hideActionSheet");
+function patchSheetMethods(sheet) {
     if (!sheet) return false;
     var ok = false;
     ["openLazy", "open"].forEach(function (method) {
@@ -1800,20 +1846,24 @@ function patchActionSheetOpen() {
             for (i = 0; i < args.length; i++) {
                 var a = args[i];
                 if (typeof a === "string" && isProfileSheetKey(a)) key = a;
-                if (a && typeof a === "object" && typeof a.then !== "function" && (a.userId || a.user || a.guildId || a.channelId || a.userID)) props = a;
+                if (a && typeof a === "object" && typeof a.then !== "function" && !Array.isArray(a) && (a.userId || a.user || a.guildId || a.channelId || a.userID)) props = a;
                 if (fi < 0 && (typeof a === "function" || (a && typeof a.then === "function") || (a && (a.default || a.type)))) fi = i;
             }
             if (key) {
                 var uid = userIdFromProfileKey(key) || userIdFromProps(props);
                 enterProfile([{ userId: uid, user: props && props.user }]);
-                log("profile sheet", key, uid);
-                if (fi >= 0) args[fi] = wrapFactory(args[fi]);
+                log("profile sheet", method, key, uid);
+                if (method === "open" && typeof args[0] === "function") {
+                    args[0] = wrapFunctionComponent(args[0], afterProfileRender, { gateProfile: true });
+                } else if (fi >= 0) {
+                    args[fi] = wrapFactory(args[fi]);
+                }
             }
             return orig.apply(this, args);
         };
         sheet[method].__mimeRtsWrapped = true;
         unpatches.push(function () {
-            if (sheet[method].__mimeRtsWrapped) sheet[method] = orig;
+            if (sheet[method] && sheet[method].__mimeRtsWrapped) sheet[method] = orig;
         });
         ok = true;
         log("patched ActionSheet." + method);
@@ -1821,10 +1871,31 @@ function patchActionSheetOpen() {
     return ok;
 }
 
+function patchActionSheetOpen() {
+    var ok = false;
+    var sheet = findByProps("openLazy", "hideActionSheet")
+        || findByProps("openLazy")
+        || findByProps("open", "hideActionSheet");
+    if (patchSheetMethods(sheet)) ok = true;
+    try {
+        eachMetroExport(function (exp) {
+            return !!(exp && typeof exp.openLazy === "function");
+        }, function (exp) {
+            if (patchSheetMethods(exp)) ok = true;
+        });
+    } catch (_e) {}
+    return ok;
+}
+
 function patchHideActionSheet() {
     var sheet = findByProps("hideActionSheet", "openLazy") || findByProps("hideActionSheet");
     if (!sheet || typeof sheet.hideActionSheet !== "function") return false;
-    return !!wrapExport(sheet, "hideActionSheet", function () {
+    return !!wrapExport(sheet, "hideActionSheet", function (args) {
+        var key = args && args[0];
+        if (key && !isProfileSheetKey(key) && typeof key === "string") return;
+        var opened = 0;
+        try { opened = lastProfileOpenAt || 0; } catch (_e) {}
+        if (Date.now() - opened < 1200) return;
         leaveProfile();
     });
 }
@@ -1893,11 +1964,13 @@ const plugin = definePlugin({
     afterProfileRender: afterProfileRender,
     wrapProfileModule: wrapProfileModule,
     enterProfile: enterProfile,
+    armProfile: armProfile,
     leaveProfile: leaveProfile,
     getProfileFlagContext: getProfileFlagContext,
     isInsideProfileTree: isInsideProfileTree,
     isMemberListContext: isMemberListContext,
     maybeDecorateCreated: maybeDecorateCreated,
+    injectOnceInNamedScroll: injectOnceInNamedScroll,
     userIdFromProfileKey: userIdFromProfileKey,
     isProfileSheetKey: isProfileSheetKey,
     QUICK_REACTS: QUICK_REACTS
