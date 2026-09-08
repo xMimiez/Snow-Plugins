@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.1.4
+  build: 1.1.5
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -1327,6 +1327,20 @@ function forceInjectReply(res, userId, status) {
     return res;
 }
 
+function countElements(node, depth) {
+    if (node == null || depth > 8) return 0;
+    if (Array.isArray(node)) {
+        var n = 0;
+        var i;
+        for (i = 0; i < node.length && i < 24; i++) n += countElements(node[i], depth + 1);
+        return n;
+    }
+    if (typeof node !== "object") return 0;
+    var c = 1;
+    if (node.props) c += countElements(node.props.children, depth + 1);
+    return c;
+}
+
 function afterProfileRender(args, res) {
     var props = args && args[0];
     var userId = userIdFromProps(props) || profileUserId;
@@ -1336,7 +1350,13 @@ function afterProfileRender(args, res) {
     if (!res) return res;
     var status = statusFromProps(props) || (userId && customStatusForUser(userId));
     if (userId && status && !shouldSkipUser(userId) && !didPlaceButton) {
-        try { res = pinButtonOver(res, userId, status) || res; } catch (err) { logError("pin", err); }
+        try {
+            var injected = injectOnceInNamedScroll(res, userId, status, 0);
+            if (injected && injected.did && injected.node) res = injected.node;
+        } catch (err) { logError("injectScroll", err); }
+        if (!didPlaceButton && countElements(res, 0) >= 6) {
+            try { res = pinButtonOver(res, userId, status) || res; } catch (err2) { logError("pin", err2); }
+        }
     }
     var Ctx = getProfileFlagContext();
     if (Ctx) res = h(Ctx.Provider, { value: true }, res) || res;
@@ -1961,6 +1981,7 @@ const plugin = definePlugin({
     isMemberListContext: isMemberListContext,
     maybeDecorateCreated: maybeDecorateCreated,
     injectOnceInNamedScroll: injectOnceInNamedScroll,
+    countElements: countElements,
     userIdFromProfileKey: userIdFromProfileKey,
     isProfileSheetKey: isProfileSheetKey,
     QUICK_REACTS: QUICK_REACTS
