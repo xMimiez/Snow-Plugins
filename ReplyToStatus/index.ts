@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.0.6
+  build: 1.0.7
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -676,7 +676,22 @@ function openReplyWindow(userId, statusHint) {
     overlay = { open: true, user: user, status: status, sending: false };
     notifyOverlay();
     log("open reply", userId, formatQuote(status));
-    if (openReplySheet(user, status)) return true;
+    var Lazy = findByProps("hideActionSheet", "openLazy") || findByProps("hideActionSheet");
+    if (Lazy && typeof Lazy.hideActionSheet === "function") {
+        try { Lazy.hideActionSheet(); } catch (_e) {}
+    }
+    leaveProfile();
+    notifyOverlay();
+    try {
+        var g = typeof globalThis !== "undefined" ? globalThis : {};
+        var later = g.setTimeout || setTimeout;
+        later(function () {
+            openReplySheet(user, status);
+            notifyOverlay();
+        }, 80);
+    } catch (_e2) {
+        openReplySheet(user, status);
+    }
     return true;
 }
 
@@ -1034,12 +1049,10 @@ function decorateProfileTree(node, userId, status) {
     return created;
 }
 
-function wrapWithReplyArrow(el, userId, status) {
-    if (!el || el.__mimeRtsDecorated) return el;
+function makeReplyButton(userId, status, extraStyle) {
     var RN = getRN() || {};
-    var View = RN.View;
     var Pressable = RN.Pressable || RN.TouchableOpacity || RN.TouchableHighlight;
-    if (!View || !Pressable) return el;
+    if (!Pressable) return null;
     var t = themeColors();
     function fire(e) {
         try {
@@ -1049,26 +1062,90 @@ function wrapWithReplyArrow(el, userId, status) {
         openReplyWindow(userId, status || customStatusForUser(userId));
     }
     var icon = replyIconElement(t.text, 16);
-    var btn = h(Pressable, {
+    return h(Pressable, {
         onPress: fire,
-        onPressIn: fire,
         hitSlop: 8,
         pointerEvents: "auto",
         accessibilityLabel: "Reply to Status",
-        style: {
-            position: "absolute",
-            bottom: 4,
-            right: 4,
+        style: Object.assign({
             width: 28,
             height: 28,
             borderRadius: 8,
             backgroundColor: t.bg,
+            borderWidth: 1,
+            borderColor: t.border,
             alignItems: "center",
-            justifyContent: "center",
-            zIndex: 80,
+            justifyContent: "center"
+        }, extraStyle || {})
+    }, icon);
+}
+
+function makeInlineReplyRow(userId, status) {
+    var RN = getRN() || {};
+    var View = RN.View;
+    if (!View) return makeReplyButton(userId, status);
+    return h(View, {
+        key: "mime-rts-inline",
+        pointerEvents: "box-none",
+        style: {
+            alignSelf: "stretch",
+            alignItems: "flex-end",
+            marginTop: -32,
+            marginRight: 8,
+            marginBottom: 4,
+            zIndex: 20,
             elevation: 8
         }
-    }, icon);
+    }, makeReplyButton(userId, status));
+}
+
+function isScrollName(name) {
+    return /ScrollView|BottomSheetScrollView|FlashList|FlatList/i.test(String(name || ""));
+}
+
+function injectInlineInScroll(node, userId, status) {
+    if (!node || typeof node !== "object") return { node: node, did: false };
+    if (Array.isArray(node)) {
+        var any = false;
+        var arr = [];
+        for (var i = 0; i < node.length; i++) {
+            var r = injectInlineInScroll(node[i], userId, status);
+            if (r.did) any = true;
+            arr.push(r.node);
+        }
+        return { node: any ? arr : node, did: any };
+    }
+    var props = node.props || {};
+    var name = getTypeName(node.type);
+    if (isScrollName(name)) {
+        var ch = props.children;
+        var list = Array.isArray(ch) ? ch.slice() : (ch != null ? [ch] : []);
+        var insertAt = list.length > 2 ? 3 : list.length;
+        list.splice(insertAt, 0, makeInlineReplyRow(userId, status));
+        return { node: h(node.type, Object.assign({}, props, { children: list })), did: true };
+    }
+    if (typeof props.children !== "undefined") {
+        var inner = injectInlineInScroll(props.children, userId, status);
+        if (inner.did) {
+            return { node: h(node.type, Object.assign({}, props, { children: inner.node })), did: true };
+        }
+    }
+    return { node: node, did: false };
+}
+
+function wrapWithReplyArrow(el, userId, status) {
+    if (!el || el.__mimeRtsDecorated) return el;
+    var RN = getRN() || {};
+    var View = RN.View;
+    if (!View) return el;
+    var btn = makeReplyButton(userId, status, {
+        position: "absolute",
+        bottom: 4,
+        right: 4,
+        zIndex: 80,
+        elevation: 8
+    });
+    if (!btn) return el;
     var wrapped = h(View, {
         pointerEvents: "box-none",
         style: { position: "relative", overflow: "visible", alignSelf: "flex-start" }
@@ -1192,6 +1269,12 @@ function afterProfileRender(args, res) {
     if (!treeHasArrow(decorated)) {
         try { decorated = decorateTree(res, userId, status); } catch (err2) { logError("decorate", err2); }
     }
+    if (!treeHasArrow(decorated)) {
+        try {
+            var injected = injectInlineInScroll(decorated, userId, status);
+            if (injected && injected.node) decorated = injected.node;
+        } catch (err3) { logError("injectScroll", err3); }
+    }
     if (!overlayAnchored) decorated = injectOverlay(decorated);
     return decorated;
 }
@@ -1205,20 +1288,19 @@ function isEsClass(fn) {
     return false;
 }
 
-var profileRenderDepth = 0;
+var profileSheetOpen = false;
 var profileUserId = null;
 
 function enterProfile(args) {
-    profileRenderDepth++;
+    profileSheetOpen = true;
     var id = userIdFromProps(args && args[0]);
     if (!id && args && args[0] && args[0].user) id = args[0].user.id;
     if (id) profileUserId = String(id);
 }
 
 function leaveProfile() {
-    profileRenderDepth--;
-    if (profileRenderDepth < 0) profileRenderDepth = 0;
-    if (profileRenderDepth === 0) profileUserId = null;
+    profileSheetOpen = false;
+    profileUserId = null;
 }
 
 function wrapExport(obj, key, afterFn, opts) {
@@ -1230,27 +1312,23 @@ function wrapExport(obj, key, afterFn, opts) {
     function wrapped() {
         var constructed = typeof new.target !== "undefined" && new.target;
         if (opts.gateProfile) enterProfile(arguments);
-        try {
-            if (constructed) {
-                try {
-                    return Reflect.construct(orig, Array.prototype.slice.call(arguments), new.target);
-                } catch (_e) {
-                    return orig.apply(this, arguments);
-                }
+        if (constructed) {
+            try {
+                return Reflect.construct(orig, Array.prototype.slice.call(arguments), new.target);
+            } catch (_e) {
+                return orig.apply(this, arguments);
             }
-            var ret = orig.apply(this, arguments);
-            if (typeof afterFn === "function") {
-                try {
-                    var next = afterFn(arguments, ret);
-                    if (next !== undefined) ret = next;
-                } catch (err) {
-                    logError("wrap", key, err);
-                }
-            }
-            return ret;
-        } finally {
-            if (opts.gateProfile) leaveProfile();
         }
+        var ret = orig.apply(this, arguments);
+        if (typeof afterFn === "function") {
+            try {
+                var next = afterFn(arguments, ret);
+                if (next !== undefined) ret = next;
+            } catch (err) {
+                logError("wrap", key, err);
+            }
+        }
+        return ret;
     }
     wrapped.__mimeRtsWrapped = true;
     try { Object.defineProperty(wrapped, "name", { value: orig.name }); } catch (_e2) {}
@@ -1350,7 +1428,7 @@ function patchNamedComponent(name, afterFn, opts) {
 var overlayAnchored = false;
 
 function afterStatusRender(args, res) {
-    if (profileRenderDepth <= 0) return res;
+    if (!profileSheetOpen) return res;
     var props = args && args[0];
     var userId = userIdFromProps(props) || profileUserId;
     if (!userId) return res;
@@ -1362,6 +1440,11 @@ function afterStatusRender(args, res) {
 
 function patchStatusComponents() {
     var names = [
+        "CustomStatus",
+        "UserStatus",
+        "ActivityStatus",
+        "StatusEmojiAndText",
+        "CustomStatusText",
         "UserProfileCustomStatus",
         "ProfileCustomStatus",
         "ProfileCustomStatusSection",
@@ -1433,6 +1516,14 @@ function patchOpenLazy() {
     return true;
 }
 
+function patchHideActionSheet() {
+    var sheet = findByProps("hideActionSheet", "openLazy") || findByProps("hideActionSheet");
+    if (!sheet || typeof sheet.hideActionSheet !== "function") return false;
+    return !!wrapExport(sheet, "hideActionSheet", function () {
+        leaveProfile();
+    });
+}
+
 function patchOverlayAnchor() {
     var names = ["App", "AppContainer", "MainApp", "Chat", "ConnectedChat"];
     for (var i = 0; i < names.length; i++) {
@@ -1449,11 +1540,12 @@ function patchOverlayAnchor() {
 
 function start() {
     overlayAnchored = false;
-    profileRenderDepth = 0;
+    profileSheetOpen = false;
     profileUserId = null;
     patchStatusComponents();
     patchProfileComponents();
     patchOpenLazy();
+    patchHideActionSheet();
     patchOverlayAnchor();
     log("started");
 }
