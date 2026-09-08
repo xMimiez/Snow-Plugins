@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.decor",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "display": {
     "name": "Decor",
     "description": "Use Decor avatar decorations in Discord's official decoration slot. Equip via Decor so other Decor users can see it.",
