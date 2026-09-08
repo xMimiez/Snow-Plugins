@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.1.5
+  build: 1.1.6
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -1126,7 +1126,7 @@ function makeInlineReplyRow(userId, status) {
             zIndex: 20,
             elevation: 8
         }
-    }, makeReplyButton(userId, status));
+    }, makeReplyButton(userId, status), h(OverlayHost, { key: "mime-rts-sheet-overlay" }));
 }
 
 function isScrollName(name) {
@@ -1313,8 +1313,7 @@ function wrapSheetWithFloatingButton(res, userId, status) {
 }
 
 function forceInjectReply(res, userId, status) {
-    var injected = injectInlineInScroll(res, userId, status);
-    if (injected && injected.did && injected.node) return injected.node;
+    if (didPlaceButton) return res;
     if (res && res.props && typeof res.props.children !== "undefined") {
         var ch = res.props.children;
         var list = Array.isArray(ch) ? ch.slice() : [ch];
@@ -1323,8 +1322,8 @@ function forceInjectReply(res, userId, status) {
         return h(res.type, Object.assign({}, res.props, { children: list })) || res;
     }
     var RN = getRN() || {};
-    if (RN.View) return h(RN.View, { style: { flex: 1 } }, makeInlineReplyRow(userId, status), res);
-    return res;
+    if (RN.View) return h(RN.View, { pointerEvents: "box-none" }, makeInlineReplyRow(userId, status), res);
+    return makeInlineReplyRow(userId, status) || res;
 }
 
 function countElements(node, depth) {
@@ -1350,13 +1349,7 @@ function afterProfileRender(args, res) {
     if (!res) return res;
     var status = statusFromProps(props) || (userId && customStatusForUser(userId));
     if (userId && status && !shouldSkipUser(userId) && !didPlaceButton) {
-        try {
-            var injected = injectOnceInNamedScroll(res, userId, status, 0);
-            if (injected && injected.did && injected.node) res = injected.node;
-        } catch (err) { logError("injectScroll", err); }
-        if (!didPlaceButton && countElements(res, 0) >= 6) {
-            try { res = pinButtonOver(res, userId, status) || res; } catch (err2) { logError("pin", err2); }
-        }
+        try { res = forceInjectReply(res, userId, status) || res; } catch (err) { logError("forceInject", err); }
     }
     var Ctx = getProfileFlagContext();
     if (Ctx) res = h(Ctx.Provider, { value: true }, res) || res;
@@ -1981,6 +1974,7 @@ const plugin = definePlugin({
     isMemberListContext: isMemberListContext,
     maybeDecorateCreated: maybeDecorateCreated,
     injectOnceInNamedScroll: injectOnceInNamedScroll,
+    forceInjectReply: forceInjectReply,
     countElements: countElements,
     userIdFromProfileKey: userIdFromProfileKey,
     isProfileSheetKey: isProfileSheetKey,
