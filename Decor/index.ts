@@ -1,9 +1,9 @@
 /*
   Decor — Snow spec-3 port of Equicord/Vencord/Rain/Vendetta Decor (FieryFlames).
   Desktop Equicord uses webpack string patches + a large profile UI.
-  Mobile: fetch Decor API, stamp users, resolve CDN URLs, and inject a 1:1
-  official decoration editor (preview + 72px cards) above Discord's native
-  avatar-decoration row in Edit Profile.
+  Mobile: fetch Decor API, stamp users, resolve CDN URLs, and replace Discord's
+  official avatar-decoration slot in Edit Profile with Decor's picker.
+  Equipping goes through Decor's API so other Decor users see it.
   Original: Fiery. Rain/Vendetta UI. Snow port: Mime | N0_.q3.
   https://github.com/Equicord/Equicord/tree/main/src/plugins/decor
   https://github.com/decor-discord/vendetta-plugin
@@ -255,13 +255,12 @@ function getDecorAvatarDecorationURL(avatarDecoration, canAnimate) {
 function applyDecorationToUser(user, decorationAsset) {
     if (!user) return user;
     if (decorationAsset) {
-        if (!user.avatarDecoration || user.avatarDecoration.skuId !== SKU_ID) {
-            user.avatarDecoration = { asset: decorationAsset, skuId: SKU_ID };
-        }
-    } else if (user.avatarDecoration && user.avatarDecoration.skuId === SKU_ID) {
+        user.avatarDecoration = { asset: decorationAsset, skuId: SKU_ID };
+    } else if (user.avatarDecoration && (user.avatarDecoration.skuId === SKU_ID || user.avatarDecoration.skuId === RAW_SKU_ID)) {
         user.avatarDecoration = null;
     }
     user.avatarDecorationData = user.avatarDecoration;
+    user.avatar_decoration_data = user.avatarDecoration;
     return user;
 }
 
@@ -284,8 +283,14 @@ function getUsersDecorations(ids) {
 
 function authFetch(path, opts) {
     opts = opts || {};
-    var headers = Object.assign({}, opts.headers || {}, { Authorization: "Bearer " + getToken() });
+    var token = getToken();
+    if (!token) return Promise.reject(new Error("unauthorized"));
+    var headers = Object.assign({}, opts.headers || {}, { Authorization: "Bearer " + token });
     return doFetch(API_URL + path, Object.assign({}, opts, { headers: headers })).then(function (r) {
+        if (r && r.status === 401) {
+            setToken(null);
+            throw new Error("unauthorized");
+        }
         if (!r || !r.ok) throw new Error("http " + (r && r.status));
         return r;
     });
@@ -348,12 +353,33 @@ function loadConfig() {
     }).catch(function () {});
 }
 
+function stampIfKnown(user) {
+    if (!user || !user.id) return user;
+    if (Object.prototype.hasOwnProperty.call(usersDecorations, user.id)) {
+        applyDecorationToUser(user, usersDecorations[user.id]);
+    } else {
+        queueFetch(user.id, false);
+    }
+    return user;
+}
+
 function handleFlux(event) {
     if (!event) return;
     var type = event.type;
     if (type === "CONNECTION_OPEN") {
         var me = getCurrentUser();
         if (me) queueFetch(me.id, true);
+        if (event.user) stampIfKnown(event.user);
+        if (event.users) {
+            var list = Array.isArray(event.users) ? event.users : [];
+            queueMany(list.map(function (u) { return u && u.id; }).filter(Boolean));
+            for (var i = 0; i < list.length; i++) stampIfKnown(list[i]);
+        }
+        if (getToken()) refreshMine();
+        return;
+    }
+    if ((type === "USER_UPDATE" || type === "CURRENT_USER_UPDATE") && event.user) {
+        stampIfKnown(event.user);
         return;
     }
     if (type === "USER_PROFILE_MODAL_OPEN" && event.userId) {
@@ -373,33 +399,58 @@ function handleFlux(event) {
     if (type === "TYPING_START" && event.userId) queueFetch(event.userId, false);
 }
 
+function decorationUrlFromOpts(opts) {
+    if (!opts) return null;
+    var uid = opts.userId || (opts.user && opts.user.id);
+    if (uid && Object.prototype.hasOwnProperty.call(usersDecorations, uid) && usersDecorations[uid]) {
+        return getDecorAvatarDecorationURL({ asset: usersDecorations[uid], skuId: SKU_ID }, opts.canAnimate);
+    }
+    return getDecorAvatarDecorationURL(opts.avatarDecoration, opts.canAnimate);
+}
+
+function patchUrlResolver(resolver) {
+    if (!resolver || typeof resolver.getAvatarDecorationURL !== "function") return;
+    var unUrl = patchMethod("instead", resolver, "getAvatarDecorationURL", function (args, orig) {
+        var custom = decorationUrlFromOpts(args && args[0]);
+        if (custom) return custom;
+        return orig.apply(resolver, args);
+    });
+    if (unUrl) {
+        unpatches.push(unUrl);
+        log("patched getAvatarDecorationURL");
+    }
+}
+
 function patchStores() {
     var UserStore = findByStoreName("UserStore") || findByProps("getUser", "getCurrentUser");
     if (UserStore) {
         var un = patchMethod("after", UserStore, "getUser", function (_args, user) {
-            if (user && Object.prototype.hasOwnProperty.call(usersDecorations, user.id)) {
-                applyDecorationToUser(user, usersDecorations[user.id]);
-            }
-            return user;
+            return stampIfKnown(user);
         });
         if (un) {
             unpatches.push(un);
             log("patched UserStore.getUser");
         }
+        if (typeof UserStore.getCurrentUser === "function") {
+            var unMe = patchMethod("after", UserStore, "getCurrentUser", function (_args, user) {
+                return stampIfKnown(user);
+            });
+            if (unMe) unpatches.push(unMe);
+        }
     }
     var resolver = findByProps("getAvatarDecorationURL", "getUserAvatarURL")
         || findByProps("getAvatarDecorationURL");
-    if (resolver && typeof resolver.getAvatarDecorationURL === "function") {
-        var unUrl = patchMethod("instead", resolver, "getAvatarDecorationURL", function (args, orig) {
-            var opts = args && args[0];
-            var custom = opts && getDecorAvatarDecorationURL(opts.avatarDecoration, opts.canAnimate);
-            if (custom) return custom;
-            return orig.apply(resolver, args);
+    patchUrlResolver(resolver);
+    if (resolver && resolver.default) patchUrlResolver(resolver.default);
+    var anim = findByProps("isAnimatedAvatarDecoration");
+    if (anim && typeof anim.isAnimatedAvatarDecoration === "function") {
+        var unAnim = patchMethod("after", anim, "isAnimatedAvatarDecoration", function (args, ret) {
+            var d = args && args[0];
+            var asset = d && (d.asset || d);
+            if (typeof asset === "string" && asset.indexOf("a_") === 0) return true;
+            return ret;
         });
-        if (unUrl) {
-            unpatches.push(unUrl);
-            log("patched getAvatarDecorationURL");
-        }
+        if (unAnim) unpatches.push(unAnim);
     }
 }
 
@@ -457,6 +508,13 @@ function decoImageUri(decoration) {
     return CDN_URL + "/" + asset + ".png";
 }
 
+function isLikelyJwt(token) {
+    token = String(token || "").trim();
+    if (!token || token.length < 16) return false;
+    if (token.charAt(0) === "<" || token.indexOf("<!DOCTYPE") >= 0 || token.indexOf("{") === 0) return false;
+    return token.split(".").length >= 2;
+}
+
 function exchangeDecorToken(location) {
     var url = String(location || "");
     if (!url) return Promise.reject(new Error("no location"));
@@ -464,16 +522,26 @@ function exchangeDecorToken(location) {
     if (url.indexOf(AUTHORIZE_URL) !== 0 && url.indexOf("code=") < 0) {
         return Promise.reject(new Error("not a Decor redirect"));
     }
-    if (url.indexOf("client=") < 0) url += (url.indexOf("?") >= 0 ? "&" : "?") + "client=snow";
-    return doFetch(url).then(function (r) { return r.text(); }).then(function (token) {
-        token = String(token || "").trim();
-        if (!token || token.length < 8) throw new Error("empty token");
-        setToken(token);
-        hideSheet();
-        showToast("Decor authorized");
-        log("authorized");
-        return refreshMine();
-    });
+    function stripClient(u) {
+        return u.replace(/([?&])client=[^&]*/g, "$1").replace(/[?&]$/, "").replace("?&", "?");
+    }
+    function tryClient(client) {
+        var u = stripClient(url);
+        u += (u.indexOf("?") >= 0 ? "&" : "?") + "client=" + encodeURIComponent(client);
+        return doFetch(u).then(function (r) { return r.text(); }).then(function (token) {
+            token = String(token || "").trim();
+            if (!isLikelyJwt(token)) throw new Error("bad token for " + client);
+            setToken(token);
+            hideSheet();
+            showToast("Decor authorized");
+            log("authorized", client);
+            return refreshMine();
+        });
+    }
+    return tryClient("snow")
+        .catch(function () { return tryClient("vendetta"); })
+        .catch(function () { return tryClient("vencord"); })
+        .catch(function () { return tryClient("rain"); });
 }
 
 function finishAuthFromRedirect(location) {
@@ -496,13 +564,21 @@ function authorizeSilent() {
         + "&response_type=code"
         + "&redirect_uri=" + encodeURIComponent(AUTHORIZE_URL)
         + "&scope=identify";
-    return doFetch("https://discord.com/api/v9/oauth2/authorize?" + qs, {
-        method: "POST",
-        headers: {
-            Authorization: discordToken,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ authorize: true, permissions: "0", integration_type: 0 })
+    function post(body) {
+        return doFetch("https://discord.com/api/v9/oauth2/authorize?" + qs, {
+            method: "POST",
+            headers: {
+                Authorization: discordToken,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(body)
+        });
+    }
+    return post({ authorize: true, permissions: "0", integration_type: 0 }).then(function (r) {
+        if (r && (r.status === 400 || r.status === 422)) {
+            return post({ authorize: true, permissions: "0" });
+        }
+        return r;
     }).then(function (r) {
         if (!r || !r.ok) throw new Error("http " + (r && r.status));
         return r.json();
@@ -510,6 +586,14 @@ function authorizeSilent() {
         var loc = data && (data.location || data.redirect_to || data.redirect_uri);
         if (!loc) throw new Error("no redirect");
         return exchangeDecorToken(loc);
+    });
+}
+
+function ensureAuth() {
+    if (getToken()) return Promise.resolve(getToken());
+    return authorizeSilent().catch(function (err) {
+        logError("ensureAuth", err);
+        return null;
     });
 }
 
@@ -595,6 +679,22 @@ function loadPresets() {
     });
 }
 
+function applySelectedLocally(decoration) {
+    selectedHash = decoration && decoration.hash ? decoration.hash : null;
+    var me = getCurrentUser();
+    var asset = decoration ? decorationToAsset(decoration) : null;
+    if (me && me.id) {
+        usersDecorations[me.id] = asset;
+        applyDecorationToUser(me, asset);
+        stampUserFromStore(me.id, asset);
+        var Flux = getFluxDispatcher();
+        if (Flux && typeof Flux.dispatch === "function") {
+            try { Flux.dispatch({ type: "CURRENT_USER_UPDATE", user: me }); } catch (_e) {}
+            try { Flux.dispatch({ type: "USER_UPDATE", user: me }); } catch (_e2) {}
+        }
+    }
+}
+
 function refreshMine() {
     var jobs = [loadPresets()];
     if (getToken()) {
@@ -602,12 +702,34 @@ function refreshMine() {
         jobs.push(authFetch("/users/@me/decoration").then(function (r) { return r.json(); }).catch(function () { return null; }));
     }
     return Promise.all(jobs).then(function (parts) {
-        if (parts[1]) myDecorations = parts[1] || [];
+        if (parts[1]) myDecorations = Array.isArray(parts[1]) ? parts[1] : [];
         if (parts[2] !== undefined) {
             var selected = parts[2];
-            selectedHash = selected && selected.hash ? selected.hash : null;
+            applySelectedLocally(selected && selected.hash ? selected : null);
         }
         log("mine", myDecorations.length, "presets", presets.length);
+    }).catch(function (err) {
+        if (String(err && err.message) === "unauthorized" && !refreshMine._retrying) {
+            refreshMine._retrying = true;
+            return ensureAuth().then(function (tok) {
+                refreshMine._retrying = false;
+                if (tok) return refreshMine();
+            }).catch(function () { refreshMine._retrying = false; });
+        }
+        logError("refreshMine", err);
+    });
+}
+
+function putDecoration(decoration) {
+    var hash = decoration && decoration.hash ? decoration.hash : null;
+    var body = new FormData();
+    body.append("hash", hash == null ? "null" : hash);
+    return authFetch("/users/@me/decoration", { method: "PUT", body: body }).catch(function () {
+        return authFetch("/users/@me/decoration", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hash: hash })
+        });
     });
 }
 
@@ -617,26 +739,20 @@ function selectDecoration(decoration) {
             showToast("Authorize with Decor first");
             return Promise.resolve();
         }
-        var body = new FormData();
-        if (!decoration) body.append("hash", "null");
-        else body.append("hash", decoration.hash);
-        return authFetch("/users/@me/decoration", { method: "PUT", body: body }).then(function () {
-            selectedHash = decoration ? decoration.hash : null;
-            var me = getCurrentUser();
-            var asset = decoration ? decorationToAsset(decoration) : null;
-            if (me) {
-                applyDecorationToUser(me, asset);
-                if (me.id) usersDecorations[me.id] = asset;
-                stampUserFromStore(me.id, asset);
-                var Flux = getFluxDispatcher();
-                if (Flux && typeof Flux.dispatch === "function") {
-                    try { Flux.dispatch({ type: "CURRENT_USER_UPDATE", user: me }); } catch (_e) {}
-                    try { Flux.dispatch({ type: "USER_SETTINGS_ACCOUNT_SUBMIT_SUCCESS" }); } catch (_e2) {}
-                }
-            }
+        return putDecoration(decoration).then(function () {
+            applySelectedLocally(decoration);
             showToast(decoration ? "Decoration applied" : "Decoration cleared");
         }).catch(function (err) {
             logError("select", err);
+            if (String(err && err.message) === "unauthorized") {
+                return authorizeSilent().then(function () { return putDecoration(decoration); }).then(function () {
+                    applySelectedLocally(decoration);
+                    showToast(decoration ? "Decoration applied" : "Decoration cleared");
+                }).catch(function () {
+                    authorize();
+                    showToast("Authorize with Decor, then tap again");
+                });
+            }
             showToast("Failed to apply decoration");
         });
     };
@@ -734,7 +850,7 @@ function injectDecorAboveOfficial(node, pickerEl) {
     if (already) return true;
     if (idx >= 0) {
         var next = arr.slice();
-        next.splice(idx, 0, pickerEl);
+        next[idx] = pickerEl;
         node.props.children = isArr ? next : (next.length === 1 ? next[0] : next);
         return true;
     }
@@ -782,38 +898,49 @@ function wrapComponentModule(mod, afterFn) {
     return ok;
 }
 
-function onEditProfileRender(_args, ret) {
+function makePickerEl() {
     var React = getReact();
-    if (!React || !ret) return ret;
-    var picker = React.createElement(EditProfileDecorBlock, { key: "mime-decor-picker", __mimeDecor: true });
-    injectDecorAboveOfficial(ret, picker);
+    if (!React) return null;
+    return React.createElement(EditProfileDecorBlock, { key: "mime-decor-picker", __mimeDecor: true });
+}
+
+function onEditProfileRender(_args, ret) {
+    if (!ret) return ret;
+    var picker = makePickerEl();
+    if (picker) injectDecorAboveOfficial(ret, picker);
     return ret;
 }
 
-function patchNamedComponent(name) {
+function onOfficialDecorRender(_args, _ret) {
+    var picker = makePickerEl();
+    return picker || _ret;
+}
+
+function patchNamedComponent(name, afterFn) {
+    afterFn = afterFn || onEditProfileRender;
     var roots = metroRoots();
     var i;
     for (i = 0; i < roots.length; i++) {
         var r = roots[i];
         var raw = null;
         try { if (r.findByName) raw = r.findByName(name, false); } catch (_e) {}
-        if (raw && wrapComponentModule(raw, onEditProfileRender)) {
+        if (raw && wrapComponentModule(raw, afterFn)) {
             log("patched", name);
             return true;
         }
         try { if (r.findByDisplayName) raw = r.findByDisplayName(name, false); } catch (_e2) {}
-        if (raw && wrapComponentModule(raw, onEditProfileRender)) {
+        if (raw && wrapComponentModule(raw, afterFn)) {
             log("patched display", name);
             return true;
         }
         try { if (r.findByTypeName) raw = r.findByTypeName(name, false); } catch (_e3) {}
-        if (raw && wrapComponentModule(raw, onEditProfileRender)) {
+        if (raw && wrapComponentModule(raw, afterFn)) {
             log("patched type", name);
             return true;
         }
     }
     var named = findByName(name, false) || findByDisplayName(name, false) || findByTypeName(name, false);
-    if (named && wrapComponentModule(named, onEditProfileRender)) {
+    if (named && wrapComponentModule(named, afterFn)) {
         log("patched fallback", name);
         return true;
     }
@@ -821,7 +948,7 @@ function patchNamedComponent(name) {
 }
 
 function patchEditProfile() {
-    var names = [
+    var screens = [
         "EditProfile",
         "EditProfileScreen",
         "UserSettingsEditProfile",
@@ -832,15 +959,23 @@ function patchEditProfile() {
         "ProfileEditForm",
         "ProfileCustomization",
         "ProfileCustomizationScreen",
-        "UserSettingsProfile",
+        "UserSettingsProfile"
+    ];
+    var official = [
         "CollectiblesProfileSettings",
         "AvatarDecorationSettings",
         "EditAvatarDecoration",
-        "AvatarDecorationSetting"
+        "AvatarDecorationSetting",
+        "AvatarDecorationPicker",
+        "CollectiblesAvatarDecoration"
     ];
     var hit = 0;
-    for (var i = 0; i < names.length; i++) {
-        if (patchNamedComponent(names[i])) hit++;
+    var i;
+    for (i = 0; i < screens.length; i++) {
+        if (patchNamedComponent(screens[i], onEditProfileRender)) hit++;
+    }
+    for (i = 0; i < official.length; i++) {
+        if (patchNamedComponent(official[i], onOfficialDecorRender)) hit++;
     }
     log("edit-profile patches", hit);
 }
@@ -1432,7 +1567,7 @@ function EditProfileDecorBlock() {
     var Text = RN.Text;
     if (!View) return h(DecorationPicker, null);
     return h(View, { __mimeDecor: true, style: { marginBottom: 16, paddingBottom: 8 } },
-        Text ? h(Text, { style: { color: "#dbdee1", fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingTop: 8 } }, "Decor") : null,
+        Text ? h(Text, { style: { color: "#dbdee1", fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingTop: 8 } }, "Avatar decoration") : null,
         h(DecorationPicker, null)
     );
 }
@@ -1446,7 +1581,9 @@ function start() {
     loadPresets();
     var me = getCurrentUser();
     if (me) queueFetch(me.id, true);
-    if (getToken()) refreshMine();
+    ensureAuth().then(function (tok) {
+        if (tok) return refreshMine();
+    });
     log("started");
 }
 
@@ -1532,6 +1669,7 @@ const plugin = definePlugin({
     handleFlux: handleFlux,
     decoImageUri: decoImageUri,
     discordAuthorizeUrl: discordAuthorizeUrl,
+    decorationUrlFromOpts: decorationUrlFromOpts,
     isOfficialDecorNode: isOfficialDecorNode,
     injectDecorAboveOfficial: injectDecorAboveOfficial,
     normalizePresets: normalizePresets,
