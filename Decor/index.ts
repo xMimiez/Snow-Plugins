@@ -101,6 +101,21 @@ function findByProps() {
     return null;
 }
 
+function findByPropsAll() {
+    var args = arguments;
+    var roots = metroRoots();
+    for (var i = 0; i < roots.length; i++) {
+        var fn = roots[i].findByPropsAll;
+        if (!fn) continue;
+        try {
+            var found = fn.apply(roots[i], args);
+            if (found && found.length) return found;
+        } catch (_e) {}
+    }
+    var one = findByProps.apply(null, args);
+    return one ? [one] : [];
+}
+
 function findByName(name, expDefault) {
     if (expDefault === undefined) expDefault = true;
     var roots = metroRoots();
@@ -174,20 +189,49 @@ function getPatcher() {
     return found;
 }
 
+function hardWrap(kind, obj, method, cb) {
+    var orig = obj[method];
+    if (typeof orig !== "function" || orig.__mimeDecorWrap) return null;
+    function wrapped() {
+        var args = arguments;
+        if (kind === "instead") {
+            return cb(args, orig.bind(obj));
+        }
+        if (kind === "before") {
+            try { cb(args); } catch (_e) {}
+            return orig.apply(this, args);
+        }
+        var ret = orig.apply(this, args);
+        try {
+            var next = cb(args, ret);
+            if (next !== undefined) ret = next;
+        } catch (_e2) {}
+        return ret;
+    }
+    wrapped.__mimeDecorWrap = true;
+    obj[method] = wrapped;
+    var un = function () {
+        if (obj[method] === wrapped) obj[method] = orig;
+    };
+    unpatches.push(un);
+    return un;
+}
+
 function patchMethod(kind, obj, method, cb) {
-    var patcher = getPatcher();
-    if (!patcher || typeof patcher[kind] !== "function") return null;
     if (!obj || typeof obj[method] !== "function") return null;
     var orig = obj[method];
-    try {
-        var un = patcher[kind](method, obj, cb);
-        if (obj[method] !== orig || typeof un === "function") return typeof un === "function" ? un : function () {};
-    } catch (_e) {}
-    try {
-        var un2 = patcher[kind](obj, method, cb);
-        if (obj[method] !== orig || typeof un2 === "function") return typeof un2 === "function" ? un2 : function () {};
-    } catch (_e2) {}
-    return null;
+    var patcher = getPatcher();
+    if (patcher && typeof patcher[kind] === "function") {
+        try {
+            var un = patcher[kind](method, obj, cb);
+            if (obj[method] !== orig) return typeof un === "function" ? un : function () {};
+        } catch (_e) {}
+        try {
+            var un2 = patcher[kind](obj, method, cb);
+            if (obj[method] !== orig) return typeof un2 === "function" ? un2 : function () {};
+        } catch (_e2) {}
+    }
+    return hardWrap(kind, obj, method, cb);
 }
 
 function getReact() {
@@ -417,26 +461,157 @@ function handleFlux(event) {
     if (type === "TYPING_START" && event.userId) queueFetch(event.userId, false);
 }
 
+function decoUrlFromAsset(asset, canAnimate) {
+    if (!asset) return null;
+    if (/^(https?:|file:|content:|ph:|data:)/i.test(String(asset))) return asset;
+    return getDecorAvatarDecorationURL({ asset: asset, skuId: SKU_ID }, canAnimate !== false);
+}
+
+function decorationForUserId(userId) {
+    if (!userId) return null;
+    if (Object.prototype.hasOwnProperty.call(usersDecorations, userId)) return usersDecorations[userId] || null;
+    queueFetch(userId, false);
+    return null;
+}
+
 function decorationUrlFromOpts(opts) {
     if (!opts) return null;
     var uid = opts.userId || (opts.user && opts.user.id);
-    if (uid && Object.prototype.hasOwnProperty.call(usersDecorations, uid) && usersDecorations[uid]) {
-        return getDecorAvatarDecorationURL({ asset: usersDecorations[uid], skuId: SKU_ID }, opts.canAnimate);
-    }
+    var cached = decorationForUserId(uid);
+    if (cached) return decoUrlFromAsset(cached, opts.canAnimate);
     return getDecorAvatarDecorationURL(opts.avatarDecoration, opts.canAnimate);
 }
 
-function patchUrlResolver(resolver) {
-    if (!resolver || typeof resolver.getAvatarDecorationURL !== "function") return;
-    var unUrl = patchMethod("instead", resolver, "getAvatarDecorationURL", function (args, orig) {
-        var custom = decorationUrlFromOpts(args && args[0]);
-        if (custom) return custom;
-        return orig.apply(resolver, args);
+function avatarPixelSize(size) {
+    if (typeof size === "number" && size > 0) return size;
+    var named = {
+        xxxsmall: 16, xxsmall: 20, xsmall: 24, extraSmall: 16, small: 32, medium: 40,
+        large: 80, xlarge: 120, xxlarge: 160, xxxlarge: 192,
+        size16: 16, size20: 20, size24: 24, size32: 32, size40: 40, size48: 48,
+        size56: 56, size64: 64, size80: 80, size120: 120
+    };
+    if (typeof size === "string" && named[size] != null) return named[size];
+    var mod = findByProps("AvatarSizes");
+    try {
+        var sizes = (mod && (mod.AvatarSizes || mod)) || {};
+        var v = size != null ? sizes[size] : null;
+        if (typeof v === "number") return v;
+        if (v && typeof v.size === "number") return v.size;
+    } catch (_e) {}
+    return 32;
+}
+
+function addDecorOverlay(ret, uri, size) {
+    var React = getReact();
+    var RN = getRN() || {};
+    var View = RN.View;
+    var Image = RN.Image;
+    if (!React || !View || !Image || !uri || !ret) return ret;
+    var overlay = h(Image, {
+        key: "mime-decor-overlay",
+        source: { uri: uri },
+        pointerEvents: "none",
+        resizeMode: "contain",
+        style: {
+            position: "absolute",
+            width: size * 1.2,
+            height: size * 1.2,
+            left: -size * 0.1,
+            top: -size * 0.1,
+            zIndex: 2
+        }
     });
-    if (unUrl) {
-        unpatches.push(unUrl);
-        log("patched getAvatarDecorationURL");
+    function hasOverlay(node) {
+        if (!node) return false;
+        if (node.key === "mime-decor-overlay") return true;
+        var kids = node.props && node.props.children;
+        if (!kids) return false;
+        if (!Array.isArray(kids)) return hasOverlay(kids);
+        for (var i = 0; i < kids.length; i++) if (hasOverlay(kids[i])) return true;
+        return false;
     }
+    if (hasOverlay(ret)) return ret;
+    var t = ret.type;
+    var native = typeof t === "string";
+    if (native || !ret.props) {
+        return h(View, { style: { width: size, height: size, overflow: "visible" } }, ret, overlay);
+    }
+    var kids = ret.props.children;
+    if (Array.isArray(kids)) ret.props.children = kids.concat([overlay]);
+    else if (kids != null) ret.props.children = [kids, overlay];
+    else ret.props.children = overlay;
+    var style = ret.props.style;
+    if (style == null) ret.props.style = { overflow: "visible" };
+    else if (Array.isArray(style)) ret.props.style = style.concat([{ overflow: "visible" }]);
+    else ret.props.style = [style, { overflow: "visible" }];
+    return ret;
+}
+
+function overlayFromProps(args, ret) {
+    var props = (args && args[0]) || {};
+    var user = props.user || props.guildMember || null;
+    var uid = props.userId || (user && user.id);
+    if (!uid && user) stampIfKnown(user);
+    var asset = decorationForUserId(uid);
+    if (!asset && user && user.avatarDecoration && user.avatarDecoration.skuId === SKU_ID) {
+        asset = user.avatarDecoration.asset;
+    }
+    if (!asset) return ret;
+    return addDecorOverlay(ret, decoUrlFromAsset(asset, true), avatarPixelSize(props.size));
+}
+
+function patchUrlResolver(resolver) {
+    if (!resolver) return;
+    if (typeof resolver.getAvatarDecorationURL === "function") {
+        var unUrl = patchMethod("instead", resolver, "getAvatarDecorationURL", function (args, orig) {
+            var custom = decorationUrlFromOpts(args && args[0]);
+            if (custom) return custom;
+            try { return orig.apply(resolver, args); } catch (_e) { return orig(args[0]); }
+        });
+        if (unUrl) log("patched getAvatarDecorationURL");
+    }
+    if (resolver.default) patchUrlResolver(resolver.default);
+}
+
+function patchAvatarComponent(comp) {
+    if (!comp) return;
+    if (typeof comp === "function") {
+        var holder = { render: comp };
+        // can't replace Discord's import of the function without module object
+    }
+    wrapComponentModule(comp, overlayFromProps);
+}
+
+function patchAvatars() {
+    var i;
+    var list = findByPropsAll("getAvatarDecorationURL");
+    for (i = 0; i < list.length; i++) patchUrlResolver(list[i]);
+    patchUrlResolver(findByProps("getAvatarDecorationURL", "default"));
+    patchUrlResolver(findByProps("getAvatarDecorationURL", "getUserAvatarURL"));
+    patchUrlResolver(findByProps("getAvatarDecorationURL"));
+
+    var sizes = findByProps("AvatarSizes");
+    if (sizes) {
+        patchAvatarComponent(sizes);
+        if (sizes.default) patchAvatarComponent(sizes.default);
+        if (sizes.type && sizes.type.render) wrapComponentModule({ type: sizes.type }, overlayFromProps);
+        else if (sizes.type) patchAvatarComponent({ default: sizes.type });
+        if (typeof sizes.type === "function") {
+            wrapComponentModule({ type: sizes }, overlayFromProps);
+        }
+    }
+    var comps = (getMod().metro && getMod().metro.common && getMod().metro.common.components) || {};
+    if (comps.Avatar) patchAvatarComponent(typeof comps.Avatar === "function" ? { default: comps.Avatar } : comps.Avatar);
+
+    var names = ["Avatar", "UserAvatar", "DisplayAvatar", "ForcedAvatar", "GuildIcon"];
+    for (i = 0; i < names.length; i++) {
+        patchNamedComponent(names[i], overlayFromProps);
+        var raw = findByName(names[i], false) || findByDisplayName(names[i], false);
+        if (raw) wrapComponentModule(raw, overlayFromProps);
+        var fn = findByName(names[i], true);
+        if (typeof fn === "function") wrapComponentModule({ default: fn }, overlayFromProps);
+    }
+    log("patched avatars");
 }
 
 function patchStores() {
@@ -445,30 +620,31 @@ function patchStores() {
         var un = patchMethod("after", UserStore, "getUser", function (_args, user) {
             return stampIfKnown(user);
         });
-        if (un) {
-            unpatches.push(un);
-            log("patched UserStore.getUser");
-        }
+        if (un) log("patched UserStore.getUser");
         if (typeof UserStore.getCurrentUser === "function") {
-            var unMe = patchMethod("after", UserStore, "getCurrentUser", function (_args, user) {
+            patchMethod("after", UserStore, "getCurrentUser", function (_args, user) {
                 return stampIfKnown(user);
             });
-            if (unMe) unpatches.push(unMe);
         }
     }
-    var resolver = findByProps("getAvatarDecorationURL", "getUserAvatarURL")
-        || findByProps("getAvatarDecorationURL");
-    patchUrlResolver(resolver);
-    if (resolver && resolver.default) patchUrlResolver(resolver.default);
+    patchAvatars();
     var anim = findByProps("isAnimatedAvatarDecoration");
     if (anim && typeof anim.isAnimatedAvatarDecoration === "function") {
-        var unAnim = patchMethod("after", anim, "isAnimatedAvatarDecoration", function (args, ret) {
+        patchMethod("after", anim, "isAnimatedAvatarDecoration", function (args, ret) {
             var d = args && args[0];
             var asset = d && (d.asset || d);
             if (typeof asset === "string" && asset.indexOf("a_") === 0) return true;
             return ret;
         });
-        if (unAnim) unpatches.push(unAnim);
+    }
+    var Flux = getFluxDispatcher();
+    if (Flux && typeof Flux.dispatch === "function") {
+        patchMethod("before", Flux, "dispatch", function (args) {
+            var e = args && args[0];
+            if (!e) return;
+            if (e.user) stampIfKnown(e.user);
+            if (e.message && e.message.author) stampIfKnown(e.message.author);
+        });
     }
 }
 
@@ -746,14 +922,18 @@ function refreshMine() {
 
 function putDecoration(decoration) {
     var hash = decoration && decoration.hash ? decoration.hash : null;
-    var body = new FormData();
-    body.append("hash", hash == null ? "null" : hash);
-    return authFetch("/users/@me/decoration", { method: "PUT", body: body }).catch(function () {
-        return authFetch("/users/@me/decoration", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ hash: hash })
-        });
+    return authFetch("/users/@me/decoration", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hash: hash })
+    }).catch(function () {
+        var body = new FormData();
+        body.append("hash", hash == null ? "null" : hash);
+        return authFetch("/users/@me/decoration", { method: "PUT", body: body });
+    }).then(function (r) {
+        var me = getCurrentUser();
+        if (me && me.id) queueFetch(me.id, true);
+        return r;
     });
 }
 
@@ -1709,6 +1889,8 @@ const plugin = definePlugin({
     handleFlux: handleFlux,
     decoImageUri: decoImageUri,
     discordAuthorizeUrl: discordAuthorizeUrl,
+    avatarPixelSize: avatarPixelSize,
+    decoUrlFromAsset: decoUrlFromAsset,
     decorationUrlFromOpts: decorationUrlFromOpts,
     isOfficialDecorNode: isOfficialDecorNode,
     injectDecorAboveOfficial: injectDecorAboveOfficial,
