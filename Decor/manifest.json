@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.decor",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "display": {
     "name": "Decor",
     "description": "Custom avatar decorations with an official-style editor above Discord's in Edit Profile.",
