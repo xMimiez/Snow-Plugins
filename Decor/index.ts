@@ -1348,6 +1348,79 @@ function screenHeight() {
     return 720;
 }
 
+function screenSize() {
+    var RN = getRN() || {};
+    try {
+        var d = RN.Dimensions && RN.Dimensions.get && RN.Dimensions.get("window");
+        if (d && d.width && d.height) return { width: d.width, height: d.height };
+    } catch (_e) {}
+    return { width: 400, height: screenHeight() };
+}
+
+function asColorString(v) {
+    if (typeof v === "string" && (v.charAt(0) === "#" || v.indexOf("rgb") === 0 || v.indexOf("hsl") === 0)) return v;
+    if (v && typeof v === "object") {
+        if (typeof v.hex === "string") return v.hex;
+        if (typeof v.color === "string") return asColorString(v.color);
+    }
+    return null;
+}
+
+function themeColors() {
+    var fb = {
+        bg: "#313338",
+        bgSecondary: "#2b2d31",
+        bgFloating: "#1e1f22",
+        text: "#dbdee1",
+        muted: "#949ba4",
+        header: "#f2f3f5",
+        link: "#00a8fc",
+        border: "#3f4147",
+        brand: "#5865F2"
+    };
+    try {
+        var ThemeStore = findByStoreName("ThemeStore") || findByProps("theme");
+        var theme = ThemeStore && ThemeStore.theme;
+        var colorMod = findByProps("colors", "meta")
+            || findByProps("colors", "unsafe_rawColors")
+            || findByProps("SemanticColor");
+        var root = colorMod && (colorMod.default || colorMod);
+        var map = (root && (root.colors || root.SemanticColor))
+            || (findByProps("ThemeColorMap") && findByProps("ThemeColorMap").ThemeColorMap);
+        var meta = root && (root.meta || root.internal);
+        var resolver = meta && meta.resolveSemanticColor;
+        function resolve(keys, fallback) {
+            if (!map) return fallback;
+            for (var i = 0; i < keys.length; i++) {
+                var sym = map[keys[i]];
+                if (sym == null) continue;
+                var hex = asColorString(sym);
+                if (hex) return hex;
+                if (typeof resolver === "function") {
+                    try {
+                        hex = asColorString(resolver(theme, sym)) || asColorString(resolver(sym));
+                        if (hex) return hex;
+                    } catch (_e) {}
+                }
+            }
+            return fallback;
+        }
+        return {
+            bg: resolve(["BACKGROUND_PRIMARY", "BG_BASE_PRIMARY", "BACKGROUND_BASE_LOW"], fb.bg),
+            bgSecondary: resolve(["BACKGROUND_SECONDARY", "BG_BASE_SECONDARY"], fb.bgSecondary),
+            bgFloating: resolve(["BACKGROUND_FLOATING", "BG_SURFACE_OVERLAY", "BACKGROUND_NESTED_FLOATING"], fb.bgFloating),
+            text: resolve(["TEXT_NORMAL", "TEXT_PRIMARY", "HEADER_PRIMARY"], fb.text),
+            muted: resolve(["TEXT_MUTED", "TEXT_SECONDARY", "HEADER_SECONDARY"], fb.muted),
+            header: resolve(["HEADER_PRIMARY", "TEXT_NORMAL"], fb.header),
+            link: resolve(["TEXT_LINK", "TEXT_BRAND"], fb.link),
+            border: resolve(["BACKGROUND_MODIFIER_ACCENT", "BORDER_SUBTLE", "BACKGROUND_TERTIARY"], fb.border),
+            brand: resolve(["BUTTON_OUTLINE_BRAND_BORDER_ACTIVE", "BRAND_500", "CONTROL_BRAND_FOREGROUND"], fb.brand)
+        };
+    } catch (_e2) {
+        return fb;
+    }
+}
+
 function closeDecorScreen() {
     var modals = findByProps("pushModal", "popModal") || findByProps("popModal");
     var keys = ["mime-decor-screen", "create-decoration", "decor-presets"];
@@ -1365,10 +1438,21 @@ function DecorScreenShell(props) {
     var View = RN.View;
     var Text = RN.Text;
     var Pressable = RN.Pressable || RN.TouchableOpacity;
-    var ScrollView = RN.ScrollView;
     if (!View) return null;
     var Page = props.page;
     var top = getSafeTop();
+    var t = themeColors();
+    var sz = screenSize();
+    var comps = (getMod().metro && getMod().metro.common && getMod().metro.common.components) || {};
+    var DText = comps.Text;
+    function titleEl() {
+        if (DText) return h(DText, { variant: "heading-lg/semibold", color: "header-primary", style: { flex: 1, textAlign: "center", marginRight: 64 } }, props.title || "");
+        return Text ? h(Text, { style: { color: t.header, fontSize: 16, fontWeight: "700", flex: 1, textAlign: "center", marginRight: 64 } }, props.title || "") : null;
+    }
+    function closeEl() {
+        if (DText) return h(DText, { variant: "text-md/medium", color: "text-link" }, "Close");
+        return Text ? h(Text, { style: { color: t.link, fontSize: 16 } }, "Close") : null;
+    }
     var header = h(View, {
         style: {
             height: 48,
@@ -1376,40 +1460,36 @@ function DecorScreenShell(props) {
             alignItems: "center",
             paddingHorizontal: 8,
             borderBottomWidth: 1,
-            borderBottomColor: "#3f4147",
-            backgroundColor: "#111214"
+            borderBottomColor: t.border,
+            backgroundColor: t.bg
         }
     },
         Pressable ? h(Pressable, {
             onPress: closeDecorScreen,
             hitSlop: 12,
             style: { paddingHorizontal: 12, paddingVertical: 8 }
-        }, Text ? h(Text, { style: { color: "#00a8fc", fontSize: 16 } }, "Close") : null) : null,
-        Text ? h(Text, {
-            style: { color: "#fff", fontSize: 16, fontWeight: "700", flex: 1, textAlign: "center", marginRight: 64 }
-        }, props.title || "") : null
+        }, closeEl()) : null,
+        titleEl()
     );
     var body = Page ? h(Page, null) : null;
     return h(View, {
         style: {
             flex: 1,
-            height: screenHeight(),
-            backgroundColor: "#111214",
+            width: sz.width,
+            height: sz.height,
+            minHeight: sz.height,
+            backgroundColor: t.bg,
             paddingTop: top
         }
-    }, header, h(View, { style: { flex: 1, backgroundColor: "#111214" } }, body));
+    }, header, h(View, { style: { flex: 1, backgroundColor: t.bg } }, body));
 }
 
 function forceOpenSheet(title, render) {
     var React = getReact();
     var Lazy = findByProps("openLazy", "hideActionSheet");
-    var SheetMod = findByProps("ActionSheet");
     if (!React || !Lazy || typeof Lazy.openLazy !== "function") return false;
     function Sheet() {
-        var page = h(DecorScreenShell, { title: title, page: render });
-        var host = SheetMod && SheetMod.ActionSheet;
-        if (host) return h(host, { style: { flex: 1, backgroundColor: "#111214" } }, page);
-        return page;
+        return h(DecorScreenShell, { title: title, page: render });
     }
     try {
         Lazy.openLazy(Promise.resolve({ default: Sheet }), "ActionSheet");
@@ -1477,9 +1557,7 @@ function openCustomPage(title, render) {
     if (Lazy && typeof Lazy.openLazy === "function") {
         function Sheet() {
             var host = SheetMod && SheetMod.ActionSheet;
-            var page = h(DecorScreenShell, { title: title, page: render });
-            if (host) return h(host, { style: { flex: 1, backgroundColor: "#111214" } }, page);
-            return page;
+            return h(DecorScreenShell, { title: title, page: render });
         }
         try {
             Lazy.openLazy(Promise.resolve({ default: Sheet }), "ActionSheet");
@@ -1528,12 +1606,12 @@ function DecorCard(props) {
             width: 72,
             height: 72,
             borderRadius: 4,
-            backgroundColor: "#2b2d31",
+            backgroundColor: themeColors().bgSecondary,
             alignItems: "center",
             justifyContent: "center",
             overflow: "hidden",
             borderWidth: selected ? 2 : 0,
-            borderColor: "#5865F2",
+            borderColor: themeColors().brand,
             opacity: disabled ? 0.5 : 1
         }
     }, inner)));
@@ -1575,13 +1653,13 @@ function CardButton(props) {
     var inner = [];
     var src = props.source;
     if (Image && src != null) {
-        inner.push(h(Image, { key: "icon", source: src, style: { width: 22, height: 22, marginBottom: 4, tintColor: "#dbdee1" } }));
+        inner.push(h(Image, { key: "icon", source: src, style: { width: 22, height: 22, marginBottom: 4, tintColor: themeColors().text } }));
     }
     if (Text) {
         inner.push(h(Text, {
             key: "label",
             numberOfLines: 1,
-            style: { color: "#dbdee1", fontSize: 11, fontWeight: "600" }
+            style: { color: themeColors().text, fontSize: 11, fontWeight: "600" }
         }, props.label || ""));
     }
     return h(DecorCard, {
@@ -1647,7 +1725,7 @@ function AvatarDecorationPreviews(props) {
             width: 208,
             height: 208,
             borderRadius: 4,
-            backgroundColor: "#111214",
+            backgroundColor: themeColors().bgFloating,
             alignItems: "center",
             justifyContent: "center"
         }
@@ -1698,9 +1776,10 @@ function DecorationPicker(props) {
     var Parser = findByProps("parse", "parseToAST");
     var showUserProfile = (findByProps("showUserProfile") || {}).showUserProfile;
     var UserUtils = findByProps("getUser", "fetchCurrentUser");
-    var titleStyle = TextStyleSheet["text-lg/semibold"] || { color: "#dbdee1", fontSize: 18, fontWeight: "600" };
-    var mutedStyle = TextStyleSheet.eyebrow || { color: "#949ba4", fontSize: 12, textTransform: "uppercase" };
-    var bodyStyle = TextStyleSheet["text-md/normal"] || { color: "#dbdee1", fontSize: 14 };
+    var t = themeColors();
+    var titleStyle = TextStyleSheet["text-lg/semibold"] || { color: t.text, fontSize: 18, fontWeight: "600" };
+    var mutedStyle = TextStyleSheet.eyebrow || { color: t.muted, fontSize: 12, textTransform: "uppercase" };
+    var bodyStyle = TextStyleSheet["text-md/normal"] || { color: t.text, fontSize: 14 };
 
     var meta = null;
     if (selected && Text) {
@@ -1777,7 +1856,7 @@ function DecorationPicker(props) {
         || (findByProps("FormTitle") && findByProps("FormTitle").FormTitle));
     var titleRow = FormTitle
         ? h(FormTitle, { title: "Decorations" })
-        : (Text ? h(Text, { style: { color: "#949ba4", fontSize: 12, fontWeight: "700", letterSpacing: 0.5, paddingHorizontal: 16, paddingTop: 8 } }, "DECORATIONS") : null);
+        : (Text ? h(Text, { style: { color: t.muted, fontSize: 12, fontWeight: "700", letterSpacing: 0.5, paddingHorizontal: 16, paddingTop: 8 } }, "DECORATIONS") : null);
 
     return h(View, { __mimeDecor: true, style: { gap: 0 } },
         h(AvatarDecorationPreviews, { pendingAvatarDecoration: selectedAvatar }),
@@ -1794,6 +1873,7 @@ function PresetsPage() {
     var Text = RN.Text;
     var ScrollView = RN.ScrollView;
     if (!React || !View) return null;
+    var t = themeColors();
     var state = React.useState(presets.slice ? presets.slice() : []);
     var list = state[0] || [];
     var setList = state[1];
@@ -1808,7 +1888,7 @@ function PresetsPage() {
     if (!list.length && Text) {
         rows.push(h(Text, {
             key: "empty",
-            style: { color: "#949ba4", padding: 16 }
+            style: { color: t.muted, padding: 16 }
         }, "Loading presets…"));
     }
     for (i = 0; i < list.length; i++) {
@@ -1828,18 +1908,18 @@ function PresetsPage() {
             }));
         }
         rows.push(h(View, { key: preset.id || String(i), style: { marginBottom: 20 } },
-            Text ? h(Text, { style: { color: "#dbdee1", fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingBottom: 4 } }, preset.name || "Preset") : null,
-            (preset.description && Text) ? h(Text, { style: { color: "#949ba4", fontSize: 13, paddingHorizontal: 16, paddingBottom: 8 } }, preset.description) : null,
-            cards.length ? HorizontalTiles(cards) : (Text ? h(Text, { style: { color: "#949ba4", paddingHorizontal: 16 } }, "No decorations in this preset") : null)
+            Text ? h(Text, { style: { color: t.text, fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingBottom: 4 } }, preset.name || "Preset") : null,
+            (preset.description && Text) ? h(Text, { style: { color: t.muted, fontSize: 13, paddingHorizontal: 16, paddingBottom: 8 } }, preset.description) : null,
+            cards.length ? HorizontalTiles(cards) : (Text ? h(Text, { style: { color: t.muted, paddingHorizontal: 16 } }, "No decorations in this preset") : null)
         ));
     }
     if (ScrollView) {
         return h(ScrollView, {
-            style: { flex: 1, backgroundColor: "#111214" },
+            style: { flex: 1, backgroundColor: t.bg },
             contentContainerStyle: { paddingTop: 8, paddingBottom: 40 }
         }, rows);
     }
-    return h(View, { style: { flex: 1, backgroundColor: "#111214", paddingTop: 8 } }, rows);
+    return h(View, { style: { flex: 1, backgroundColor: t.bg, paddingTop: 8 } }, rows);
 }
 
 function personalDecorations() {
@@ -1859,6 +1939,7 @@ function CustomPage() {
     var Text = RN.Text;
     var ScrollView = RN.ScrollView;
     if (!React || !View) return null;
+    var t = themeColors();
     var [, bump] = React.useState(0);
     React.useEffect(function () {
         var unsub = subscribeSelection(function () { bump(function (n) { return n + 1; }); });
@@ -1880,20 +1961,20 @@ function CustomPage() {
     var inner = [];
     inner.push(Text ? h(Text, {
         key: "title",
-        style: { color: "#dbdee1", fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingBottom: 8 }
+        style: { color: t.text, fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingBottom: 8 }
     }, "Your decorations") : null);
     inner.push(Text ? h(Text, {
         key: "sub",
-        style: { color: "#949ba4", fontSize: 13, paddingHorizontal: 16, paddingBottom: 12 }
+        style: { color: t.muted, fontSize: 13, paddingHorizontal: 16, paddingBottom: 12 }
     }, mine.length ? "Tap one to equip it." : "Nothing here yet. Use New to submit a PNG or APNG.") : null);
     if (cards.length) inner.push(h(View, { key: "grid", style: { paddingBottom: 16 } }, HorizontalTiles(cards)));
     if (ScrollView) {
         return h(ScrollView, {
-            style: { flex: 1, backgroundColor: "#111214" },
+            style: { flex: 1, backgroundColor: t.bg },
             contentContainerStyle: { paddingTop: 8, paddingBottom: 40 }
         }, inner);
     }
-    return h(View, { style: { flex: 1, backgroundColor: "#111214", paddingTop: 8 } }, inner);
+    return h(View, { style: { flex: 1, backgroundColor: t.bg, paddingTop: 8 } }, inner);
 }
 
 function normalizePickedImage(ret) {
@@ -1982,6 +2063,7 @@ function CreateDecorationPage() {
     var Button = comps.Button || comps.LegacyButton;
     var TextInput = comps.TextInput;
     if (!React || !View) return null;
+    var t = themeColors();
     var assetState = React.useState(createDraft.asset);
     var altState = React.useState(createDraft.alt || "");
     var creatingState = React.useState(false);
@@ -2048,7 +2130,7 @@ function CreateDecorationPage() {
     }
     var body = [
         h(AvatarDecorationPreviews, { key: "preview", pendingAvatarDecoration: asset ? { asset: asset.uri, skuId: RAW_SKU_ID } : null }),
-        Text ? h(Text, { key: "hint", style: { color: "#949ba4", marginTop: 16, marginBottom: 12, lineHeight: 18 } }, "File must be a PNG or APNG.") : null,
+        Text ? h(Text, { key: "hint", style: { color: t.muted, marginTop: 16, marginBottom: 12, lineHeight: 18 } }, "File must be a PNG or APNG.") : null,
         Button ? h(View, { key: "pick", style: { marginBottom: 12 } }, h(Button, { text: asset ? (asset.fileName || "Image selected") : "Select Image", onPress: pick })) : null,
         TextInput ? h(View, { key: "name", style: { marginBottom: 16 } }, h(TextInput, {
             label: "Decoration Name",
@@ -2062,11 +2144,11 @@ function CreateDecorationPage() {
     var ScrollView = RN.ScrollView;
     if (ScrollView) {
         return h(ScrollView, {
-            style: { flex: 1, backgroundColor: "#111214" },
+            style: { flex: 1, backgroundColor: t.bg },
             contentContainerStyle: { padding: 16, paddingBottom: 40 }
         }, body);
     }
-    return h(View, { style: { padding: 16, backgroundColor: "#111214", flex: 1 } }, body);
+    return h(View, { style: { padding: 16, backgroundColor: t.bg, flex: 1 } }, body);
 }
 
 function EditProfileDecorBlock() {
@@ -2075,7 +2157,7 @@ function EditProfileDecorBlock() {
     var Text = RN.Text;
     if (!View) return h(DecorationPicker, null);
     return h(View, { __mimeDecor: true, style: { marginBottom: 16, paddingBottom: 8 } },
-        Text ? h(Text, { style: { color: "#dbdee1", fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingTop: 8 } }, "Avatar decoration") : null,
+        Text ? h(Text, { style: { color: themeColors().header, fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingTop: 8 } }, "Avatar decoration") : null,
         h(DecorationPicker, null)
     );
 }
@@ -2128,7 +2210,7 @@ function SettingsComponent() {
     if (Text) {
         children.push(h(Text, {
             key: "status",
-            style: { color: "#dbdee1", marginTop: 16, marginBottom: 8, paddingHorizontal: 12 }
+            style: { color: themeColors().text, marginTop: 16, marginBottom: 8, paddingHorizontal: 12 }
         }, authorized ? "Authorized with Decor." : "Authorize to equip decorations. Uses your Discord login."));
     }
     if (Button) {
@@ -2156,8 +2238,9 @@ function SettingsComponent() {
             onChangeText: function (v) { setToken(v); refresh(); }
         }));
     }
-    var inner = View ? h(View, { style: { paddingBottom: 40 } }, children) : children[0];
-    if (ScrollView) return h(ScrollView, { style: { flex: 1 } }, inner);
+    var t = themeColors();
+    var inner = View ? h(View, { style: { paddingBottom: 40, backgroundColor: t.bg } }, children) : children[0];
+    if (ScrollView) return h(ScrollView, { style: { flex: 1, backgroundColor: t.bg } }, inner);
     return inner;
 }
 
@@ -2177,6 +2260,7 @@ const plugin = definePlugin({
     handleFlux: handleFlux,
     decoImageUri: decoImageUri,
     discordAuthorizeUrl: discordAuthorizeUrl,
+    themeColors: themeColors,
     avatarPixelSize: avatarPixelSize,
     decoUrlFromAsset: decoUrlFromAsset,
     resolveAvatarSize: resolveAvatarSize,
