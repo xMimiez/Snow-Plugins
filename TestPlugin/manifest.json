@@ -1,0 +1,20 @@
+{
+  "spec": 3,
+  "type": "plugin",
+  "id": "mime.testplugin",
+  "version": "1.0.0",
+  "display": {
+    "name": "TestPlugin",
+    "description": "Tests whether Snow can load extra files besides index.ts. Run /testplugin.",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.ts",
+  "extras": {
+    "bunny": {}
+  }
+}
