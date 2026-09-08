@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.1.3
+  build: 1.1.4
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -671,7 +671,7 @@ function openReplyWindow(userId, statusHint) {
     }
     var user = getUser(userId) || { id: userId };
     var now = Date.now();
-    if (now - lastOpenAt < 600) return true;
+    if (now - lastOpenAt < 250) return true;
     lastOpenAt = now;
     overlay = { open: true, user: user, status: status, sending: false };
     notifyOverlay();
@@ -833,36 +833,34 @@ function OverlayHost() {
             };
         }, []);
     }
-    if (!overlay.open) return null;
+    if (!overlay.open) {
+        return h(View, { pointerEvents: "none", style: { width: 0, height: 0 } });
+    }
     var t = themeColors();
     var card = h(ReplySheet, { user: overlay.user, status: overlay.status });
     var Pressable = RN.Pressable || RN.TouchableOpacity || View;
-    var backdrop = h(Pressable, {
-        onPress: closeReplyWindow,
+    return h(View, {
+        pointerEvents: "auto",
         style: {
-            flex: 1,
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 99999,
+            elevation: 50,
             backgroundColor: "rgba(0,0,0,0.55)",
             justifyContent: "center",
             alignItems: "center",
             paddingHorizontal: 28
         }
-    }, h(Pressable, {
-        onPress: function (e) {
-            try { if (e && e.stopPropagation) e.stopPropagation(); } catch (_e) {}
-        },
-        style: { width: "100%", maxWidth: 360 }
-    }, card));
-    if (Modal) {
-        return h(Modal, {
-            visible: true,
-            animationType: "fade",
-            transparent: true,
-            onRequestClose: closeReplyWindow
-        }, backdrop);
-    }
-    return h(View, {
-        style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999 }
-    }, backdrop);
+    },
+        h(Pressable, {
+            onPress: closeReplyWindow,
+            style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }
+        }),
+        h(View, { style: { width: "100%", maxWidth: 360 }, pointerEvents: "auto" }, card)
+    );
 }
 
 function injectOverlay(el) {
@@ -1094,7 +1092,8 @@ function makeReplyButton(userId, status, extraStyle) {
     var icon = replyIconElement(t.text, 16);
     return h(Pressable, {
         onPress: fire,
-        hitSlop: 8,
+        onPressIn: fire,
+        hitSlop: 12,
         pointerEvents: "auto",
         accessibilityLabel: "Reply to Status",
         style: Object.assign({
@@ -1105,7 +1104,9 @@ function makeReplyButton(userId, status, extraStyle) {
             borderWidth: 1,
             borderColor: t.border,
             alignItems: "center",
-            justifyContent: "center"
+            justifyContent: "center",
+            zIndex: 9999,
+            elevation: 20
         }, extraStyle || {})
     }, icon);
 }
@@ -1140,14 +1141,14 @@ function pinButtonOver(children, userId, status) {
         position: "absolute",
         top: 152,
         right: 12,
-        zIndex: 80,
-        elevation: 12
+        zIndex: 9999,
+        elevation: 20
     });
     if (!btn) return children;
     return h(View, {
         pointerEvents: "box-none",
         style: { position: "relative" }
-    }, children, btn);
+    }, children, btn, h(OverlayHost, { key: "mime-rts-sheet-overlay" }));
 }
 
 function injectOnceInNamedScroll(node, userId, status, depth) {
@@ -1334,23 +1335,8 @@ function afterProfileRender(args, res) {
     profileDidRender = true;
     if (!res) return res;
     var status = statusFromProps(props) || (userId && customStatusForUser(userId));
-    if (userId && status && !shouldSkipUser(userId)) {
-        try { res = decorateProfileTree(res, userId, status); } catch (err) { logError("decorateProfile", err); }
-        if (!didPlaceButton) {
-            try { res = decorateTree(res, userId, status); } catch (err2) { logError("decorate", err2); }
-        }
-        if (!didPlaceButton) {
-            try {
-                var injected = injectOnceInNamedScroll(res, userId, status, 0);
-                if (injected && injected.did && injected.node) res = injected.node;
-            } catch (err3) { logError("injectScroll", err3); }
-        }
-        if (!didPlaceButton) {
-            try { res = forceInjectReply(res, userId, status); } catch (err4) { logError("forceInject", err4); }
-        }
-        if (!didPlaceButton) {
-            try { res = pinButtonOver(res, userId, status) || res; } catch (err5) { logError("pin", err5); }
-        }
+    if (userId && status && !shouldSkipUser(userId) && !didPlaceButton) {
+        try { res = pinButtonOver(res, userId, status) || res; } catch (err) { logError("pin", err); }
     }
     var Ctx = getProfileFlagContext();
     if (Ctx) res = h(Ctx.Provider, { value: true }, res) || res;
@@ -1416,12 +1402,16 @@ function inProfileSurface() {
 }
 
 function enterProfile(args) {
-    profileSheetOpen = true;
-    didPlaceButton = false;
-    profileDidRender = false;
-    lastProfileOpenAt = Date.now();
     var id = userIdFromProps(args && args[0]);
     if (!id && args && args[0] && args[0].user) id = args[0].user.id;
+    var switching = !!(id && profileUserId && String(id) !== String(profileUserId));
+    var fresh = !profileSheetOpen;
+    profileSheetOpen = true;
+    lastProfileOpenAt = Date.now();
+    if (fresh || switching) {
+        didPlaceButton = false;
+        profileDidRender = false;
+    }
     if (id) profileUserId = String(id);
 }
 
