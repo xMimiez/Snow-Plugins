@@ -8,7 +8,7 @@
   https://github.com/Equicord/Equicord/tree/main/src/plugins/decor
   https://github.com/decor-discord/vendetta-plugin
   https://codeberg.org/raincord/rain/src/commit/333142c78140586c458002bda0f502e7d4053fdf/src/plugins/decor
-  build: 1.1.4
+  build: 1.1.5
 */
 var unpatches = [];
 var _storage;
@@ -2102,6 +2102,135 @@ function pickImage(cb) {
     return false;
 }
 
+function altText(v) {
+    if (v == null) return "";
+    if (typeof v === "string") return v.trim();
+    if (typeof v === "number") return String(v);
+    if (typeof v === "object") {
+        if (typeof v.text === "string") return v.text.trim();
+        if (v.nativeEvent && typeof v.nativeEvent.text === "string") return v.nativeEvent.text.trim();
+    }
+    return "";
+}
+
+function withTimeout(promise, ms, msg) {
+    return new Promise(function (resolve, reject) {
+        var settled = false;
+        var timer = setTimeout(function () {
+            if (settled) return;
+            settled = true;
+            reject(new Error(msg || "timed out"));
+        }, ms);
+        Promise.resolve(promise).then(function (v) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(v);
+        }, function (err) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
+        });
+    });
+}
+
+function readFileBase64(uri) {
+    var RN = getRN() || {};
+    var NM = RN.NativeModules || {};
+    var fm = NM.DCDFileManager || NM.RTNFileManager || NM.FileManager;
+    if (!fm || typeof fm.readFile !== "function") return Promise.reject(new Error("no file reader"));
+    var path = String(uri || "");
+    if (path.indexOf("file://") === 0) path = path.slice(7);
+    try {
+        var result = fm.readFile(path, "base64");
+        if (result && typeof result.then === "function") return result;
+    } catch (_e) {}
+    return new Promise(function (resolve, reject) {
+        try {
+            fm.readFile(path, "base64", function (err, data) {
+                if (err) reject(err);
+                else resolve(data);
+            });
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+function xhrPutForm(url, form) {
+    return new Promise(function (resolve, reject) {
+        var XHR = typeof XMLHttpRequest !== "undefined" ? XMLHttpRequest
+            : (typeof globalThis !== "undefined" && globalThis.XMLHttpRequest);
+        if (!XHR) {
+            reject(new Error("no xhr"));
+            return;
+        }
+        var xhr = new XHR();
+        xhr.open("PUT", url);
+        xhr.setRequestHeader("Authorization", "Bearer " + getToken());
+        xhr.timeout = 60000;
+        xhr.onload = function () {
+            var status = xhr.status;
+            var text = String(xhr.responseText || "");
+            if (status === 401) {
+                setToken(null);
+                reject(new Error("unauthorized"));
+                return;
+            }
+            if (status >= 200 && status < 300) {
+                try { resolve(text ? JSON.parse(text) : {}); }
+                catch (_e) { resolve({}); }
+                return;
+            }
+            reject(new Error((text || ("http " + status)).slice(0, 180)));
+        };
+        xhr.onerror = function () { reject(new Error("network error")); };
+        xhr.ontimeout = function () { reject(new Error("upload timed out")); };
+        try { xhr.send(form); }
+        catch (e) { reject(e); }
+    });
+}
+
+function createDecorationUpload(asset, alt) {
+    var name = (asset && (asset.fileName || asset.name)) || "decoration.png";
+    var type = (asset && (asset.type || asset.mimeType)) || "image/png";
+    var uri = asset && asset.uri;
+    var altStr = altText(alt);
+    if (!uri) return Promise.reject(new Error("no image selected"));
+    if (!altStr) return Promise.reject(new Error("enter a decoration name"));
+    function sendUri(u) {
+        var form = new FormData();
+        form.append("image", { uri: u, type: type, name: name });
+        form.append("alt", altStr);
+        return xhrPutForm(API_URL + "/users/@me/decoration", form).catch(function () {
+            return authFetch("/users/@me/decoration", { method: "PUT", body: form }).then(function (r) {
+                if (!r) return {};
+                if (typeof r.text === "function") {
+                    return r.text().then(function (t) {
+                        t = String(t || "").trim();
+                        if (!t) return {};
+                        try { return JSON.parse(t); } catch (_e) { return {}; }
+                    });
+                }
+                if (typeof r.json === "function") return r.json();
+                return r;
+            });
+        });
+    }
+    var RN = getRN() || {};
+    var ios = RN.Platform && RN.Platform.OS === "ios";
+    if (ios && String(uri).indexOf("data:") !== 0) {
+        return withTimeout(readFileBase64(uri), 8000, "could not read image").then(function (b64) {
+            if (!b64) throw new Error("empty file");
+            return sendUri("data:" + type + ";base64," + b64);
+        }).catch(function () {
+            return sendUri(uri);
+        });
+    }
+    return sendUri(uri);
+}
+
 function openCreateDecoration() {
     var pending = myDecorations.some(function (d) { return d && d.reviewed === false; });
     if (pending) {
@@ -2157,45 +2286,34 @@ function CreateDecorationPage() {
         }, 400);
     }
     function submit() {
-        if (!asset || !alt || creating) return;
-        setCreating(true);
-        function send(uri) {
-            var form = new FormData();
-            form.append("image", { uri: uri, type: asset.type || "image/png", name: asset.fileName || "decoration.png" });
-            form.append("alt", alt);
-            return authFetch("/users/@me/decoration", { method: "PUT", body: form }).then(function (r) { return r.json ? r.json() : r; }).then(function (created) {
-                createDraft.asset = null;
-                createDraft.alt = "";
-                if (created && created.hash) {
-                    var exists = false;
-                    for (var i = 0; i < myDecorations.length; i++) {
-                        if (myDecorations[i] && myDecorations[i].hash === created.hash) exists = true;
-                    }
-                    if (!exists) myDecorations = myDecorations.concat([created]);
-                }
-                showToast("Decoration created and pending review");
-                refreshMine();
-                closeDecorScreen();
-                setTimeout(function () {
-                    if (!forceOpenSheet("Custom", CustomPage)) openCustomPage("Custom", CustomPage);
-                }, 200);
-            });
+        var name = altText(alt) || altText(createDraft.alt);
+        if (!asset || !name) {
+            showToast("Select a PNG and enter a name");
+            return;
         }
-        var uri = asset.uri;
-        var NM = RN.NativeModules || {};
-        var fm = NM.DCDFileManager || NM.RTNFileManager;
-        var path = uri;
-        if (path && path.indexOf("file://") === 0) path = path.slice(7);
-        var needB64 = RN.Platform && RN.Platform.OS === "ios" && fm && typeof fm.readFile === "function";
-        var job = needB64
-            ? Promise.resolve(fm.readFile(path, "base64")).then(function (b64) {
-                return send("data:" + (asset.type || "image/png") + ";base64," + b64);
-            })
-            : send(uri);
-        job.catch(function (err) {
-            logError("create", err);
-            showToast("Failed to create decoration");
+        if (creating) return;
+        setCreating(true);
+        createDecorationUpload(asset, name).then(function (created) {
+            createDraft.asset = null;
+            createDraft.alt = "";
+            if (created && created.hash) {
+                var exists = false;
+                for (var i = 0; i < myDecorations.length; i++) {
+                    if (myDecorations[i] && myDecorations[i].hash === created.hash) exists = true;
+                }
+                if (!exists) myDecorations = myDecorations.concat([created]);
+            }
             setCreating(false);
+            showToast("Decoration created and pending review");
+            refreshMine();
+            closeDecorScreen();
+            setTimeout(function () {
+                openDecorTab("Custom", CustomPage);
+            }, 200);
+        }).catch(function (err) {
+            logError("create", err);
+            setCreating(false);
+            showToast(String((err && err.message) || err || "Failed to create").slice(0, 140));
         });
     }
     var body = [
@@ -2330,6 +2448,7 @@ const plugin = definePlugin({
     handleFlux: handleFlux,
     decoImageUri: decoImageUri,
     discordAuthorizeUrl: discordAuthorizeUrl,
+    altText: altText,
     themeColors: themeColors,
     avatarPixelSize: avatarPixelSize,
     decoUrlFromAsset: decoUrlFromAsset,
