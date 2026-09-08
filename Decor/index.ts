@@ -1446,24 +1446,69 @@ function themeColors() {
     }
 }
 
-function closeDecorScreen() {
-    hideSheet();
-    var modals = findByProps("pushModal", "popModal") || findByProps("popModal") || findByProps("popAllModals");
-    var keys = ["mime-decor-screen", "create-decoration", "decor-presets"];
-    if (modals) {
-        if (typeof modals.popModal === "function") {
-            for (var i = 0; i < keys.length; i++) {
-                try { modals.popModal(keys[i]); } catch (_e) {}
-            }
-            try { modals.popModal(); } catch (_e2) {}
-        }
-        if (typeof modals.popAllModals === "function") {
-            try { modals.popAllModals(); } catch (_e3) {}
-        }
+var overlayTab = { title: null, Page: null };
+var overlayTabListeners = [];
+
+function notifyOverlayTab() {
+    for (var i = 0; i < overlayTabListeners.length; i++) {
+        try { overlayTabListeners[i](); } catch (_e) {}
     }
-    var nav = findByProps("pop", "push", "goBack");
-    try { if (nav && typeof nav.goBack === "function") nav.goBack(); } catch (_e4) {}
-    try { if (nav && typeof nav.pop === "function") nav.pop(); } catch (_e5) {}
+}
+
+function openDecorTab(title, Page) {
+    overlayTab = { title: title, Page: Page };
+    notifyOverlayTab();
+    return true;
+}
+
+function closeDecorScreen() {
+    overlayTab = { title: null, Page: null };
+    notifyOverlayTab();
+    hideSheet();
+}
+
+function DecorOverlayHost() {
+    var React = getReact();
+    var RN = getRN() || {};
+    var Modal = RN.Modal;
+    var View = RN.View;
+    if (!React || !View) return null;
+    var [, bump] = React.useState(0);
+    React.useEffect(function () {
+        function on() { bump(function (n) { return n + 1; }); }
+        overlayTabListeners.push(on);
+        return function () {
+            var i = overlayTabListeners.indexOf(on);
+            if (i >= 0) overlayTabListeners.splice(i, 1);
+        };
+    }, []);
+    if (!overlayTab.Page) return null;
+    var shell = h(DecorScreenShell, { title: overlayTab.title, page: overlayTab.Page });
+    var t = themeColors();
+    var sz = screenSize();
+    if (Modal) {
+        return h(Modal, {
+            visible: true,
+            animationType: "slide",
+            presentationStyle: "fullScreen",
+            transparent: false,
+            onRequestClose: closeDecorScreen
+        }, shell);
+    }
+    return h(View, {
+        style: {
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: sz.width,
+            height: sz.height,
+            zIndex: 9999,
+            elevation: 9999,
+            backgroundColor: t.bg
+        }
+    }, shell);
 }
 
 function DecorScreenShell(props) {
@@ -1520,19 +1565,7 @@ function DecorScreenShell(props) {
 }
 
 function forceOpenSheet(title, render) {
-    var React = getReact();
-    var Lazy = findByProps("openLazy", "hideActionSheet");
-    if (!React || !Lazy || typeof Lazy.openLazy !== "function") return false;
-    function Sheet() {
-        return h(DecorScreenShell, { title: title, page: render });
-    }
-    try {
-        Lazy.openLazy(Promise.resolve({ default: Sheet }), "ActionSheet");
-        return true;
-    } catch (err) {
-        logError("forceOpenSheet", err);
-        return false;
-    }
+    return openDecorTab(title, render);
 }
 
 function openCustomPage(title, render) {
@@ -1897,7 +1930,8 @@ function DecorationPicker(props) {
         h(AvatarDecorationPreviews, { pendingAvatarDecoration: selectedAvatar }),
         meta,
         titleRow,
-        list
+        list,
+        h(DecorOverlayHost, { key: "overlay-host" })
     );
 }
 
