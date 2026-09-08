@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.0.2
+  build: 1.0.3
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -967,11 +967,29 @@ function afterProfileRender(args, res) {
     return decorated;
 }
 
+function isEsClass(fn) {
+    if (typeof fn !== "function") return false;
+    try {
+        var src = Function.prototype.toString.call(fn);
+        if (/^\s*class[\s{]/.test(src)) return true;
+    } catch (_e) {}
+    return false;
+}
+
 function wrapExport(obj, key, afterFn) {
     var orig = obj[key];
     if (typeof orig !== "function") return null;
     if (orig.__mimeRtsWrapped) return null;
+    if (isEsClass(orig)) return null;
     function wrapped() {
+        var constructed = typeof new.target !== "undefined" && new.target;
+        if (constructed) {
+            try {
+                return Reflect.construct(orig, Array.prototype.slice.call(arguments), new.target);
+            } catch (_e) {
+                return orig.apply(this, arguments);
+            }
+        }
         var ret = orig.apply(this, arguments);
         try {
             var next = afterFn(arguments, ret);
@@ -982,13 +1000,13 @@ function wrapExport(obj, key, afterFn) {
         return ret;
     }
     wrapped.__mimeRtsWrapped = true;
-    try { Object.defineProperty(wrapped, "name", { value: orig.name }); } catch (_e) {}
+    try { Object.defineProperty(wrapped, "name", { value: orig.name }); } catch (_e2) {}
     wrapped.displayName = orig.displayName || orig.name;
     try {
         Object.keys(orig).forEach(function (k) {
-            try { wrapped[k] = orig[k]; } catch (_e2) {}
+            try { wrapped[k] = orig[k]; } catch (_e3) {}
         });
-    } catch (_e3) {}
+    } catch (_e4) {}
     obj[key] = wrapped;
     unpatches.push(function () {
         if (obj[key] === wrapped) obj[key] = orig;
@@ -1000,10 +1018,10 @@ function wrapComponentModule(mod, afterFn) {
     if (!mod) return false;
     if (typeof mod === "function") return false;
     var ok = false;
-    if (typeof mod.default === "function" && wrapExport(mod, "default", afterFn)) ok = true;
-    if (typeof mod.type === "function" && wrapExport(mod, "type", afterFn)) ok = true;
-    if (typeof mod.Z === "function" && wrapExport(mod, "Z", afterFn)) ok = true;
-    if (typeof mod.ZP === "function" && wrapExport(mod, "ZP", afterFn)) ok = true;
+    if (typeof mod.default === "function" && !isEsClass(mod.default) && wrapExport(mod, "default", afterFn)) ok = true;
+    if (typeof mod.type === "function" && !isEsClass(mod.type) && wrapExport(mod, "type", afterFn)) ok = true;
+    if (typeof mod.Z === "function" && !isEsClass(mod.Z) && wrapExport(mod, "Z", afterFn)) ok = true;
+    if (typeof mod.ZP === "function" && !isEsClass(mod.ZP) && wrapExport(mod, "ZP", afterFn)) ok = true;
     if (mod.prototype && typeof mod.prototype.render === "function" && wrapExport(mod.prototype, "render", afterFn)) ok = true;
     return ok;
 }
@@ -1065,6 +1083,7 @@ function patchProfileComponents() {
     var names = [
         "UserProfile",
         "UserProfileModal",
+        "UserProfileActionSheet",
         "UserProfileHeader",
         "UserProfileCard",
         "UserProfileInfo",
@@ -1072,7 +1091,6 @@ function patchProfileComponents() {
         "ProfileHeader",
         "ProfilePrimaryInfo",
         "UserProfileBannerInfo",
-        "DisplayProfile",
         "UserProfileSimplified"
     ];
     var total = 0;
@@ -1132,5 +1150,7 @@ const plugin = definePlugin({
     wrapWithReplyArrow: wrapWithReplyArrow,
     decorateTree: decorateTree,
     isSmallStatusNode: isSmallStatusNode,
+    isEsClass: isEsClass,
+    wrapComponentModule: wrapComponentModule,
     QUICK_REACTS: QUICK_REACTS
 });
