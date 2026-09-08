@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.0.4
+  build: 1.0.5
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -953,7 +953,7 @@ function wrapWithReplyArrow(el, userId, status) {
     function fire() {
         openReplyWindow(userId, status || customStatusForUser(userId));
     }
-    var icon = replyIconElement(t.header, 16);
+    var icon = replyIconElement("#ffffff", 16);
     var btn = h(Pressable, {
         onPress: fire,
         hitSlop: 8,
@@ -965,7 +965,7 @@ function wrapWithReplyArrow(el, userId, status) {
             width: 28,
             height: 28,
             borderRadius: 8,
-            backgroundColor: t.bgFloating,
+            backgroundColor: t.brand,
             alignItems: "center",
             justifyContent: "center",
             zIndex: 80,
@@ -982,6 +982,7 @@ function wrapWithReplyArrow(el, userId, status) {
 
 function findBestStatusNode(node, status, best, depth) {
     if (!node || typeof node !== "object" || depth > 16) return best;
+    if (node.__mimeRtsDecorated) return best;
     if (Array.isArray(node)) {
         for (var i = 0; i < node.length; i++) best = findBestStatusNode(node[i], status, best, depth + 1);
         return best;
@@ -993,6 +994,7 @@ function findBestStatusNode(node, status, best, depth) {
     } else if (ch && typeof ch === "object") {
         best = findBestStatusNode(ch, status, best, depth + 1);
     }
+    if (best && best.node) return best;
     if (!nodeHasStatus(node, status)) return best;
     var txt = collectText(node, [], 0).join(" ");
     var seed = status.text || status.emojiName || "";
@@ -1106,28 +1108,52 @@ function isEsClass(fn) {
     return false;
 }
 
-function wrapExport(obj, key, afterFn) {
+var profileRenderDepth = 0;
+var profileUserId = null;
+
+function enterProfile(args) {
+    profileRenderDepth++;
+    var id = userIdFromProps(args && args[0]);
+    if (!id && args && args[0] && args[0].user) id = args[0].user.id;
+    if (id) profileUserId = String(id);
+}
+
+function leaveProfile() {
+    profileRenderDepth--;
+    if (profileRenderDepth < 0) profileRenderDepth = 0;
+    if (profileRenderDepth === 0) profileUserId = null;
+}
+
+function wrapExport(obj, key, afterFn, opts) {
+    opts = opts || {};
     var orig = obj[key];
     if (typeof orig !== "function") return null;
     if (orig.__mimeRtsWrapped) return null;
     if (isEsClass(orig)) return null;
     function wrapped() {
         var constructed = typeof new.target !== "undefined" && new.target;
-        if (constructed) {
-            try {
-                return Reflect.construct(orig, Array.prototype.slice.call(arguments), new.target);
-            } catch (_e) {
-                return orig.apply(this, arguments);
-            }
-        }
-        var ret = orig.apply(this, arguments);
+        if (opts.gateProfile) enterProfile(arguments);
         try {
-            var next = afterFn(arguments, ret);
-            if (next !== undefined) ret = next;
-        } catch (err) {
-            logError("wrap", key, err);
+            if (constructed) {
+                try {
+                    return Reflect.construct(orig, Array.prototype.slice.call(arguments), new.target);
+                } catch (_e) {
+                    return orig.apply(this, arguments);
+                }
+            }
+            var ret = orig.apply(this, arguments);
+            if (typeof afterFn === "function") {
+                try {
+                    var next = afterFn(arguments, ret);
+                    if (next !== undefined) ret = next;
+                } catch (err) {
+                    logError("wrap", key, err);
+                }
+            }
+            return ret;
+        } finally {
+            if (opts.gateProfile) leaveProfile();
         }
-        return ret;
     }
     wrapped.__mimeRtsWrapped = true;
     try { Object.defineProperty(wrapped, "name", { value: orig.name }); } catch (_e2) {}
@@ -1144,53 +1170,92 @@ function wrapExport(obj, key, afterFn) {
     return true;
 }
 
-function wrapComponentModule(mod, afterFn) {
+function tryWrapKey(obj, key, afterFn, opts) {
+    if (!obj || typeof obj[key] !== "function") return false;
+    if (isEsClass(obj[key])) return false;
+    return !!wrapExport(obj, key, afterFn, opts);
+}
+
+function wrapComponentModule(mod, afterFn, opts) {
     if (!mod) return false;
     if (typeof mod === "function") return false;
     var ok = false;
-    if (typeof mod.default === "function" && !isEsClass(mod.default) && wrapExport(mod, "default", afterFn)) ok = true;
-    if (typeof mod.type === "function" && !isEsClass(mod.type) && wrapExport(mod, "type", afterFn)) ok = true;
-    if (typeof mod.Z === "function" && !isEsClass(mod.Z) && wrapExport(mod, "Z", afterFn)) ok = true;
-    if (typeof mod.ZP === "function" && !isEsClass(mod.ZP) && wrapExport(mod, "ZP", afterFn)) ok = true;
-    if (mod.prototype && typeof mod.prototype.render === "function" && wrapExport(mod.prototype, "render", afterFn)) ok = true;
+    if (tryWrapKey(mod, "default", afterFn, opts)) ok = true;
+    if (tryWrapKey(mod, "type", afterFn, opts)) ok = true;
+    if (tryWrapKey(mod, "Z", afterFn, opts)) ok = true;
+    if (tryWrapKey(mod, "ZP", afterFn, opts)) ok = true;
+    if (mod.default && typeof mod.default === "object") {
+        if (tryWrapKey(mod.default, "type", afterFn, opts)) ok = true;
+        if (tryWrapKey(mod.default, "render", afterFn, opts)) ok = true;
+    }
+    if (mod.type && typeof mod.type === "object") {
+        if (tryWrapKey(mod.type, "type", afterFn, opts)) ok = true;
+    }
+    if (mod.prototype && tryWrapKey(mod.prototype, "render", afterFn, opts)) ok = true;
     return ok;
 }
 
-function patchNamedComponent(name, afterFn) {
+function findModuleByName(name) {
     var roots = metroRoots();
     var i;
     for (i = 0; i < roots.length; i++) {
         var r = roots[i];
-        var raw = null;
-        try { if (r.findByName) raw = r.findByName(name, false); } catch (_e) {}
-        if (raw && wrapComponentModule(raw, afterFn)) {
+        if (typeof r.find === "function") {
+            try {
+                var found = r.find(function (exp) {
+                    if (!exp) return false;
+                    function hit(fn) {
+                        return fn && (fn.name === name || fn.displayName === name);
+                    }
+                    return hit(exp)
+                        || hit(exp.default)
+                        || hit(exp.Z)
+                        || hit(exp.ZP)
+                        || hit(exp.type)
+                        || (exp.default && hit(exp.default.type));
+                });
+                if (found) return found;
+            } catch (_e) {}
+        }
+    }
+    return findByName(name, false) || findByDisplayName(name, false) || findByTypeName(name, false);
+}
+
+function patchNamedComponent(name, afterFn, opts) {
+    var raw = findModuleByName(name);
+    if (raw && wrapComponentModule(raw, afterFn, opts)) {
+        log("patched", name);
+        return true;
+    }
+    var roots = metroRoots();
+    var i;
+    for (i = 0; i < roots.length; i++) {
+        var r = roots[i];
+        try { if (r.findByName) raw = r.findByName(name, false); } catch (_e) { raw = null; }
+        if (raw && wrapComponentModule(raw, afterFn, opts)) {
             log("patched", name);
             return true;
         }
-        try { if (r.findByDisplayName) raw = r.findByDisplayName(name, false); } catch (_e2) {}
-        if (raw && wrapComponentModule(raw, afterFn)) {
+        try { if (r.findByDisplayName) raw = r.findByDisplayName(name, false); } catch (_e2) { raw = null; }
+        if (raw && wrapComponentModule(raw, afterFn, opts)) {
             log("patched display", name);
             return true;
         }
-        try { if (r.findByTypeName) raw = r.findByTypeName(name, false); } catch (_e3) {}
-        if (raw && wrapComponentModule(raw, afterFn)) {
+        try { if (r.findByTypeName) raw = r.findByTypeName(name, false); } catch (_e3) { raw = null; }
+        if (raw && wrapComponentModule(raw, afterFn, opts)) {
             log("patched type", name);
             return true;
         }
-    }
-    var named = findByName(name, false) || findByDisplayName(name, false) || findByTypeName(name, false);
-    if (named && wrapComponentModule(named, afterFn)) {
-        log("patched fallback", name);
-        return true;
     }
     return false;
 }
 
 var overlayAnchored = false;
 
-function afterProfileStatusRender(args, res) {
+function afterStatusRender(args, res) {
+    if (profileRenderDepth <= 0) return res;
     var props = args && args[0];
-    var userId = userIdFromProps(props);
+    var userId = userIdFromProps(props) || profileUserId;
     if (!userId) return res;
     if (shouldSkipUser(userId)) return res;
     var status = statusFromProps(props) || customStatusForUser(userId);
@@ -1200,6 +1265,11 @@ function afterProfileStatusRender(args, res) {
 
 function patchStatusComponents() {
     var names = [
+        "CustomStatus",
+        "UserStatus",
+        "ActivityStatus",
+        "StatusEmojiAndText",
+        "CustomStatusText",
         "UserProfileCustomStatus",
         "ProfileCustomStatus",
         "ProfileCustomStatusSection",
@@ -1208,7 +1278,7 @@ function patchStatusComponents() {
     ];
     var total = 0;
     for (var i = 0; i < names.length; i++) {
-        if (patchNamedComponent(names[i], afterProfileStatusRender)) total++;
+        if (patchNamedComponent(names[i], afterStatusRender)) total++;
     }
     log("status component patches", total);
     return total;
@@ -1216,9 +1286,9 @@ function patchStatusComponents() {
 
 function patchProfileComponents() {
     var names = [
+        "UserProfileActionSheet",
         "UserProfile",
         "UserProfileModal",
-        "UserProfileActionSheet",
         "UserProfileHeader",
         "UserProfileCard",
         "UserProfileInfo",
@@ -1227,12 +1297,48 @@ function patchProfileComponents() {
         "ProfilePrimaryInfo",
         "UserProfileBannerInfo"
     ];
+    var opts = { gateProfile: true };
     var total = 0;
     for (var i = 0; i < names.length; i++) {
-        if (patchNamedComponent(names[i], afterProfileRender)) total++;
+        if (patchNamedComponent(names[i], afterProfileRender, opts)) total++;
     }
     log("profile patches", total);
     return total;
+}
+
+function isProfileSheetKey(key) {
+    if (!key) return false;
+    var s = String(key);
+    return /UserProfile/i.test(s) && !/Edit|Settings|Preview/i.test(s);
+}
+
+function patchOpenLazy() {
+    var sheet = findByProps("openLazy", "hideActionSheet") || findByProps("openLazy");
+    if (!sheet || typeof sheet.openLazy !== "function" || sheet.openLazy.__mimeRtsWrapped) return false;
+    var orig = sheet.openLazy;
+    sheet.openLazy = function (factory, key, props) {
+        if (isProfileSheetKey(key) && typeof factory === "function") {
+            var origFactory = factory;
+            arguments[0] = function () {
+                var out = origFactory.apply(this, arguments);
+                function wrapMod(mod) {
+                    var target = mod;
+                    if (mod && !mod.default && typeof mod === "function") target = { default: mod };
+                    wrapComponentModule(target, afterProfileRender, { gateProfile: true });
+                    return mod;
+                }
+                if (out && typeof out.then === "function") return out.then(wrapMod);
+                return wrapMod(out);
+            };
+        }
+        return orig.apply(this, arguments);
+    };
+    sheet.openLazy.__mimeRtsWrapped = true;
+    unpatches.push(function () {
+        if (sheet.openLazy.__mimeRtsWrapped) sheet.openLazy = orig;
+    });
+    log("patched openLazy");
+    return true;
 }
 
 function patchOverlayAnchor() {
@@ -1251,8 +1357,11 @@ function patchOverlayAnchor() {
 
 function start() {
     overlayAnchored = false;
+    profileRenderDepth = 0;
+    profileUserId = null;
     patchStatusComponents();
     patchProfileComponents();
+    patchOpenLazy();
     patchOverlayAnchor();
     log("started");
 }
@@ -1287,5 +1396,8 @@ const plugin = definePlugin({
     isEsClass: isEsClass,
     wrapComponentModule: wrapComponentModule,
     replyIconElement: replyIconElement,
+    afterStatusRender: afterStatusRender,
+    enterProfile: enterProfile,
+    leaveProfile: leaveProfile,
     QUICK_REACTS: QUICK_REACTS
 });
