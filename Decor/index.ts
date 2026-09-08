@@ -375,53 +375,92 @@ function showToast(message) {
     log("toast", message);
 }
 
+function hideSheet() {
+    var Lazy = findByProps("hideActionSheet", "openLazy");
+    try { if (Lazy && Lazy.hideActionSheet) Lazy.hideActionSheet(); } catch (_e) {}
+}
+
+function getWebView() {
+    var named = findByName("WebView");
+    if (named) return named;
+    var mod = findByProps("WebView");
+    if (!mod) return null;
+    if (typeof mod.WebView === "function") return mod.WebView;
+    if (mod.default && typeof mod.default === "function") return mod.default;
+    return null;
+}
+
+function discordAuthorizeUrl() {
+    return "https://discord.com/api/oauth2/authorize"
+        + "?client_id=" + encodeURIComponent(CLIENT_ID)
+        + "&redirect_uri=" + encodeURIComponent(AUTHORIZE_URL)
+        + "&response_type=code&scope=identify";
+}
+
+function finishAuthFromRedirect(location) {
+    var url = String(location || "");
+    if (!url || url.indexOf(AUTHORIZE_URL) !== 0) return false;
+    if (url.indexOf("code=") < 0 && url.indexOf("error=") < 0) return false;
+    if (url.indexOf("client=") < 0) url += (url.indexOf("?") >= 0 ? "&" : "?") + "client=snow";
+    doFetch(url).then(function (r) { return r.text(); }).then(function (token) {
+        token = String(token || "").trim();
+        if (!token || token.length < 8) throw new Error("empty token");
+        setToken(token);
+        hideSheet();
+        showToast("Decor authorized");
+        refreshMine();
+        log("authorized");
+    }).catch(function (err) {
+        logError("authorize", err);
+        showToast("Decor authorize failed");
+    });
+    return true;
+}
+
 function authorize() {
-    var OAuth = findByName("OAuth2AuthorizeModal");
-    var modals = findByProps("pushModal", "popModal");
     var React = getReact();
-    if (!OAuth || !modals || !React) {
-        showToast("OAuth2AuthorizeModal not found");
+    var Lazy = findByProps("openLazy", "hideActionSheet");
+    var WebView = getWebView();
+    var uri = discordAuthorizeUrl();
+    if (React && Lazy && typeof Lazy.openLazy === "function" && WebView) {
+        var handled = false;
+        function AuthSheet() {
+            return React.createElement(WebView, {
+                source: { uri: uri },
+                originWhitelist: ["*"],
+                style: { height: 520, width: "100%" },
+                onNavigationStateChange: function (nav) {
+                    if (handled || !nav || !nav.url) return;
+                    if (finishAuthFromRedirect(nav.url)) handled = true;
+                },
+                onShouldStartLoadWithRequest: function (req) {
+                    var u = req && req.url;
+                    if (u && u.indexOf(AUTHORIZE_URL) === 0) {
+                        if (!handled) {
+                            handled = true;
+                            finishAuthFromRedirect(u);
+                        }
+                        return false;
+                    }
+                    return true;
+                }
+            });
+        }
+        try {
+            Lazy.openLazy(Promise.resolve({ default: AuthSheet }), "ActionSheet");
+            log("opened WebView authorize");
+            return;
+        } catch (err) {
+            logError("openLazy authorize", err);
+        }
+    }
+    var Linking = findByProps("openURL", "openDeeplink") || findByProps("openURL");
+    if (Linking && typeof Linking.openURL === "function") {
+        try { Linking.openURL(uri); } catch (_e2) {}
+        showToast("Finish login, then paste the Decor token in settings");
         return;
     }
-    try {
-        modals.pushModal({
-            key: "oauth2-authorize",
-            modal: {
-                key: "oauth2-authorize",
-                modal: OAuth,
-                animation: "slide-up",
-                shouldPersistUnderModals: false,
-                props: {
-                    clientId: CLIENT_ID,
-                    redirectUri: AUTHORIZE_URL,
-                    scopes: ["identify"],
-                    responseType: "code",
-                    permissions: 0,
-                    cancelCompletesFlow: false,
-                    callback: function (data) {
-                        try {
-                            var location = data && data.location;
-                            if (!location) return;
-                            var url = String(location);
-                            url += (url.indexOf("?") >= 0 ? "&" : "?") + "client=snow";
-                            doFetch(url).then(function (r) { return r.text(); }).then(function (token) {
-                                setToken(String(token).trim());
-                                showToast("Decor authorized");
-                                refreshMine();
-                            }).catch(function (err) { logError("authorize", err); });
-                        } catch (err) {
-                            logError("oauth callback", err);
-                        }
-                    },
-                    dismissOAuthModal: function () { try { modals.popModal("oauth2-authorize"); } catch (_e) {} }
-                },
-                closable: true
-            }
-        });
-    } catch (err) {
-        logError("pushModal", err);
-        showToast("Could not open Decor authorize");
-    }
+    showToast("No WebView — paste a Decor token in settings");
 }
 
 function refreshMine() {
@@ -496,6 +535,16 @@ function SettingsComponent() {
     function refresh() { bump(function (n) { return n + 1; }); }
     var children = [];
     var authorized = !!getToken();
+    var TextInput = comps.TextInput;
+    if (TextInput) {
+        children.push(React.createElement(TextInput, {
+            key: "paste",
+            label: "Decor token (paste if WebView cannot finish)",
+            value: getToken() || "",
+            onChange: function (v) { setToken(v); refresh(); },
+            onChangeText: function (v) { setToken(v); refresh(); }
+        }));
+    }
     if (Button) {
         children.push(React.createElement(Button, {
             key: "auth",
