@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.0.9
+  build: 1.1.1
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -986,14 +986,45 @@ function getTypeName(type) {
 
 function isStatusTypeName(name) {
     if (!name) return false;
-    if (/MemberList|GuildMember|NameTag|ListItem/i.test(name)) return false;
-    return /CustomStatus|UserProfileStatus|ActivityStatus|StatusEmoji|StatusText|StatusCard|ProfileCustomStatus/i.test(name);
+    if (/MemberList|GuildMember|NameTag|ListItem|UserList/i.test(name)) return false;
+    return /UserProfileCustomStatus|ProfileCustomStatus|UserProfileStatus|^CustomStatus$/i.test(name);
+}
+
+function isMemberListContext(props, type) {
+    var name = getTypeName(type);
+    if (/MemberList|GuildMember|NameTag|UserList|ListItem/i.test(name)) return true;
+    if (!props) return false;
+    if (props.guildId || props.guild) return true;
+    if (props.listType || props.compact === true) return true;
+    return false;
+}
+
+function isIgnorableCreatedType(type, name) {
+    if (type === "Text" || type === "Image" || type === "RCTText" || type === "RCTImage") return true;
+    if (!name) return false;
+    if (/^(Text|Image|RCTText|RCTImage)$/.test(name)) return true;
+    if (/Icon$|Emoji$/i.test(name) && !/CustomStatus/i.test(name)) return true;
+    return false;
+}
+
+function looksLikeChipStyle(style) {
+    if (styleHasRadius(style)) return true;
+    if (style == null) return false;
+    if (typeof style === "number") return true;
+    if (Array.isArray(style)) {
+        for (var i = 0; i < style.length; i++) if (looksLikeChipStyle(style[i])) return true;
+        return false;
+    }
+    if (typeof style !== "object") return false;
+    if (style.flexDirection === "row" && (style.alignItems === "center" || style.paddingHorizontal > 0 || style.paddingLeft > 0 || style.overflow === "hidden")) return true;
+    return false;
 }
 
 function makeOutputWrapper(Inner, userId, status) {
     if (typeof Inner === "function" && Inner.__mimeRtsStatusWrap) return Inner;
     function MimeRtsWrap(props) {
         var el = h(Inner, props);
+        if (!inProfileSurface()) return el;
         return wrapWithReplyArrow(el, userId, status);
     }
     MimeRtsWrap.__mimeRtsStatusWrap = true;
@@ -1029,12 +1060,13 @@ function decorateProfileTree(node, userId, status) {
     var nextChildren = decorateProfileTree(props.children, userId, status);
     var type = node.type;
     var name = getTypeName(type);
-    var asStatusComp = (typeof type === "function" || (type && typeof type === "object"))
-        && (isStatusTypeName(name) || !!statusFromProps(props));
+    var asStatusComp = !didPlaceButton
+        && (typeof type === "function" || (type && typeof type === "object"))
+        && isStatusTypeName(name);
     if (asStatusComp && /UserProfileActionSheet|UserProfileModal|^UserProfile$|UserProfileHeader/i.test(name)) {
         asStatusComp = false;
     }
-    var asChip = !asStatusComp && looksLikeStatusChip(node, status);
+    var asChip = !asStatusComp && !didPlaceButton && looksLikeStatusChip(node, status);
     if (!asStatusComp && !asChip && nextChildren === props.children) return node;
     var nextType = asStatusComp ? makeOutputWrapper(type, userId, status) : type;
     var merged = Object.assign({}, props);
@@ -1046,9 +1078,11 @@ function decorateProfileTree(node, userId, status) {
 }
 
 function makeReplyButton(userId, status, extraStyle) {
+    if (didPlaceButton) return null;
     var RN = getRN() || {};
     var Pressable = RN.Pressable || RN.TouchableOpacity || RN.TouchableHighlight;
     if (!Pressable) return null;
+    didPlaceButton = true;
     var t = themeColors();
     function fire(e) {
         try {
@@ -1277,6 +1311,15 @@ function afterProfileRender(args, res) {
     if (!userId && props && props.user) userId = props.user.id || props.user.userId;
     if (userId && !shouldSkipUser(userId)) enterProfile([{ userId: userId, user: props && props.user }]);
     if (!res) return res;
+    var status = statusFromProps(props) || (userId && customStatusForUser(userId));
+    if (userId && status && !shouldSkipUser(userId)) {
+        try { res = decorateProfileTree(res, userId, status); } catch (err) { logError("decorateProfile", err); }
+        if (!didPlaceButton) {
+            try { res = decorateTree(res, userId, status); } catch (err2) { logError("decorate", err2); }
+        }
+    }
+    var Ctx = getProfileFlagContext();
+    if (Ctx) res = h(Ctx.Provider, { value: true }, res) || res;
     if (!overlayAnchored) res = injectOverlay(res);
     return res;
 }
@@ -1292,9 +1335,53 @@ function isEsClass(fn) {
 
 var profileSheetOpen = false;
 var profileUserId = null;
+var didPlaceButton = false;
+var ProfileFlagContext = null;
+
+function getProfileFlagContext() {
+    if (ProfileFlagContext) return ProfileFlagContext;
+    var React = getReact();
+    if (!React || typeof React.createContext !== "function") return null;
+    try { ProfileFlagContext = React.createContext(false); } catch (_e) { return null; }
+    return ProfileFlagContext;
+}
+
+function ownerLooksLikeProfile() {
+    try {
+        var React = getReact();
+        var internals = React && (
+            React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
+            || React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE
+        );
+        if (!internals) return false;
+        var owner = (internals.ReactCurrentOwner && internals.ReactCurrentOwner.current)
+            || internals.A
+            || null;
+        var n = 0;
+        while (owner && n < 28) {
+            var tn = getTypeName(owner.type || owner.elementType || owner);
+            if (/MemberList|GuildMember/i.test(tn)) return false;
+            if (/UserProfile|ProfileActionSheet|MimeProfileGate|MimeRtsWrap/i.test(tn) && !/Edit|Settings|Preview/i.test(tn)) return true;
+            owner = owner.return || owner._debugOwner || owner._debugStack || null;
+            n++;
+        }
+    } catch (_e) {}
+    return false;
+}
+
+function isInsideProfileTree() {
+    var ctx = ProfileFlagContext;
+    if (ctx && (ctx._currentValue === true || ctx._currentValue2 === true)) return true;
+    return ownerLooksLikeProfile();
+}
+
+function inProfileSurface() {
+    return isInsideProfileTree() || !!profileSheetOpen;
+}
 
 function enterProfile(args) {
     profileSheetOpen = true;
+    didPlaceButton = false;
     var id = userIdFromProps(args && args[0]);
     if (!id && args && args[0] && args[0].user) id = args[0].user.id;
     if (id) profileUserId = String(id);
@@ -1303,6 +1390,7 @@ function enterProfile(args) {
 function leaveProfile() {
     profileSheetOpen = false;
     profileUserId = null;
+    didPlaceButton = false;
 }
 
 function wrapExport(obj, key, afterFn, opts) {
@@ -1429,9 +1517,82 @@ function patchNamedComponent(name, afterFn, opts) {
 
 var overlayAnchored = false;
 
+function shouldAttachToCreated(type, props, el, status) {
+    if (!el || !status) return false;
+    if (el.__mimeRtsDecorated) return false;
+    if (props && props.accessibilityLabel === "Reply to Status") return false;
+    var name = getTypeName(type);
+    if (isIgnorableCreatedType(type, name)) return false;
+    if (isMemberListContext(props, type)) return false;
+    if (isStatusTypeName(name) && !/^CustomStatus$/i.test(name)) return true;
+    if (!isSmallStatusNode(el, status)) return false;
+    if (looksLikeChipStyle(props && props.style)) return true;
+    if (typeof type === "string" && /Pressable|TouchableOpacity|TouchableHighlight/.test(type)) return true;
+    if (/Pressable|TouchableOpacity|TouchableHighlight/.test(name)) return true;
+    if (type === "View" || name === "View" || name === "RCTView") {
+        var txt = collectText(el, [], 0).join(" ");
+        var seed = status.text || status.emojiName || "";
+        if (!seed) return false;
+        if (txt.replace(/^\s+|\s+$/g, "") === seed) return true;
+        if (txt.indexOf(seed) >= 0 && txt.length <= seed.length + 8) return true;
+    }
+    return false;
+}
+
+function maybeDecorateCreated(type, el) {
+    if (!el || !profileSheetOpen || didPlaceButton) return el;
+    if (!isInsideProfileTree()) return el;
+    var props = el.props || {};
+    if (isMemberListContext(props, type)) return el;
+    var userId = userIdFromProps(props) || profileUserId;
+    if (!userId || shouldSkipUser(userId)) return el;
+    var status = statusFromProps(props) || customStatusForUser(userId);
+    if (!status) return el;
+    if (!shouldAttachToCreated(type, props, el, status)) return el;
+    return wrapWithReplyArrow(el, userId, status);
+}
+
+function wrapElementFactory(obj, key) {
+    if (!obj || typeof obj[key] !== "function") return false;
+    var orig = obj[key];
+    if (orig.__mimeRtsEl) return false;
+    function wrapped(type) {
+        var el = orig.apply(this, arguments);
+        try {
+            var next = maybeDecorateCreated(type, el);
+            if (next !== undefined) el = next;
+        } catch (err) {
+            logError("createElement", err);
+        }
+        return el;
+    }
+    wrapped.__mimeRtsEl = true;
+    try { obj[key] = wrapped; } catch (_e) { return false; }
+    unpatches.push(function () {
+        if (obj[key] === wrapped) obj[key] = orig;
+    });
+    return true;
+}
+
+function patchElementFactories() {
+    var React = getReact();
+    var n = 0;
+    if (React && wrapElementFactory(React, "createElement")) n++;
+    var jsx = findByProps("jsx", "jsxs") || findByProps("jsx");
+    if (jsx) {
+        if (wrapElementFactory(jsx, "jsx")) n++;
+        if (wrapElementFactory(jsx, "jsxs")) n++;
+        if (wrapElementFactory(jsx, "jsxDEV")) n++;
+    }
+    log("element factory patches", n);
+    return n;
+}
+
 function afterStatusRender(args, res) {
     if (!profileSheetOpen) return res;
     var props = args && args[0];
+    if (isMemberListContext(props)) return res;
+    if (!isInsideProfileTree()) return res;
     var userId = userIdFromProps(props) || profileUserId;
     if (!userId) return res;
     if (shouldSkipUser(userId)) return res;
@@ -1577,6 +1738,9 @@ function start() {
     overlayAnchored = false;
     profileSheetOpen = false;
     profileUserId = null;
+    didPlaceButton = false;
+    getProfileFlagContext();
+    patchElementFactories();
     patchStatusComponents();
     patchProfileComponents();
     patchActionSheetOpen();
@@ -1617,8 +1781,13 @@ const plugin = definePlugin({
     wrapComponentModule: wrapComponentModule,
     replyIconElement: replyIconElement,
     afterStatusRender: afterStatusRender,
+    afterProfileRender: afterProfileRender,
     enterProfile: enterProfile,
     leaveProfile: leaveProfile,
+    getProfileFlagContext: getProfileFlagContext,
+    isInsideProfileTree: isInsideProfileTree,
+    isMemberListContext: isMemberListContext,
+    maybeDecorateCreated: maybeDecorateCreated,
     userIdFromProfileKey: userIdFromProfileKey,
     isProfileSheetKey: isProfileSheetKey,
     QUICK_REACTS: QUICK_REACTS
