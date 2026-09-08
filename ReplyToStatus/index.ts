@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.0.3
+  build: 1.0.4
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -881,88 +881,218 @@ function isSmallStatusNode(node, status) {
     return true;
 }
 
+function styleHasRadius(style) {
+    if (!style) return false;
+    if (Array.isArray(style)) {
+        for (var i = 0; i < style.length; i++) if (styleHasRadius(style[i])) return true;
+        return false;
+    }
+    if (typeof style !== "object") return false;
+    return style.borderRadius > 0
+        || style.borderTopLeftRadius > 0
+        || style.borderTopRightRadius > 0;
+}
+
+function replyIconElement(color, size) {
+    size = size || 16;
+    color = color || "#fff";
+    var iconNames = [
+        "ArrowAngleLeftUpIcon",
+        "ArrowAngleLeftUp",
+        "ReplyIcon",
+        "ChatReplyIcon",
+        "ArrowBendUpLeftIcon"
+    ];
+    var i;
+    for (i = 0; i < iconNames.length; i++) {
+        var Comp = findByName(iconNames[i]) || findByDisplayName(iconNames[i]) || findByTypeName(iconNames[i]);
+        if (typeof Comp === "function" && !isEsClass(Comp)) {
+            return h(Comp, { size: size, color: color, colorPrimary: color });
+        }
+        var mod = findByName(iconNames[i], false) || findByDisplayName(iconNames[i], false);
+        if (mod && typeof mod.default === "function" && !isEsClass(mod.default)) {
+            return h(mod.default, { size: size, color: color, colorPrimary: color });
+        }
+        var byProps = findByProps(iconNames[i]);
+        if (byProps && typeof byProps[iconNames[i]] === "function") {
+            return h(byProps[iconNames[i]], { size: size, color: color, colorPrimary: color });
+        }
+    }
+    var assetMod = findByProps("getAssetByName") || findByProps("registerAsset", "getAssetByName");
+    var getAsset = assetMod && assetMod.getAssetByName;
+    var Icon = findByName("Icon") || (findByProps("Icon") && findByProps("Icon").Icon);
+    var Image = (getRN() || {}).Image;
+    var assetNames = [
+        "ic_reply_24px",
+        "ic_reply",
+        "reply",
+        "ic_arrow_angle_left_up_24px",
+        "ArrowAngleLeftUp",
+        "ic_message_reply"
+    ];
+    if (typeof getAsset === "function") {
+        for (i = 0; i < assetNames.length; i++) {
+            var src = null;
+            try { src = getAsset(assetNames[i]); } catch (_e) {}
+            if (src == null) continue;
+            if (typeof Icon === "function") return h(Icon, { source: src, size: size, color: color });
+            if (Image) return h(Image, { source: src, style: { width: size, height: size }, tintColor: color });
+        }
+    }
+    var Text = (getRN() || {}).Text;
+    return Text ? h(Text, { style: { color: color, fontSize: size, fontWeight: "700" } }, "\u21A9") : null;
+}
+
 function wrapWithReplyArrow(el, userId, status) {
     if (!el || el.__mimeRtsDecorated) return el;
     var RN = getRN() || {};
     var View = RN.View;
-    var Text = RN.Text;
     var Pressable = RN.Pressable || RN.TouchableOpacity || RN.TouchableHighlight;
     if (!View || !Pressable) return el;
     var t = themeColors();
     function fire() {
         openReplyWindow(userId, status || customStatusForUser(userId));
     }
+    var icon = replyIconElement(t.header, 16);
     var btn = h(Pressable, {
         onPress: fire,
-        hitSlop: 10,
+        hitSlop: 8,
         accessibilityLabel: "Reply to Status",
         style: {
             position: "absolute",
             top: 4,
             right: 4,
-            width: 24,
-            height: 24,
-            borderRadius: 12,
-            backgroundColor: t.brand,
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            backgroundColor: t.bgFloating,
             alignItems: "center",
             justifyContent: "center",
             zIndex: 80,
             elevation: 8
         }
-    }, h(Text, { style: { color: "#fff", fontSize: 13, fontWeight: "700", marginTop: -1 } }, "\u21A9"));
+    }, icon);
     var wrapped = h(View, {
         pointerEvents: "box-none",
-        style: { position: "relative", overflow: "visible", alignSelf: "flex-start" }
+        style: { position: "relative", overflow: "visible", alignSelf: "stretch" }
     }, el, btn);
     if (wrapped) wrapped.__mimeRtsDecorated = true;
     return wrapped || el;
 }
 
-function decorateTree(node, userId, status) {
-    if (!node || typeof node !== "object") return node;
-    if (node.__mimeRtsDecorated) return node;
+function findBestStatusNode(node, status, best, depth) {
+    if (!node || typeof node !== "object" || depth > 16) return best;
     if (Array.isArray(node)) {
-        for (var i = 0; i < node.length; i++) node[i] = decorateTree(node[i], userId, status);
-        return node;
+        for (var i = 0; i < node.length; i++) best = findBestStatusNode(node[i], status, best, depth + 1);
+        return best;
     }
-    if (!node.props) return node;
+    if (!node.props) return best;
     var ch = node.props.children;
-    var childWrapped = false;
     if (Array.isArray(ch)) {
-        for (var j = 0; j < ch.length; j++) {
-            var next = decorateTree(ch[j], userId, status);
-            if (next !== ch[j]) childWrapped = true;
-            ch[j] = next;
-        }
+        for (var j = 0; j < ch.length; j++) best = findBestStatusNode(ch[j], status, best, depth + 1);
     } else if (ch && typeof ch === "object") {
-        var nch = decorateTree(ch, userId, status);
-        if (nch !== ch) childWrapped = true;
-        node.props.children = nch;
+        best = findBestStatusNode(ch, status, best, depth + 1);
     }
-    if (childWrapped) return node;
-    if (isSmallStatusNode(node, status)) return wrapWithReplyArrow(node, userId, status);
-    return node;
+    if (!nodeHasStatus(node, status)) return best;
+    var txt = collectText(node, [], 0).join(" ");
+    var seed = status.text || status.emojiName || "";
+    if (txt.length > Math.max(seed.length + 96, 180)) return best;
+    var score = 1;
+    if (styleHasRadius(node.props.style)) score += 6;
+    if (node.props.style && (node.props.style.flexDirection === "row" || (Array.isArray(node.props.style) && node.props.style.some && node.props.style.some(function (s) { return s && s.flexDirection === "row"; })))) score += 2;
+    if (!best || score > best.score || (score === best.score && depth >= best.depth)) {
+        best = { node: node, score: score, depth: depth };
+    }
+    return best;
 }
 
-function afterStatusRender(args, res) {
-    var props = args && args[0];
-    var userId = userIdFromProps(props);
-    if (!userId) return res;
-    if (shouldSkipUser(userId)) return res;
-    var status = statusFromProps(props) || customStatusForUser(userId);
-    if (!status || !res) return res;
-    return wrapWithReplyArrow(res, userId, status);
+function replaceNode(root, target, replacement) {
+    if (root === target) return replacement;
+    if (!root || typeof root !== "object") return root;
+    if (Array.isArray(root)) {
+        for (var i = 0; i < root.length; i++) root[i] = replaceNode(root[i], target, replacement);
+        return root;
+    }
+    if (!root.props) return root;
+    var ch = root.props.children;
+    if (ch === target) {
+        root.props.children = replacement;
+        return root;
+    }
+    if (Array.isArray(ch)) {
+        for (var j = 0; j < ch.length; j++) {
+            if (ch[j] === target) ch[j] = replacement;
+            else ch[j] = replaceNode(ch[j], target, replacement);
+        }
+    } else if (ch && typeof ch === "object") {
+        root.props.children = replaceNode(ch, target, replacement);
+    }
+    return root;
+}
+
+function treeHasArrow(node, depth) {
+    if (!node || depth > 14) return false;
+    if (node.__mimeRtsDecorated) return true;
+    if (node.props && node.props.accessibilityLabel === "Reply to Status") return true;
+    if (Array.isArray(node)) {
+        for (var i = 0; i < node.length; i++) if (treeHasArrow(node[i], depth + 1)) return true;
+        return false;
+    }
+    if (node.props && node.props.children) return treeHasArrow(node.props.children, depth + 1);
+    return false;
+}
+
+function decorateTree(node, userId, status) {
+    if (!node || typeof node !== "object") return node;
+    var best = findBestStatusNode(node, status, null, 0);
+    if (!best || !best.node) return node;
+    return replaceNode(node, best.node, wrapWithReplyArrow(best.node, userId, status));
+}
+
+function wrapSheetWithFloatingButton(res, userId, status) {
+    if (!res || res.__mimeRtsDecorated) return res;
+    var RN = getRN() || {};
+    var View = RN.View;
+    var Pressable = RN.Pressable || RN.TouchableOpacity;
+    if (!View || !Pressable) return res;
+    var t = themeColors();
+    var icon = replyIconElement(t.header, 16);
+    var btn = h(Pressable, {
+        onPress: function () { openReplyWindow(userId, status); },
+        accessibilityLabel: "Reply to Status",
+        hitSlop: 8,
+        style: {
+            position: "absolute",
+            top: 132,
+            right: 16,
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            backgroundColor: t.bgFloating,
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 80,
+            elevation: 8
+        }
+    }, icon);
+    var wrapped = h(View, { style: { flex: 1 }, pointerEvents: "box-none" }, res, btn);
+    if (wrapped) wrapped.__mimeRtsDecorated = true;
+    return wrapped || res;
 }
 
 function afterProfileRender(args, res) {
     var props = args && args[0];
     var userId = userIdFromProps(props);
-    if (!userId) return res;
+    if (!userId && props && props.user) userId = props.user.id || props.user.userId;
+    if (!userId) return overlayAnchored ? res : injectOverlay(res);
     if (shouldSkipUser(userId)) return overlayAnchored ? res : injectOverlay(res);
     var status = statusFromProps(props) || customStatusForUser(userId);
     if (!status || !res) return overlayAnchored ? res : injectOverlay(res);
     var decorated = res;
     try { decorated = decorateTree(res, userId, status); } catch (err) { logError("decorate", err); }
+    if (!treeHasArrow(decorated)) {
+        try { decorated = wrapSheetWithFloatingButton(res, userId, status); } catch (_e2) {}
+    }
     if (!overlayAnchored) decorated = injectOverlay(decorated);
     return decorated;
 }
@@ -1058,22 +1188,27 @@ function patchNamedComponent(name, afterFn) {
 
 var overlayAnchored = false;
 
+function afterProfileStatusRender(args, res) {
+    var props = args && args[0];
+    var userId = userIdFromProps(props);
+    if (!userId) return res;
+    if (shouldSkipUser(userId)) return res;
+    var status = statusFromProps(props) || customStatusForUser(userId);
+    if (!status || !res) return res;
+    return wrapWithReplyArrow(res, userId, status);
+}
+
 function patchStatusComponents() {
     var names = [
-        "CustomStatus",
         "UserProfileCustomStatus",
         "ProfileCustomStatus",
-        "CustomStatusContent",
-        "StatusEmojiAndText",
-        "UserStatus",
-        "ActivityStatus",
-        "CustomStatusText",
         "ProfileCustomStatusSection",
-        "UserProfileStatus"
+        "UserProfileStatus",
+        "CustomStatusCard"
     ];
     var total = 0;
     for (var i = 0; i < names.length; i++) {
-        if (patchNamedComponent(names[i], afterStatusRender)) total++;
+        if (patchNamedComponent(names[i], afterProfileStatusRender)) total++;
     }
     log("status component patches", total);
     return total;
@@ -1090,8 +1225,7 @@ function patchProfileComponents() {
         "UserProfileTopSection",
         "ProfileHeader",
         "ProfilePrimaryInfo",
-        "UserProfileBannerInfo",
-        "UserProfileSimplified"
+        "UserProfileBannerInfo"
     ];
     var total = 0;
     for (var i = 0; i < names.length; i++) {
@@ -1152,5 +1286,6 @@ const plugin = definePlugin({
     isSmallStatusNode: isSmallStatusNode,
     isEsClass: isEsClass,
     wrapComponentModule: wrapComponentModule,
+    replyIconElement: replyIconElement,
     QUICK_REACTS: QUICK_REACTS
 });
