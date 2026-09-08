@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.0.8
+  build: 1.0.9
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -676,22 +676,6 @@ function openReplyWindow(userId, statusHint) {
     overlay = { open: true, user: user, status: status, sending: false };
     notifyOverlay();
     log("open reply", userId, formatQuote(status));
-    var Lazy = findByProps("hideActionSheet", "openLazy") || findByProps("hideActionSheet");
-    if (Lazy && typeof Lazy.hideActionSheet === "function") {
-        try { Lazy.hideActionSheet(); } catch (_e) {}
-    }
-    leaveProfile();
-    notifyOverlay();
-    try {
-        var g = typeof globalThis !== "undefined" ? globalThis : {};
-        var later = g.setTimeout || setTimeout;
-        later(function () {
-            openReplySheet(user, status);
-            notifyOverlay();
-        }, 80);
-    } catch (_e2) {
-        openReplySheet(user, status);
-    }
     return true;
 }
 
@@ -777,30 +761,20 @@ function ReplySheet(props) {
     }
 
     return h(View, {
-        style: { flex: 1, backgroundColor: t.bg, paddingTop: 18, paddingHorizontal: 16 }
+        style: { backgroundColor: t.bg, borderRadius: 16, padding: 16, width: "100%" }
     },
-        h(View, {
-            style: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }
-        },
-            h(Text, { style: { color: t.header, fontSize: 20, fontWeight: "700" } }, "Reply to Status"),
-            h(Pressable || View, { onPress: closeReplyWindow, hitSlop: 12 },
-                h(Text, { style: { color: t.link, fontSize: 16 } }, "Close")
-            )
-        ),
-        h(Text, { style: { color: t.muted, fontSize: 13, marginBottom: 8 } }, "Replying to " + name),
+        h(Text, { style: { color: t.header, fontSize: 18, fontWeight: "700", marginBottom: 10 } }, "Reply to Status"),
         h(View, {
             style: {
                 backgroundColor: t.bgSecondary,
-                borderRadius: 12,
-                paddingVertical: 10,
-                paddingHorizontal: 12,
-                marginBottom: 16,
+                borderRadius: 10,
+                paddingVertical: 8,
+                paddingHorizontal: 10,
+                marginBottom: 12,
                 borderLeftWidth: 3,
                 borderLeftColor: t.brand
             }
-        }, h(Text, { style: { color: t.text, fontSize: 16 } }, quote || "(empty status)")),
-        h(Text, { style: { color: t.muted, fontSize: 12, marginBottom: 8 } }, "React"),
-        h(ScrollView, { horizontal: true, style: { marginBottom: 16 }, showsHorizontalScrollIndicator: false }, reacts),
+        }, h(Text, { style: { color: t.text, fontSize: 15 } }, quote || "(empty status)")),
         TextInput ? h(TextInput, {
             value: text,
             onChangeText: onChange,
@@ -810,27 +784,33 @@ function ReplySheet(props) {
             multiline: true,
             autoFocus: true,
             style: {
-                minHeight: 88,
-                maxHeight: 160,
+                minHeight: 64,
+                maxHeight: 120,
                 backgroundColor: t.bgSecondary,
                 color: t.text,
-                borderRadius: 12,
-                paddingHorizontal: 12,
-                paddingVertical: 10,
+                borderRadius: 10,
+                paddingHorizontal: 10,
+                paddingVertical: 8,
                 fontSize: 16,
-                marginBottom: 16
+                marginBottom: 12
             }
         }) : null,
-        h(Pressable || View, {
-            onPress: function () { doSend(); },
-            style: {
-                backgroundColor: t.brand,
-                borderRadius: 12,
-                paddingVertical: 14,
-                alignItems: "center",
-                opacity: sending ? 0.6 : 1
-            }
-        }, h(Text, { style: { color: "#fff", fontSize: 16, fontWeight: "700" } }, sending ? "Sending…" : "Send reply"))
+        h(View, { style: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center" } },
+            h(Pressable || View, {
+                onPress: closeReplyWindow,
+                style: { paddingVertical: 10, paddingHorizontal: 14, marginRight: 8 }
+            }, h(Text, { style: { color: t.muted, fontSize: 16, fontWeight: "600" } }, "Cancel")),
+            h(Pressable || View, {
+                onPress: function () { doSend(); },
+                style: {
+                    backgroundColor: t.brand,
+                    borderRadius: 10,
+                    paddingVertical: 10,
+                    paddingHorizontal: 16,
+                    opacity: sending ? 0.6 : 1
+                }
+            }, h(Text, { style: { color: "#fff", fontSize: 16, fontWeight: "700" } }, sending ? "Sending…" : "Send"))
+        )
     );
 }
 
@@ -855,18 +835,34 @@ function OverlayHost() {
     }
     if (!overlay.open) return null;
     var t = themeColors();
-    var sheet = h(ReplySheet, null);
+    var card = h(ReplySheet, { user: overlay.user, status: overlay.status });
+    var Pressable = RN.Pressable || RN.TouchableOpacity || View;
+    var backdrop = h(Pressable, {
+        onPress: closeReplyWindow,
+        style: {
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.55)",
+            justifyContent: "center",
+            alignItems: "center",
+            paddingHorizontal: 28
+        }
+    }, h(Pressable, {
+        onPress: function (e) {
+            try { if (e && e.stopPropagation) e.stopPropagation(); } catch (_e) {}
+        },
+        style: { width: "100%", maxWidth: 360 }
+    }, card));
     if (Modal) {
         return h(Modal, {
             visible: true,
-            animationType: "slide",
-            transparent: false,
+            animationType: "fade",
+            transparent: true,
             onRequestClose: closeReplyWindow
-        }, h(Safe, { style: { flex: 1, backgroundColor: t.bg } }, sheet));
+        }, backdrop);
     }
     return h(View, {
-        style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, backgroundColor: t.bg }
-    }, sheet);
+        style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999 }
+    }, backdrop);
 }
 
 function injectOverlay(el) {
@@ -1160,6 +1156,7 @@ function wrapWithReplyArrow(el, userId, status) {
 function findBestStatusNode(node, status, best, depth) {
     if (!node || typeof node !== "object" || depth > 16) return best;
     if (node.__mimeRtsDecorated) return best;
+    if (treeHasArrow(node, 0)) return best;
     if (Array.isArray(node)) {
         for (var i = 0; i < node.length; i++) best = findBestStatusNode(node[i], status, best, depth + 1);
         return best;
@@ -1278,20 +1275,10 @@ function afterProfileRender(args, res) {
     var props = args && args[0];
     var userId = userIdFromProps(props) || profileUserId;
     if (!userId && props && props.user) userId = props.user.id || props.user.userId;
-    if (!userId) return overlayAnchored ? res : injectOverlay(res);
-    if (shouldSkipUser(userId)) return overlayAnchored ? res : injectOverlay(res);
-    var status = statusFromProps(props) || customStatusForUser(userId) || { text: "", emojiName: null };
+    if (userId && !shouldSkipUser(userId)) enterProfile([{ userId: userId, user: props && props.user }]);
     if (!res) return res;
-    var decorated = res;
-    try { decorated = decorateProfileTree(res, userId, status); } catch (err) { logError("decorateProfile", err); }
-    if (!treeHasArrow(decorated)) {
-        try { decorated = decorateTree(res, userId, status); } catch (err2) { logError("decorate", err2); }
-    }
-    if (!treeHasArrow(decorated)) {
-        try { decorated = forceInjectReply(decorated, userId, status); } catch (err3) { logError("forceInject", err3); }
-    }
-    if (!overlayAnchored) decorated = injectOverlay(decorated);
-    return decorated;
+    if (!overlayAnchored) res = injectOverlay(res);
+    return res;
 }
 
 function isEsClass(fn) {
@@ -1448,23 +1435,18 @@ function afterStatusRender(args, res) {
     var userId = userIdFromProps(props) || profileUserId;
     if (!userId) return res;
     if (shouldSkipUser(userId)) return res;
+    if (props && props.activity && !isCustomActivity(props.activity) && !props.customStatus) return res;
     var status = statusFromProps(props) || customStatusForUser(userId);
     if (!status || !res) return res;
+    if (treeHasArrow(res, 0)) return res;
     return wrapWithReplyArrow(res, userId, status);
 }
 
 function patchStatusComponents() {
     var names = [
         "CustomStatus",
-        "UserStatus",
-        "ActivityStatus",
-        "StatusEmojiAndText",
-        "CustomStatusText",
         "UserProfileCustomStatus",
-        "ProfileCustomStatus",
-        "ProfileCustomStatusSection",
-        "UserProfileStatus",
-        "CustomStatusCard"
+        "ProfileCustomStatus"
     ];
     var total = 0;
     for (var i = 0; i < names.length; i++) {
