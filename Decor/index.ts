@@ -574,13 +574,23 @@ function authorize() {
     });
 }
 
+function normalizePresets(p) {
+    if (!p) return [];
+    if (Array.isArray(p)) return p;
+    if (Array.isArray(p.presets)) return p.presets;
+    if (Array.isArray(p.data)) return p.data;
+    if (Array.isArray(p.results)) return p.results;
+    return [];
+}
+
 function loadPresets() {
     return doFetch(API_URL + "/decorations/presets").then(function (r) { return r.json(); }).then(function (p) {
-        presets = p || [];
+        presets = normalizePresets(p);
         log("presets", presets.length);
         return presets;
     }).catch(function (err) {
         logError("presets", err);
+        presets = [];
         return [];
     });
 }
@@ -643,9 +653,14 @@ function h(type, props) {
     var React = getReact();
     if (!React) return null;
     var kids = [].slice.call(arguments, 2);
-    if (kids.length === 0) return React.createElement(type, props);
-    if (kids.length === 1) return React.createElement(type, props, kids[0]);
-    return React.createElement.apply(React, [type, props].concat(kids));
+    if (kids.length === 1 && Array.isArray(kids[0])) kids = kids[0];
+    var clean = [];
+    for (var i = 0; i < kids.length; i++) {
+        if (kids[i] != null && kids[i] !== false) clean.push(kids[i]);
+    }
+    if (clean.length === 0) return React.createElement(type, props);
+    if (clean.length === 1) return React.createElement(type, props, clean[0]);
+    return React.createElement.apply(React, [type, props].concat(clean));
 }
 
 function findAssetId(name) {
@@ -937,13 +952,6 @@ function DecorScreenShell(props) {
         }, props.title || "") : null
     );
     var body = Page ? h(Page, null) : null;
-    var inner = ScrollView
-        ? h(ScrollView, {
-            style: { flex: 1, backgroundColor: "#111214" },
-            contentContainerStyle: { paddingBottom: 48, flexGrow: 1 },
-            keyboardShouldPersistTaps: "handled"
-        }, body)
-        : body;
     return h(View, {
         style: {
             flex: 1,
@@ -951,7 +959,7 @@ function DecorScreenShell(props) {
             backgroundColor: "#111214",
             paddingTop: top
         }
-    }, header, inner);
+    }, header, h(View, { style: { flex: 1, backgroundColor: "#111214" } }, body));
 }
 
 function openCustomPage(title, render) {
@@ -1038,29 +1046,25 @@ function assetSource(names) {
 function DecorCard(props) {
     var RN = getRN() || {};
     var View = RN.View;
-    var Pressable = RN.Pressable || RN.TouchableOpacity;
+    var Touchable = RN.TouchableOpacity || RN.Pressable;
     var Image = RN.Image;
-    if (!View || !Pressable) return null;
+    if (!View || !Touchable) return null;
     var selected = !!props.selected;
     var disabled = !!props.disabled;
     var inner = props.children;
     if (!inner && Image && props.uri) {
-        inner = h(Image, { source: { uri: props.uri }, style: { width: 56, height: 56 } });
+        inner = h(Image, { source: { uri: props.uri }, style: { width: 72, height: 72 }, resizeMode: "contain" });
     }
-    return h(Pressable, {
+    return h(View, {
+        style: { width: 72, height: 72 }
+    }, h(Touchable, {
         onPress: disabled ? undefined : function () {
             hapticTap();
             if (props.onPress) props.onPress();
         },
         onLongPress: disabled ? undefined : props.onLongPress,
         disabled: disabled,
-        style: {
-            width: 72,
-            height: 72,
-            marginRight: 8,
-            flexGrow: 0,
-            flexShrink: 0
-        }
+        activeOpacity: 0.75
     }, h(View, {
         style: {
             width: 72,
@@ -1074,7 +1078,35 @@ function DecorCard(props) {
             borderColor: "#5865F2",
             opacity: disabled ? 0.5 : 1
         }
-    }, inner));
+    }, inner)));
+}
+
+function HorizontalTiles(nodes) {
+    var React = getReact();
+    var RN = getRN() || {};
+    var View = RN.View;
+    var ScrollView = RN.ScrollView;
+    if (!View || !nodes || !nodes.length) return null;
+    var slots = [];
+    for (var i = 0; i < nodes.length; i++) {
+        if (!nodes[i]) continue;
+        slots.push(h(View, {
+            key: (nodes[i].key != null ? nodes[i].key : String(i)),
+            style: { width: 72, height: 72, marginRight: 8 }
+        }, nodes[i]));
+    }
+    if (ScrollView) {
+        return React.createElement.apply(React, [ScrollView, {
+            horizontal: true,
+            showsHorizontalScrollIndicator: false,
+            nestedScrollEnabled: true,
+            style: { height: 88, width: "100%", flexGrow: 0, flexShrink: 0 },
+            contentContainerStyle: { paddingHorizontal: 12, paddingVertical: 8, alignItems: "center" }
+        }].concat(slots));
+    }
+    return React.createElement.apply(React, [View, {
+        style: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 12, minHeight: 88 }
+    }].concat(slots));
 }
 
 function CardButton(props) {
@@ -1102,16 +1134,17 @@ function CardButton(props) {
 }
 
 function DecorationTile(props) {
+    var RN = getRN() || {};
+    var Image = RN.Image;
     var decoration = props.decoration;
     var selected = selectedHash === (decoration && decoration.hash);
     var uri = decoImageUri(decoration);
-    var Cutout = findByName("CutoutableAvatarDecoration");
-    var child = null;
-    if (Cutout) {
-        child = h(Cutout, { avatarDecoration: decorationToAvatar(decoration), size: 56, animate: selected });
-    }
+    var img = (Image && uri) ? h(Image, {
+        source: { uri: uri },
+        style: { width: 72, height: 72 },
+        resizeMode: "contain"
+    }) : null;
     return h(DecorCard, {
-        uri: uri,
         selected: selected,
         disabled: props.disabled,
         onPress: function () {
@@ -1120,9 +1153,9 @@ function DecorationTile(props) {
             });
         },
         onLongPress: function () {
-            showToast(decoration.alt || decoration.hash);
+            showToast((decoration && (decoration.alt || decoration.hash)) || "Decoration");
         }
-    }, child);
+    }, img);
 }
 
 function AvatarDecorationPreviews(props) {
@@ -1263,23 +1296,7 @@ function DecorationPicker(props) {
         }
     }));
 
-    var list;
-    if (ScrollView) {
-        list = h(ScrollView, {
-            horizontal: true,
-            showsHorizontalScrollIndicator: false,
-            nestedScrollEnabled: true,
-            style: { flexGrow: 0, height: 96 },
-            contentContainerStyle: {
-                paddingHorizontal: 12,
-                paddingVertical: 12,
-                alignItems: "center",
-                flexDirection: "row"
-            }
-        }, tiles);
-    } else {
-        list = h(View, { style: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 12, minHeight: 96 } }, tiles);
-    }
+    var list = HorizontalTiles(tiles);
 
     var headerIcon = null;
     if (!authorized && ActivityIndicator) headerIcon = null;
@@ -1302,32 +1319,48 @@ function PresetsPage() {
     var RN = getRN() || {};
     var View = RN.View;
     var Text = RN.Text;
-    var FlatList = RN.FlatList;
     var ScrollView = RN.ScrollView;
     if (!React || !View) return null;
-    var [, bump] = React.useState(0);
+    var state = React.useState(presets.slice ? presets.slice() : []);
+    var list = state[0] || [];
+    var setList = state[1];
     React.useEffect(function () {
-        loadPresets().then(function () { bump(function (n) { return n + 1; }); });
+        loadPresets().then(function (p) { setList(p || []); });
     }, []);
-    function row(preset) {
+    var rows = [];
+    var i;
+    if (!list.length && Text) {
+        rows.push(h(Text, {
+            key: "empty",
+            style: { color: "#949ba4", padding: 16 }
+        }, "Loading presets…"));
+    }
+    for (i = 0; i < list.length; i++) {
+        var preset = list[i];
+        if (!preset) continue;
+        var decos = preset.decorations || preset.items || [];
         var cards = [];
-        var decos = (preset && preset.decorations) || [];
-        for (var i = 0; i < decos.length; i++) {
+        for (var j = 0; j < decos.length; j++) {
+            if (!decos[j] || !decos[j].hash) continue;
             cards.push(h(DecorationTile, {
-                key: decos[i].hash,
-                decoration: decos[i],
+                key: decos[j].hash,
+                decoration: decos[j],
                 onChanged: function () { closeDecorScreen(); }
             }));
         }
-        return h(View, { style: { marginBottom: 20, backgroundColor: "#111214" } },
-            Text ? h(Text, { style: { color: "#dbdee1", fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingBottom: 8 } }, preset.name) : null,
+        rows.push(h(View, { key: preset.id || String(i), style: { marginBottom: 20 } },
+            Text ? h(Text, { style: { color: "#dbdee1", fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingBottom: 4 } }, preset.name || "Preset") : null,
             (preset.description && Text) ? h(Text, { style: { color: "#949ba4", fontSize: 13, paddingHorizontal: 16, paddingBottom: 8 } }, preset.description) : null,
-            h(View, { style: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 12 } }, cards)
-        );
+            cards.length ? HorizontalTiles(cards) : (Text ? h(Text, { style: { color: "#949ba4", paddingHorizontal: 16 } }, "No decorations in this preset") : null)
+        ));
     }
-    var rows = [];
-    for (var i = 0; i < presets.length; i++) rows.push(h(View, { key: presets[i].id || i }, row(presets[i])));
-    return h(View, { style: { backgroundColor: "#111214", paddingTop: 8, paddingBottom: 24 } }, rows);
+    if (ScrollView) {
+        return h(ScrollView, {
+            style: { flex: 1, backgroundColor: "#111214" },
+            contentContainerStyle: { paddingTop: 8, paddingBottom: 40 }
+        }, rows);
+    }
+    return h(View, { style: { flex: 1, backgroundColor: "#111214", paddingTop: 8 } }, rows);
 }
 
 function CreateDecorationPage() {
@@ -1376,13 +1409,21 @@ function CreateDecorationPage() {
             setCreating(false);
         });
     }
-    return h(View, { style: { padding: 16, backgroundColor: "#111214", flex: 1 } },
-        h(AvatarDecorationPreviews, { pendingAvatarDecoration: asset ? { asset: asset.uri, skuId: RAW_SKU_ID } : null }),
-        Text ? h(Text, { style: { color: "#949ba4", marginTop: 16, marginBottom: 12, lineHeight: 18 } }, "File must be a PNG or APNG.") : null,
-        Button ? h(View, { style: { marginBottom: 12 } }, h(Button, { text: asset ? (asset.fileName || "Image selected") : "Select Image", onPress: pick })) : null,
-        TextInput ? h(View, { style: { marginBottom: 16 } }, h(TextInput, { label: "Decoration Name", placeholder: "e.g. Companion Cube", value: alt, onChange: setAlt, onChangeText: setAlt })) : null,
-        Button ? h(Button, { text: creating ? "Creating…" : "Create Decoration", disabled: !asset || !alt, onPress: submit }) : null
-    );
+    var body = [
+        h(AvatarDecorationPreviews, { key: "preview", pendingAvatarDecoration: asset ? { asset: asset.uri, skuId: RAW_SKU_ID } : null }),
+        Text ? h(Text, { key: "hint", style: { color: "#949ba4", marginTop: 16, marginBottom: 12, lineHeight: 18 } }, "File must be a PNG or APNG.") : null,
+        Button ? h(View, { key: "pick", style: { marginBottom: 12 } }, h(Button, { text: asset ? (asset.fileName || "Image selected") : "Select Image", onPress: pick })) : null,
+        TextInput ? h(View, { key: "name", style: { marginBottom: 16 } }, h(TextInput, { label: "Decoration Name", placeholder: "e.g. Companion Cube", value: alt, onChange: setAlt, onChangeText: setAlt })) : null,
+        Button ? h(Button, { key: "go", text: creating ? "Creating…" : "Create Decoration", disabled: !asset || !alt, onPress: submit }) : null
+    ];
+    var ScrollView = RN.ScrollView;
+    if (ScrollView) {
+        return h(ScrollView, {
+            style: { flex: 1, backgroundColor: "#111214" },
+            contentContainerStyle: { padding: 16, paddingBottom: 40 }
+        }, body);
+    }
+    return h(View, { style: { padding: 16, backgroundColor: "#111214", flex: 1 } }, body);
 }
 
 function EditProfileDecorBlock() {
@@ -1493,5 +1534,6 @@ const plugin = definePlugin({
     discordAuthorizeUrl: discordAuthorizeUrl,
     isOfficialDecorNode: isOfficialDecorNode,
     injectDecorAboveOfficial: injectDecorAboveOfficial,
+    normalizePresets: normalizePresets,
     DecorationPicker: DecorationPicker
 });
