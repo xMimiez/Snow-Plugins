@@ -873,34 +873,166 @@ function hapticTap() {
     } catch (_e) {}
 }
 
+function getSafeTop() {
+    var RN = getRN() || {};
+    try {
+        if (RN.StatusBar && typeof RN.StatusBar.currentHeight === "number") {
+            return RN.StatusBar.currentHeight + 8;
+        }
+    } catch (_e) {}
+    try {
+        if (RN.Platform && RN.Platform.OS === "ios") return 54;
+    } catch (_e2) {}
+    return 28;
+}
+
+function screenHeight() {
+    var RN = getRN() || {};
+    try {
+        var d = RN.Dimensions && RN.Dimensions.get && RN.Dimensions.get("window");
+        if (d && d.height) return d.height;
+    } catch (_e) {}
+    return 720;
+}
+
+function closeDecorScreen() {
+    var modals = findByProps("pushModal", "popModal") || findByProps("popModal");
+    var keys = ["mime-decor-screen", "create-decoration", "decor-presets"];
+    if (modals && typeof modals.popModal === "function") {
+        for (var i = 0; i < keys.length; i++) {
+            try { modals.popModal(keys[i]); } catch (_e) {}
+        }
+        try { modals.popModal(); } catch (_e2) {}
+    }
+    hideSheet();
+}
+
+function DecorScreenShell(props) {
+    var RN = getRN() || {};
+    var View = RN.View;
+    var Text = RN.Text;
+    var Pressable = RN.Pressable || RN.TouchableOpacity;
+    var ScrollView = RN.ScrollView;
+    if (!View) return null;
+    var Page = props.page;
+    var top = getSafeTop();
+    var header = h(View, {
+        style: {
+            height: 48,
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: 8,
+            borderBottomWidth: 1,
+            borderBottomColor: "#3f4147",
+            backgroundColor: "#111214"
+        }
+    },
+        Pressable ? h(Pressable, {
+            onPress: closeDecorScreen,
+            hitSlop: 12,
+            style: { paddingHorizontal: 12, paddingVertical: 8 }
+        }, Text ? h(Text, { style: { color: "#00a8fc", fontSize: 16 } }, "Close") : null) : null,
+        Text ? h(Text, {
+            style: { color: "#fff", fontSize: 16, fontWeight: "700", flex: 1, textAlign: "center", marginRight: 64 }
+        }, props.title || "") : null
+    );
+    var body = Page ? h(Page, null) : null;
+    var inner = ScrollView
+        ? h(ScrollView, {
+            style: { flex: 1, backgroundColor: "#111214" },
+            contentContainerStyle: { paddingBottom: 48, flexGrow: 1 },
+            keyboardShouldPersistTaps: "handled"
+        }, body)
+        : body;
+    return h(View, {
+        style: {
+            flex: 1,
+            height: screenHeight(),
+            backgroundColor: "#111214",
+            paddingTop: top
+        }
+    }, header, inner);
+}
+
 function openCustomPage(title, render) {
     var React = getReact();
-    var NavigationNative = findByProps("useNavigation", "NavigationContainer") || findByProps("useNavigation");
-    try {
-        var navigation = NavigationNative && NavigationNative.useNavigation && NavigationNative.useNavigation();
-        if (navigation && typeof navigation.push === "function") {
-            var routes = ["VendettaCustomPage", "BunnyCustomPage", "RAIN_CUSTOM_PAGE", "SNOW_CUSTOM_PAGE"];
-            for (var i = 0; i < routes.length; i++) {
-                try {
-                    navigation.push(routes[i], { title: title, render: render });
-                    return true;
-                } catch (_e) {}
-            }
+    if (!React) return false;
+    function Modal() {
+        return h(DecorScreenShell, { title: title, page: render });
+    }
+    var modals = findByProps("pushModal", "popModal") || findByProps("pushModal");
+    if (modals && typeof modals.pushModal === "function") {
+        try {
+            modals.pushModal({
+                key: "mime-decor-screen",
+                modal: {
+                    key: "mime-decor-screen",
+                    modal: Modal,
+                    animation: "slide-up",
+                    shouldPersistUnderModals: false,
+                    closable: true,
+                    props: {}
+                }
+            });
+            return true;
+        } catch (err) {
+            logError("pushModal object", err);
         }
-    } catch (_e2) {}
+        try {
+            modals.pushModal(Modal, "mime-decor-screen");
+            return true;
+        } catch (err2) {
+            logError("pushModal fn", err2);
+        }
+    }
+    var Navigator = findByName("Navigator") || (findByProps("Navigator") && findByProps("Navigator").Navigator);
+    if (modals && Navigator && typeof modals.pushModal === "function") {
+        function NavModal() {
+            return h(Navigator, {
+                initialRouteName: "DECOR_PAGE",
+                screens: {
+                    DECOR_PAGE: {
+                        title: title,
+                        render: render
+                    }
+                }
+            });
+        }
+        try {
+            modals.pushModal({
+                key: "mime-decor-screen",
+                modal: { key: "mime-decor-screen", modal: NavModal, animation: "slide-up", closable: true, props: {} }
+            });
+            return true;
+        } catch (_e3) {}
+    }
     var Lazy = findByProps("openLazy", "hideActionSheet");
-    if (React && Lazy && typeof Lazy.openLazy === "function") {
+    var SheetMod = findByProps("ActionSheet");
+    if (Lazy && typeof Lazy.openLazy === "function") {
         function Sheet() {
-            var RN = getRN() || {};
-            var ScrollView = RN.ScrollView || RN.View;
-            return h(ScrollView, { style: { maxHeight: 520 } }, h(render, null));
+            var host = SheetMod && SheetMod.ActionSheet;
+            var page = h(DecorScreenShell, { title: title, page: render });
+            if (host) return h(host, { style: { flex: 1, backgroundColor: "#111214" } }, page);
+            return page;
         }
         try {
             Lazy.openLazy(Promise.resolve({ default: Sheet }), "ActionSheet");
             return true;
-        } catch (_e3) {}
+        } catch (err4) {
+            logError("openLazy page", err4);
+        }
     }
     return false;
+}
+
+function assetSource(names) {
+    var list = Array.isArray(names) ? names : [names];
+    for (var i = 0; i < list.length; i++) {
+        var id = findAssetId(list[i]);
+        if (typeof id === "number") return id;
+        if (id && typeof id === "object") return id;
+    }
+    return null;
 }
 
 function DecorCard(props) {
@@ -921,15 +1053,23 @@ function DecorCard(props) {
             if (props.onPress) props.onPress();
         },
         onLongPress: disabled ? undefined : props.onLongPress,
-        disabled: disabled
+        disabled: disabled,
+        style: {
+            width: 72,
+            height: 72,
+            marginRight: 8,
+            flexGrow: 0,
+            flexShrink: 0
+        }
     }, h(View, {
         style: {
             width: 72,
             height: 72,
             borderRadius: 4,
-            backgroundColor: "#111214",
+            backgroundColor: "#2b2d31",
             alignItems: "center",
             justifyContent: "center",
+            overflow: "hidden",
             borderWidth: selected ? 2 : 0,
             borderColor: "#5865F2",
             opacity: disabled ? 0.5 : 1
@@ -943,17 +1083,22 @@ function CardButton(props) {
     var Text = RN.Text;
     var Image = RN.Image;
     var inner = [];
-    if (Image && props.source != null) {
-        inner.push(h(Image, { key: "icon", source: props.source, style: { width: 20, height: 20, marginBottom: 4, tintColor: "#dbdee1" } }));
+    var src = props.source;
+    if (Image && src != null) {
+        inner.push(h(Image, { key: "icon", source: src, style: { width: 22, height: 22, marginBottom: 4, tintColor: "#dbdee1" } }));
     }
     if (Text) {
-        inner.push(h(Text, { key: "label", style: { color: "#dbdee1", fontSize: 12, fontWeight: "500" } }, props.label || ""));
+        inner.push(h(Text, {
+            key: "label",
+            numberOfLines: 1,
+            style: { color: "#dbdee1", fontSize: 11, fontWeight: "600" }
+        }, props.label || ""));
     }
     return h(DecorCard, {
         selected: props.selected,
         disabled: props.disabled,
         onPress: props.onPress
-    }, h(View, { style: { alignItems: "center", justifyContent: "center" } }, inner));
+    }, h(View, { style: { alignItems: "center", justifyContent: "center", paddingHorizontal: 4 } }, inner));
 }
 
 function DecorationTile(props) {
@@ -1080,30 +1225,34 @@ function DecorationPicker(props) {
     }
 
     var tiles = [];
-    tiles.push(h(View, { key: "none", style: { marginRight: 4 } }, h(CardButton, {
-        source: findAssetId("img_none"),
+    tiles.push(h(CardButton, {
+        key: "none",
+        source: assetSource(["img_none", "ic_close_circle", "CircleXIcon", "ic_close_16px"]),
         label: "None",
         selected: !selected,
         disabled: disabled,
         onPress: function () { selectDecoration(null).then(refresh); }
-    })));
+    }));
     for (i = 0; i < own.length; i++) {
-        tiles.push(h(View, { key: own[i].hash, style: { marginRight: 4 } }, h(DecorationTile, {
+        tiles.push(h(DecorationTile, {
+            key: own[i].hash,
             decoration: own[i],
             disabled: disabled,
             onChanged: refresh
-        })));
+        }));
     }
-    tiles.push(h(View, { key: "presets", style: { marginRight: 4 } }, h(CardButton, {
-        source: findAssetId("smile") || findAssetId("ReactionIcon") || findAssetId("ic_reaction_smile"),
+    tiles.push(h(CardButton, {
+        key: "presets",
+        source: assetSource(["smile", "ReactionIcon", "ic_reaction_smile", "ic_emoji_24px"]),
         label: "Presets",
         selected: !!(selected && selected.presetId),
         disabled: disabled,
         onPress: function () { openCustomPage("Presets", PresetsPage); }
-    })));
-    tiles.push(h(View, { key: "new" }, h(CardButton, {
-        source: findAssetId("ic_add_24px"),
-        label: "New..",
+    }));
+    tiles.push(h(CardButton, {
+        key: "new",
+        source: assetSource(["ic_add_24px", "PlusSmallIcon", "ic_plus_24px", "PlusIcon"]),
+        label: "New",
         disabled: disabled || hasPending,
         onPress: function () {
             if (hasPending) {
@@ -1112,24 +1261,24 @@ function DecorationPicker(props) {
             }
             openCustomPage("Submit a Decoration", CreateDecorationPage);
         }
-    })));
+    }));
 
     var list;
-    if (FlatList) {
-        list = h(FlatList, {
+    if (ScrollView) {
+        list = h(ScrollView, {
             horizontal: true,
             showsHorizontalScrollIndicator: false,
-            data: tiles,
-            renderItem: function (info) { return info.item; },
-            keyExtractor: function (_item, index) { return String(index); },
-            snapToInterval: 74,
-            decelerationRate: "fast",
-            contentContainerStyle: { paddingHorizontal: 8, paddingVertical: 12 }
-        });
-    } else if (ScrollView) {
-        list = h(ScrollView, { horizontal: true, showsHorizontalScrollIndicator: false, contentContainerStyle: { paddingHorizontal: 8, paddingVertical: 12, flexDirection: "row" } }, tiles);
+            nestedScrollEnabled: true,
+            style: { flexGrow: 0, height: 96 },
+            contentContainerStyle: {
+                paddingHorizontal: 12,
+                paddingVertical: 12,
+                alignItems: "center",
+                flexDirection: "row"
+            }
+        }, tiles);
     } else {
-        list = h(View, { style: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 8 } }, tiles);
+        list = h(View, { style: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 12, minHeight: 96 } }, tiles);
     }
 
     var headerIcon = null;
@@ -1164,28 +1313,21 @@ function PresetsPage() {
         var cards = [];
         var decos = (preset && preset.decorations) || [];
         for (var i = 0; i < decos.length; i++) {
-            cards.push(h(View, { key: decos[i].hash, style: { marginRight: 4 } }, h(DecorationTile, {
+            cards.push(h(DecorationTile, {
+                key: decos[i].hash,
                 decoration: decos[i],
-                onChanged: function () { hideSheet(); }
-            })));
+                onChanged: function () { closeDecorScreen(); }
+            }));
         }
-        return h(View, { style: { marginBottom: 16 } },
+        return h(View, { style: { marginBottom: 20, backgroundColor: "#111214" } },
             Text ? h(Text, { style: { color: "#dbdee1", fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingBottom: 8 } }, preset.name) : null,
             (preset.description && Text) ? h(Text, { style: { color: "#949ba4", fontSize: 13, paddingHorizontal: 16, paddingBottom: 8 } }, preset.description) : null,
-            h(View, { style: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 8 } }, cards)
+            h(View, { style: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 12 } }, cards)
         );
-    }
-    if (FlatList) {
-        return h(FlatList, {
-            data: presets,
-            renderItem: function (info) { return row(info.item); },
-            keyExtractor: function (item, index) { return (item && item.id) || String(index); },
-            ListFooterComponent: function () { return h(View, { style: { height: 18 } }); }
-        });
     }
     var rows = [];
     for (var i = 0; i < presets.length; i++) rows.push(h(View, { key: presets[i].id || i }, row(presets[i])));
-    return h(ScrollView, null, rows);
+    return h(View, { style: { backgroundColor: "#111214", paddingTop: 8, paddingBottom: 24 } }, rows);
 }
 
 function CreateDecorationPage() {
@@ -1227,18 +1369,18 @@ function CreateDecorationPage() {
         authFetch("/users/@me/decoration", { method: "PUT", body: form }).then(function (r) { return r.json(); }).then(function () {
             showToast("Decoration created and pending review");
             refreshMine();
-            hideSheet();
+            closeDecorScreen();
         }).catch(function (err) {
             logError("create", err);
             showToast("Failed to create decoration");
             setCreating(false);
         });
     }
-    return h(View, { style: { padding: 16 } },
+    return h(View, { style: { padding: 16, backgroundColor: "#111214", flex: 1 } },
         h(AvatarDecorationPreviews, { pendingAvatarDecoration: asset ? { asset: asset.uri, skuId: RAW_SKU_ID } : null }),
-        Text ? h(Text, { style: { color: "#949ba4", marginTop: 12, marginBottom: 8 } }, "File must be a PNG or APNG.") : null,
-        Button ? h(Button, { text: asset ? (asset.fileName || "Image selected") : "Select Image", onPress: pick }) : null,
-        TextInput ? h(TextInput, { label: "Decoration Name", placeholder: "e.g. Companion Cube", value: alt, onChange: setAlt, onChangeText: setAlt }) : null,
+        Text ? h(Text, { style: { color: "#949ba4", marginTop: 16, marginBottom: 12, lineHeight: 18 } }, "File must be a PNG or APNG.") : null,
+        Button ? h(View, { style: { marginBottom: 12 } }, h(Button, { text: asset ? (asset.fileName || "Image selected") : "Select Image", onPress: pick })) : null,
+        TextInput ? h(View, { style: { marginBottom: 16 } }, h(TextInput, { label: "Decoration Name", placeholder: "e.g. Companion Cube", value: alt, onChange: setAlt, onChangeText: setAlt })) : null,
         Button ? h(Button, { text: creating ? "Creating…" : "Create Decoration", disabled: !asset || !alt, onPress: submit }) : null
     );
 }
@@ -1304,23 +1446,20 @@ function SettingsComponent() {
         }, authorized ? "Authorized with Decor." : "Authorize to equip decorations. Uses your Discord login."));
     }
     if (Button) {
-        children.push(h(Button, {
-            key: "auth",
+        children.push(h(View, { key: "authwrap", style: { paddingHorizontal: 12, marginTop: 8, marginBottom: 8 } }, h(Button, {
             text: authorized ? "Re-authorize" : "Authorize with Decor",
             onPress: function () { authorize().then(refresh); setTimeout(refresh, 2000); }
-        }));
+        })));
         if (authorized) {
-            children.push(h(Button, {
-                key: "logout",
+            children.push(h(View, { key: "logoutwrap", style: { paddingHorizontal: 12, marginBottom: 8 } }, h(Button, {
                 text: "Log out",
                 onPress: function () { setToken(null); refresh(); }
-            }));
+            })));
         }
-        children.push(h(Button, {
-            key: "reload",
+        children.push(h(View, { key: "reloadwrap", style: { paddingHorizontal: 12, marginBottom: 8 } }, h(Button, {
             text: "Reload list",
             onPress: function () { refreshMine().then(refresh); }
-        }));
+        })));
     }
     if (TextInput) {
         children.push(h(TextInput, {
