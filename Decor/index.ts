@@ -8,7 +8,7 @@
   https://github.com/Equicord/Equicord/tree/main/src/plugins/decor
   https://github.com/decor-discord/vendetta-plugin
   https://codeberg.org/raincord/rain/src/commit/333142c78140586c458002bda0f502e7d4053fdf/src/plugins/decor
-  build: 1.1.5
+  build: 1.1.6
 */
 var unpatches = [];
 var _storage;
@@ -2052,17 +2052,25 @@ function normalizePickedImage(ret) {
     var a = (ret.assets && ret.assets[0]) || ret;
     var uri = a.uri || a.path || a.fileCopyUri || a.filePath;
     if (!uri && typeof ret === "string") uri = ret;
+    var type = a.type || a.mimeType || "image/png";
+    if (String(type).indexOf("/") < 0) type = "image/png";
+    var b64 = a.base64 || a.data;
+    if (b64) {
+        b64 = String(b64).replace(/\s/g, "");
+        uri = "data:" + type + ";base64," + b64;
+    }
     if (!uri) return null;
-    if (uri.indexOf("/") === 0 && uri.indexOf("file:") !== 0) uri = "file://" + uri;
+    if (uri.indexOf("/") === 0 && uri.indexOf("file:") !== 0 && uri.indexOf("data:") !== 0) uri = "file://" + uri;
     return {
         uri: uri,
-        type: a.type || a.mimeType || "image/png",
-        fileName: a.fileName || a.name || "decoration.png"
+        type: type,
+        fileName: a.fileName || a.name || "decoration.png",
+        base64: b64 || null
     };
 }
 
 function pickImage(cb) {
-    var opts = { mediaType: "photo", quality: 1, selectionLimit: 1 };
+    var opts = { mediaType: "photo", quality: 0.9, selectionLimit: 1, includeBase64: true, maxWidth: 768, maxHeight: 768 };
     function done(ret) {
         var n = normalizePickedImage(ret);
         if (n) cb(n);
@@ -2192,13 +2200,53 @@ function xhrPutForm(url, form) {
     });
 }
 
+function arrayBufferToDataUri(buf, type) {
+    var bytes = new Uint8Array(buf);
+    var bin = "";
+    var i;
+    var step = 0x8000;
+    for (i = 0; i < bytes.length; i += step) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+    }
+    if (typeof btoa !== "function") throw new Error("no btoa");
+    return "data:" + type + ";base64," + btoa(bin);
+}
+
+function resolveUploadUri(asset) {
+    var type = (asset && (asset.type || asset.mimeType)) || "image/png";
+    var uri = asset && asset.uri;
+    if (asset && asset.base64) {
+        return Promise.resolve("data:" + type + ";base64," + String(asset.base64).replace(/\s/g, ""));
+    }
+    if (uri && String(uri).indexOf("data:") === 0) return Promise.resolve(uri);
+    if (!uri) return Promise.reject(new Error("no image selected"));
+    var fromFetch = doFetch(uri).then(function (r) {
+        if (!r) throw new Error("could not open image");
+        if (typeof r.arrayBuffer === "function") return r.arrayBuffer();
+        if (typeof r.blob === "function") {
+            return r.blob().then(function (blob) {
+                if (blob && typeof blob.arrayBuffer === "function") return blob.arrayBuffer();
+                throw new Error("no arrayBuffer");
+            });
+        }
+        throw new Error("cannot read image bytes");
+    }).then(function (buf) {
+        return arrayBufferToDataUri(buf, type);
+    });
+    var fromFile = readFileBase64(uri).then(function (b64) {
+        if (!b64) throw new Error("empty file");
+        return "data:" + type + ";base64," + b64;
+    });
+    return withTimeout(fromFetch.catch(function () { return fromFile; }), 12000, "could not read that image");
+}
+
 function createDecorationUpload(asset, alt) {
     var name = (asset && (asset.fileName || asset.name)) || "decoration.png";
     var type = (asset && (asset.type || asset.mimeType)) || "image/png";
-    var uri = asset && asset.uri;
     var altStr = altText(alt);
-    if (!uri) return Promise.reject(new Error("no image selected"));
+    if (!asset) return Promise.reject(new Error("no image selected"));
     if (!altStr) return Promise.reject(new Error("enter a decoration name"));
+    if (!getToken()) return Promise.reject(new Error("not authorized with Decor"));
     function sendUri(u) {
         var form = new FormData();
         form.append("image", { uri: u, type: type, name: name });
@@ -2213,22 +2261,11 @@ function createDecorationUpload(asset, alt) {
                         try { return JSON.parse(t); } catch (_e) { return {}; }
                     });
                 }
-                if (typeof r.json === "function") return r.json();
-                return r;
+                return {};
             });
         });
     }
-    var RN = getRN() || {};
-    var ios = RN.Platform && RN.Platform.OS === "ios";
-    if (ios && String(uri).indexOf("data:") !== 0) {
-        return withTimeout(readFileBase64(uri), 8000, "could not read image").then(function (b64) {
-            if (!b64) throw new Error("empty file");
-            return sendUri("data:" + type + ";base64," + b64);
-        }).catch(function () {
-            return sendUri(uri);
-        });
-    }
-    return sendUri(uri);
+    return withTimeout(resolveUploadUri(asset).then(sendUri), 25000, "upload timed out — use a smaller PNG");
 }
 
 function openCreateDecoration() {
@@ -2293,7 +2330,18 @@ function CreateDecorationPage() {
         }
         if (creating) return;
         setCreating(true);
+        showToast("Uploading…");
+        var finished = false;
+        var dog = setTimeout(function () {
+            if (finished) return;
+            finished = true;
+            setCreating(false);
+            showToast("Upload timed out. Use a smaller PNG (under 1MB).");
+        }, 20000);
         createDecorationUpload(asset, name).then(function (created) {
+            if (finished) return;
+            finished = true;
+            clearTimeout(dog);
             createDraft.asset = null;
             createDraft.alt = "";
             if (created && created.hash) {
@@ -2311,6 +2359,9 @@ function CreateDecorationPage() {
                 openDecorTab("Custom", CustomPage);
             }, 200);
         }).catch(function (err) {
+            if (finished) return;
+            finished = true;
+            clearTimeout(dog);
             logError("create", err);
             setCreating(false);
             showToast(String((err && err.message) || err || "Failed to create").slice(0, 140));
