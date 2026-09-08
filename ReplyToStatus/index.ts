@@ -3,11 +3,12 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.0.5
+  build: 1.0.6
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
 var overlayListeners = [];
+var lastOpenAt = 0;
 var QUICK_REACTS = ["\uD83D\uDC4D", "\u2764\uFE0F", "\uD83D\uDE02", "\uD83D\uDD25", "\uD83C\uDF89", "\uD83D\uDE2E", "\uD83D\uDE22", "\uD83D\uDE4F"];
 var STATUS_TYPE = 4;
 
@@ -643,6 +644,21 @@ function closeReplyWindow() {
     notifyOverlay();
 }
 
+function openReplySheet(user, status) {
+    var Lazy = findByProps("openLazy", "hideActionSheet") || findByProps("openLazy");
+    if (!Lazy || typeof Lazy.openLazy !== "function") return false;
+    var props = { user: user, status: status };
+    try {
+        Lazy.openLazy(Promise.resolve({ default: ReplySheet }), "MimeReplyToStatus", props);
+        return true;
+    } catch (_e) {}
+    try {
+        Lazy.openLazy(function () { return { default: ReplySheet }; }, "MimeReplyToStatus", props);
+        return true;
+    } catch (_e2) {}
+    return false;
+}
+
 function openReplyWindow(userId, statusHint) {
     if (shouldSkipUser(userId)) {
         showToast("Can't reply to your own status");
@@ -654,9 +670,13 @@ function openReplyWindow(userId, statusHint) {
         return false;
     }
     var user = getUser(userId) || { id: userId };
+    var now = Date.now();
+    if (now - lastOpenAt < 600) return true;
+    lastOpenAt = now;
     overlay = { open: true, user: user, status: status, sending: false };
     notifyOverlay();
     log("open reply", userId, formatQuote(status));
+    if (openReplySheet(user, status)) return true;
     return true;
 }
 
@@ -665,7 +685,7 @@ function setSending(v) {
     notifyOverlay();
 }
 
-function ReplySheet() {
+function ReplySheet(props) {
     var React = getReact();
     var RN = getRN() || {};
     var View = RN.View;
@@ -675,8 +695,8 @@ function ReplySheet() {
     var ScrollView = RN.ScrollView || View;
     if (!React || !View || !Text) return null;
     var t = themeColors();
-    var user = overlay.user;
-    var status = overlay.status;
+    var user = (props && props.user) || overlay.user;
+    var status = (props && props.status) || overlay.status;
     var sending = overlay.sending;
     var quote = formatQuote(status);
     var name = displayName(user);
@@ -943,6 +963,77 @@ function replyIconElement(color, size) {
     return Text ? h(Text, { style: { color: color, fontSize: size, fontWeight: "700" } }, "\u21A9") : null;
 }
 
+function getTypeName(type) {
+    if (!type) return "";
+    if (typeof type === "string") return type;
+    if (type.displayName) return String(type.displayName);
+    if (type.name && type.name !== "anonymous" && type.name !== "_default") return String(type.name);
+    if (type.type) return getTypeName(type.type);
+    if (type.render) return getTypeName(type.render);
+    return "";
+}
+
+function isStatusTypeName(name) {
+    if (!name) return false;
+    if (/MemberList|GuildMember|NameTag|ListItem/i.test(name)) return false;
+    return /CustomStatus|UserProfileStatus|ActivityStatus|StatusEmoji|StatusText|StatusCard|ProfileCustomStatus/i.test(name);
+}
+
+function makeOutputWrapper(Inner, userId, status) {
+    if (typeof Inner === "function" && Inner.__mimeRtsStatusWrap) return Inner;
+    function MimeRtsWrap(props) {
+        var el = h(Inner, props);
+        return wrapWithReplyArrow(el, userId, status);
+    }
+    MimeRtsWrap.__mimeRtsStatusWrap = true;
+    MimeRtsWrap.displayName = "MimeRtsWrap";
+    return MimeRtsWrap;
+}
+
+function looksLikeStatusChip(node, status) {
+    if (!node || !node.props || !status) return false;
+    if (statusFromProps(node.props)) return true;
+    var txt = collectText(node, [], 0).join(" ");
+    var seed = status.text || status.emojiName || "";
+    if (!seed || txt.indexOf(seed) < 0) return false;
+    if (txt.length > seed.length + 96) return false;
+    return styleHasRadius(node.props.style) || txt.length <= seed.length + 24;
+}
+
+function decorateProfileTree(node, userId, status) {
+    if (node == null || typeof node !== "object") return node;
+    if (node.__mimeRtsDecorated) return node;
+    if (Array.isArray(node)) {
+        var changed = false;
+        var arr = [];
+        for (var i = 0; i < node.length; i++) {
+            var n = decorateProfileTree(node[i], userId, status);
+            if (n !== node[i]) changed = true;
+            arr.push(n);
+        }
+        return changed ? arr : node;
+    }
+    if (!node.type && !node.props) return node;
+    var props = node.props || {};
+    var nextChildren = decorateProfileTree(props.children, userId, status);
+    var type = node.type;
+    var name = getTypeName(type);
+    var asStatusComp = (typeof type === "function" || (type && typeof type === "object"))
+        && (isStatusTypeName(name) || !!statusFromProps(props));
+    if (asStatusComp && /UserProfileActionSheet|UserProfileModal|^UserProfile$|UserProfileHeader/i.test(name)) {
+        asStatusComp = false;
+    }
+    var asChip = !asStatusComp && looksLikeStatusChip(node, status);
+    if (!asStatusComp && !asChip && nextChildren === props.children) return node;
+    var nextType = asStatusComp ? makeOutputWrapper(type, userId, status) : type;
+    var merged = Object.assign({}, props);
+    if (nextChildren !== props.children) merged.children = nextChildren;
+    var created = h(nextType, merged);
+    if (!created) return node;
+    if (asChip) created = wrapWithReplyArrow(created, userId, status);
+    return created;
+}
+
 function wrapWithReplyArrow(el, userId, status) {
     if (!el || el.__mimeRtsDecorated) return el;
     var RN = getRN() || {};
@@ -950,22 +1041,28 @@ function wrapWithReplyArrow(el, userId, status) {
     var Pressable = RN.Pressable || RN.TouchableOpacity || RN.TouchableHighlight;
     if (!View || !Pressable) return el;
     var t = themeColors();
-    function fire() {
+    function fire(e) {
+        try {
+            if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+            if (e && typeof e.preventDefault === "function") e.preventDefault();
+        } catch (_e) {}
         openReplyWindow(userId, status || customStatusForUser(userId));
     }
-    var icon = replyIconElement("#ffffff", 16);
+    var icon = replyIconElement(t.text, 16);
     var btn = h(Pressable, {
         onPress: fire,
+        onPressIn: fire,
         hitSlop: 8,
+        pointerEvents: "auto",
         accessibilityLabel: "Reply to Status",
         style: {
             position: "absolute",
-            top: 4,
+            bottom: 4,
             right: 4,
             width: 28,
             height: 28,
             borderRadius: 8,
-            backgroundColor: t.brand,
+            backgroundColor: t.bg,
             alignItems: "center",
             justifyContent: "center",
             zIndex: 80,
@@ -974,7 +1071,7 @@ function wrapWithReplyArrow(el, userId, status) {
     }, icon);
     var wrapped = h(View, {
         pointerEvents: "box-none",
-        style: { position: "relative", overflow: "visible", alignSelf: "stretch" }
+        style: { position: "relative", overflow: "visible", alignSelf: "flex-start" }
     }, el, btn);
     if (wrapped) wrapped.__mimeRtsDecorated = true;
     return wrapped || el;
@@ -1091,9 +1188,9 @@ function afterProfileRender(args, res) {
     var status = statusFromProps(props) || customStatusForUser(userId);
     if (!status || !res) return overlayAnchored ? res : injectOverlay(res);
     var decorated = res;
-    try { decorated = decorateTree(res, userId, status); } catch (err) { logError("decorate", err); }
+    try { decorated = decorateProfileTree(res, userId, status); } catch (err) { logError("decorateProfile", err); }
     if (!treeHasArrow(decorated)) {
-        try { decorated = wrapSheetWithFloatingButton(res, userId, status); } catch (_e2) {}
+        try { decorated = decorateTree(res, userId, status); } catch (err2) { logError("decorate", err2); }
     }
     if (!overlayAnchored) decorated = injectOverlay(decorated);
     return decorated;
@@ -1265,11 +1362,6 @@ function afterStatusRender(args, res) {
 
 function patchStatusComponents() {
     var names = [
-        "CustomStatus",
-        "UserStatus",
-        "ActivityStatus",
-        "StatusEmojiAndText",
-        "CustomStatusText",
         "UserProfileCustomStatus",
         "ProfileCustomStatus",
         "ProfileCustomStatusSection",
@@ -1392,6 +1484,7 @@ const plugin = definePlugin({
     sendStatusReply: sendStatusReply,
     wrapWithReplyArrow: wrapWithReplyArrow,
     decorateTree: decorateTree,
+    decorateProfileTree: decorateProfileTree,
     isSmallStatusNode: isSmallStatusNode,
     isEsClass: isEsClass,
     wrapComponentModule: wrapComponentModule,
