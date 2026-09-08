@@ -765,8 +765,33 @@ function showToast(message) {
 }
 
 function hideSheet() {
-    var Lazy = findByProps("hideActionSheet", "openLazy");
-    try { if (Lazy && Lazy.hideActionSheet) Lazy.hideActionSheet(); } catch (_e) {}
+    var keys = [undefined, "ActionSheet", "mime-decor-screen"];
+    var mods = [
+        findByProps("hideActionSheet", "openLazy"),
+        findByProps("hideActionSheet"),
+        findByProps("ActionSheet")
+    ];
+    var i;
+    var j;
+    for (i = 0; i < mods.length; i++) {
+        var m = mods[i];
+        if (!m) continue;
+        var fn = m.hideActionSheet || (m.ActionSheet && m.ActionSheet.hideActionSheet);
+        if (typeof fn !== "function") continue;
+        for (j = 0; j < keys.length; j++) {
+            try {
+                if (keys[j] === undefined) fn.call(m);
+                else fn.call(m, keys[j]);
+            } catch (_e) {}
+        }
+        try { fn.call(m, true); } catch (_e2) {}
+    }
+    var Flux = getFluxDispatcher();
+    if (Flux && typeof Flux.dispatch === "function") {
+        try { Flux.dispatch({ type: "HIDE_ACTION_SHEET" }); } catch (_e3) {}
+        try { Flux.dispatch({ type: "ACTION_SHEET_HIDDEN" }); } catch (_e4) {}
+        try { Flux.dispatch({ type: "ACTION_SHEET_HIDDEN", key: "ActionSheet" }); } catch (_e5) {}
+    }
 }
 
 function getWebView() {
@@ -1422,15 +1447,23 @@ function themeColors() {
 }
 
 function closeDecorScreen() {
-    var modals = findByProps("pushModal", "popModal") || findByProps("popModal");
-    var keys = ["mime-decor-screen", "create-decoration", "decor-presets"];
-    if (modals && typeof modals.popModal === "function") {
-        for (var i = 0; i < keys.length; i++) {
-            try { modals.popModal(keys[i]); } catch (_e) {}
-        }
-        try { modals.popModal(); } catch (_e2) {}
-    }
     hideSheet();
+    var modals = findByProps("pushModal", "popModal") || findByProps("popModal") || findByProps("popAllModals");
+    var keys = ["mime-decor-screen", "create-decoration", "decor-presets"];
+    if (modals) {
+        if (typeof modals.popModal === "function") {
+            for (var i = 0; i < keys.length; i++) {
+                try { modals.popModal(keys[i]); } catch (_e) {}
+            }
+            try { modals.popModal(); } catch (_e2) {}
+        }
+        if (typeof modals.popAllModals === "function") {
+            try { modals.popAllModals(); } catch (_e3) {}
+        }
+    }
+    var nav = findByProps("pop", "push", "goBack");
+    try { if (nav && typeof nav.goBack === "function") nav.goBack(); } catch (_e4) {}
+    try { if (nav && typeof nav.pop === "function") nav.pop(); } catch (_e5) {}
 }
 
 function DecorScreenShell(props) {
@@ -1445,30 +1478,32 @@ function DecorScreenShell(props) {
     var sz = screenSize();
     var comps = (getMod().metro && getMod().metro.common && getMod().metro.common.components) || {};
     var DText = comps.Text;
+    var Touchable = RN.TouchableOpacity || Pressable;
     function titleEl() {
-        if (DText) return h(DText, { variant: "heading-lg/semibold", color: "header-primary", style: { flex: 1, textAlign: "center", marginRight: 64 } }, props.title || "");
-        return Text ? h(Text, { style: { color: t.header, fontSize: 16, fontWeight: "700", flex: 1, textAlign: "center", marginRight: 64 } }, props.title || "") : null;
+        if (DText) return h(DText, { variant: "heading-lg/semibold", color: "header-primary", style: { flex: 1, textAlign: "center", pointerEvents: "none" } }, props.title || "");
+        return Text ? h(Text, { style: { color: t.header, fontSize: 16, fontWeight: "700", flex: 1, textAlign: "center" }, pointerEvents: "none" }, props.title || "") : null;
     }
-    function closeEl() {
-        if (DText) return h(DText, { variant: "text-md/medium", color: "text-link" }, "Close");
-        return Text ? h(Text, { style: { color: t.link, fontSize: 16 } }, "Close") : null;
-    }
+    var closeLabel = Text ? h(Text, { style: { color: t.link, fontSize: 16, fontWeight: "600" } }, "Close") : "Close";
     var header = h(View, {
         style: {
-            height: 48,
+            height: 52,
             flexDirection: "row",
             alignItems: "center",
-            paddingHorizontal: 8,
+            paddingHorizontal: 4,
             borderBottomWidth: 1,
             borderBottomColor: t.border,
-            backgroundColor: t.bg
+            backgroundColor: t.bg,
+            zIndex: 30,
+            elevation: 30
         }
     },
-        Pressable ? h(Pressable, {
-            onPress: closeDecorScreen,
-            hitSlop: 12,
-            style: { paddingHorizontal: 12, paddingVertical: 8 }
-        }, closeEl()) : null,
+        Touchable ? h(Touchable, {
+            onPress: function () { closeDecorScreen(); },
+            accessibilityRole: "button",
+            accessibilityLabel: "Close",
+            hitSlop: { top: 16, bottom: 16, left: 16, right: 16 },
+            style: { minWidth: 72, height: 44, paddingHorizontal: 12, justifyContent: "center", zIndex: 40, elevation: 40 }
+        }, closeLabel) : null,
         titleEl()
     );
     var body = Page ? h(Page, null) : null;
