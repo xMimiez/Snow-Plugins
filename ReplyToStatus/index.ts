@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.0.0
+  build: 1.0.1
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -400,7 +400,23 @@ function formatQuote(status) {
 
 function displayName(user) {
     if (!user) return "this user";
+    if (typeof user === "string") return user;
     return user.globalName || user.global_name || user.displayName || user.username || "this user";
+}
+
+function nameForUser(userId) {
+    if (overlay.user && String(overlay.user.id) === String(userId)) return displayName(overlay.user);
+    return displayName(getUser(userId));
+}
+
+function formatStatusReplyMessage(name, status, content, kind) {
+    kind = kind || "Replied";
+    var who = displayName(name);
+    var lines = ["> -# *" + kind + " to " + who + "'s status*"];
+    var quote = formatQuote(status);
+    if (quote) lines.push("> " + quote);
+    lines.push(String(content || ""));
+    return lines.join("\n");
 }
 
 function shouldSkipUser(userId) {
@@ -421,28 +437,9 @@ function statusApiObject(status) {
     return o;
 }
 
-function buildSendBodies(content, userId, status) {
-    var st = statusApiObject(status);
-    var quote = formatQuote(status);
-    var bodies = [];
-    if (st) {
-        bodies.push({ content: content, custom_status: st });
-        bodies.push({ content: content, custom_status_reply: st });
-        bodies.push({
-            content: content,
-            referenced_custom_status: {
-                user_id: String(userId),
-                text: st.text,
-                emoji_name: st.emoji_name,
-                emoji_id: st.emoji_id
-            }
-        });
-    }
-    if (quote) {
-        bodies.push({ content: "> " + quote + "\n" + content });
-    }
-    bodies.push({ content: content });
-    return bodies;
+function buildSendBodies(content, userId, status, name, kind) {
+    var msg = formatStatusReplyMessage(name || nameForUser(userId), status, content, kind || "Replied");
+    return [{ content: msg }];
 }
 
 function getRest() {
@@ -612,23 +609,19 @@ function sendStatusReply(userId, content, status) {
     var trimmed = String(content || "").replace(/^\s+|\s+$/g, "");
     if (!trimmed) return Promise.reject(new Error("empty"));
     var extra = { location: "CUSTOM_STATUS_REPLY", customStatus: statusApiObject(status) };
-    return sendViaNative(userId, trimmed, status, null).then(function (ok) {
-        if (ok) return true;
-        return openDm(userId).then(function (channelId) {
-            if (!channelId) throw new Error("could not open DM");
-            return sendBodiesToChannel(channelId, buildSendBodies(trimmed, userId, status), extra);
-        });
+    var name = nameForUser(userId);
+    return openDm(userId).then(function (channelId) {
+        if (!channelId) throw new Error("could not open DM");
+        return sendBodiesToChannel(channelId, buildSendBodies(trimmed, userId, status, name, "Replied"), extra);
     });
 }
 
 function sendStatusReaction(userId, emoji, status) {
     var extra = { location: "CUSTOM_STATUS_REACTION", customStatus: statusApiObject(status) };
-    return sendViaNative(userId, emoji, status, emoji).then(function (ok) {
-        if (ok) return true;
-        return openDm(userId).then(function (channelId) {
-            if (!channelId) throw new Error("could not open DM");
-            return sendBodiesToChannel(channelId, buildSendBodies(emoji, userId, status), extra);
-        });
+    var name = nameForUser(userId);
+    return openDm(userId).then(function (channelId) {
+        if (!channelId) throw new Error("could not open DM");
+        return sendBodiesToChannel(channelId, buildSendBodies(emoji, userId, status, name, "Reacted"), extra);
     });
 }
 
@@ -1017,6 +1010,7 @@ const plugin = definePlugin({
     extractCustomStatus: extractCustomStatus,
     userIdFromProps: userIdFromProps,
     formatQuote: formatQuote,
+    formatStatusReplyMessage: formatStatusReplyMessage,
     buildSendBodies: buildSendBodies,
     shouldSkipUser: shouldSkipUser,
     statusApiObject: statusApiObject,
