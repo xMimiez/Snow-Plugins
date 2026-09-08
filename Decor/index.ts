@@ -8,7 +8,7 @@
   https://github.com/Equicord/Equicord/tree/main/src/plugins/decor
   https://github.com/decor-discord/vendetta-plugin
   https://codeberg.org/raincord/rain/src/commit/333142c78140586c458002bda0f502e7d4053fdf/src/plugins/decor
-  build: 1.1.6
+  build: 1.1.7
 */
 var unpatches = [];
 var _storage;
@@ -2200,72 +2200,124 @@ function xhrPutForm(url, form) {
     });
 }
 
-function arrayBufferToDataUri(buf, type) {
-    var bytes = new Uint8Array(buf);
-    var bin = "";
-    var i;
-    var step = 0x8000;
-    for (i = 0; i < bytes.length; i += step) {
-        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+function decodeBase64(b64) {
+    b64 = String(b64 || "").replace(/[^A-Za-z0-9+/=]/g, "");
+    if (!b64) return new Uint8Array(0);
+    if (typeof atob === "function") {
+        var bin = atob(b64);
+        var bytes = new Uint8Array(bin.length);
+        var i;
+        for (i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i) & 255;
+        return bytes;
     }
-    if (typeof btoa !== "function") throw new Error("no btoa");
-    return "data:" + type + ";base64," + btoa(bin);
+    var table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    var outLen = Math.floor(b64.length * 3 / 4);
+    if (b64.charAt(b64.length - 1) === "=") outLen--;
+    if (b64.charAt(b64.length - 2) === "=") outLen--;
+    var out = new Uint8Array(outLen);
+    var o = 0;
+    var j;
+    for (j = 0; j < b64.length; j += 4) {
+        var n = (Math.max(table.indexOf(b64.charAt(j)), 0) << 18)
+            | (Math.max(table.indexOf(b64.charAt(j + 1)), 0) << 12)
+            | (Math.max(table.indexOf(b64.charAt(j + 2)), 0) << 6)
+            | Math.max(table.indexOf(b64.charAt(j + 3)), 0);
+        if (o < outLen) out[o++] = (n >> 16) & 255;
+        if (o < outLen) out[o++] = (n >> 8) & 255;
+        if (o < outLen) out[o++] = n & 255;
+    }
+    return out;
 }
 
-function resolveUploadUri(asset) {
-    var type = (asset && (asset.type || asset.mimeType)) || "image/png";
-    var uri = asset && asset.uri;
-    if (asset && asset.base64) {
-        return Promise.resolve("data:" + type + ";base64," + String(asset.base64).replace(/\s/g, ""));
+function encodeUtf8(str) {
+    if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(String(str));
+    var s = String(str);
+    var out = [];
+    var i;
+    for (i = 0; i < s.length; i++) {
+        var c = s.charCodeAt(i);
+        if (c < 128) out.push(c);
+        else if (c < 2048) out.push(192 | (c >> 6), 128 | (c & 63));
+        else out.push(224 | (c >> 12), 128 | ((c >> 6) & 63), 128 | (c & 63));
     }
-    if (uri && String(uri).indexOf("data:") === 0) return Promise.resolve(uri);
-    if (!uri) return Promise.reject(new Error("no image selected"));
-    var fromFetch = doFetch(uri).then(function (r) {
-        if (!r) throw new Error("could not open image");
-        if (typeof r.arrayBuffer === "function") return r.arrayBuffer();
-        if (typeof r.blob === "function") {
-            return r.blob().then(function (blob) {
-                if (blob && typeof blob.arrayBuffer === "function") return blob.arrayBuffer();
-                throw new Error("no arrayBuffer");
-            });
-        }
-        throw new Error("cannot read image bytes");
-    }).then(function (buf) {
-        return arrayBufferToDataUri(buf, type);
-    });
-    var fromFile = readFileBase64(uri).then(function (b64) {
-        if (!b64) throw new Error("empty file");
-        return "data:" + type + ";base64," + b64;
-    });
-    return withTimeout(fromFetch.catch(function () { return fromFile; }), 12000, "could not read that image");
+    return new Uint8Array(out);
+}
+
+function concatBytes(parts) {
+    var len = 0;
+    var i;
+    for (i = 0; i < parts.length; i++) len += parts[i].length;
+    var out = new Uint8Array(len);
+    var o = 0;
+    for (i = 0; i < parts.length; i++) {
+        out.set(parts[i], o);
+        o += parts[i].length;
+    }
+    return out;
+}
+
+function getAssetBase64(asset) {
+    if (asset && asset.base64) return Promise.resolve(String(asset.base64).replace(/\s/g, ""));
+    var uri = asset && asset.uri;
+    if (uri && String(uri).indexOf("data:") === 0) {
+        var idx = String(uri).indexOf("base64,");
+        if (idx >= 0) return Promise.resolve(String(uri).slice(idx + 7).replace(/\s/g, ""));
+    }
+    if (uri && (String(uri).indexOf("file:") === 0 || String(uri).indexOf("/") === 0)) {
+        return withTimeout(readFileBase64(uri), 4000, "could not read file");
+    }
+    return Promise.reject(new Error("no image data — pick the PNG again"));
 }
 
 function createDecorationUpload(asset, alt) {
     var name = (asset && (asset.fileName || asset.name)) || "decoration.png";
     var type = (asset && (asset.type || asset.mimeType)) || "image/png";
+    if (String(type).indexOf("/") < 0) type = "image/png";
     var altStr = altText(alt);
     if (!asset) return Promise.reject(new Error("no image selected"));
     if (!altStr) return Promise.reject(new Error("enter a decoration name"));
     if (!getToken()) return Promise.reject(new Error("not authorized with Decor"));
-    function sendUri(u) {
-        var form = new FormData();
-        form.append("image", { uri: u, type: type, name: name });
-        form.append("alt", altStr);
-        return xhrPutForm(API_URL + "/users/@me/decoration", form).catch(function () {
-            return authFetch("/users/@me/decoration", { method: "PUT", body: form }).then(function (r) {
-                if (!r) return {};
-                if (typeof r.text === "function") {
-                    return r.text().then(function (t) {
-                        t = String(t || "").trim();
-                        if (!t) return {};
-                        try { return JSON.parse(t); } catch (_e) { return {}; }
-                    });
+    return getAssetBase64(asset).then(function (b64) {
+        if (!b64) throw new Error("empty image");
+        var png = decodeBase64(b64);
+        if (!png || !png.length) throw new Error("could not decode image");
+        var boundary = "----DecorBoundary" + String(Date.now());
+        var crlf = "\r\n";
+        var head = "--" + boundary + crlf
+            + "Content-Disposition: form-data; name=\"alt\"" + crlf + crlf
+            + altStr + crlf
+            + "--" + boundary + crlf
+            + "Content-Disposition: form-data; name=\"image\"; filename=\"" + name.replace(/"/g, "") + "\"" + crlf
+            + "Content-Type: " + type + crlf + crlf;
+        var tail = crlf + "--" + boundary + "--" + crlf;
+        var body = concatBytes([encodeUtf8(head), png, encodeUtf8(tail)]);
+        var payload = body.buffer && typeof body.buffer.slice === "function"
+            ? body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)
+            : body;
+        var headers = {
+            Authorization: "Bearer " + getToken(),
+            "Content-Type": "multipart/form-data; boundary=" + boundary
+        };
+        return withTimeout(doFetch(API_URL + "/users/@me/decoration", {
+            method: "PUT",
+            headers: headers,
+            body: payload
+        }).then(function (r) {
+            if (!r) throw new Error("no response");
+            var status = r.status;
+            var read = typeof r.text === "function" ? r.text() : Promise.resolve("");
+            return read.then(function (text) {
+                text = String(text || "");
+                if (status === 401) {
+                    setToken(null);
+                    throw new Error("unauthorized");
                 }
-                return {};
+                if (status && status >= 400) throw new Error(text.slice(0, 180) || ("http " + status));
+                if (!text) return {};
+                try { return JSON.parse(text); } catch (_e) { return {}; }
             });
-        });
-    }
-    return withTimeout(resolveUploadUri(asset).then(sendUri), 25000, "upload timed out — use a smaller PNG");
+        }), 15000, "upload timed out — use a smaller PNG");
+    });
 }
 
 function openCreateDecoration() {
@@ -2337,7 +2389,7 @@ function CreateDecorationPage() {
             finished = true;
             setCreating(false);
             showToast("Upload timed out. Use a smaller PNG (under 1MB).");
-        }, 20000);
+        }, 12000);
         createDecorationUpload(asset, name).then(function (created) {
             if (finished) return;
             finished = true;
