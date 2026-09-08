@@ -1,11 +1,13 @@
 /*
-  Decor — Snow spec-3 port of Equicord/Vencord Decor (FieryFlames).
+  Decor — Snow spec-3 port of Equicord/Vencord/Rain/Vendetta Decor (FieryFlames).
   Desktop Equicord uses webpack string patches + a large profile UI.
-  This is the Vendetta/mobile path: fetch Decor API, stamp users, resolve CDN URLs.
-  Create-from-file and Equicord settings injection are not ported.
-  Original: Fiery. Snow port: Mime | N0_.q3.
+  Mobile: fetch Decor API, stamp users, resolve CDN URLs, and inject a 1:1
+  official decoration editor (preview + 72px cards) above Discord's native
+  avatar-decoration row in Edit Profile.
+  Original: Fiery. Rain/Vendetta UI. Snow port: Mime | N0_.q3.
   https://github.com/Equicord/Equicord/tree/main/src/plugins/decor
   https://github.com/decor-discord/vendetta-plugin
+  https://codeberg.org/raincord/rain/src/commit/333142c78140586c458002bda0f502e7d4053fdf/src/plugins/decor
 */
 var unpatches = [];
 var _storage;
@@ -81,13 +83,47 @@ function findByProps() {
     return null;
 }
 
-function findByName(name) {
+function findByName(name, expDefault) {
+    if (expDefault === undefined) expDefault = true;
     var roots = metroRoots();
     for (var i = 0; i < roots.length; i++) {
         var fn = roots[i].findByName;
         if (!fn) continue;
         try {
-            var found = fn.call(roots[i], name);
+            var found = fn.call(roots[i], name, expDefault);
+            if (found) return found;
+        } catch (_e) {
+            try {
+                var found2 = fn.call(roots[i], name);
+                if (found2) return found2;
+            } catch (_e2) {}
+        }
+    }
+    return null;
+}
+
+function findByDisplayName(name, expDefault) {
+    if (expDefault === undefined) expDefault = true;
+    var roots = metroRoots();
+    for (var i = 0; i < roots.length; i++) {
+        var fn = roots[i].findByDisplayName;
+        if (!fn) continue;
+        try {
+            var found = fn.call(roots[i], name, expDefault);
+            if (found) return found;
+        } catch (_e) {}
+    }
+    return null;
+}
+
+function findByTypeName(name, expDefault) {
+    if (expDefault === undefined) expDefault = true;
+    var roots = metroRoots();
+    for (var i = 0; i < roots.length; i++) {
+        var fn = roots[i].findByTypeName;
+        if (!fn) continue;
+        try {
+            var found = fn.call(roots[i], name, expDefault);
             if (found) return found;
         } catch (_e) {}
     }
@@ -582,6 +618,11 @@ function selectDecoration(decoration) {
                 applyDecorationToUser(me, asset);
                 if (me.id) usersDecorations[me.id] = asset;
                 stampUserFromStore(me.id, asset);
+                var Flux = getFluxDispatcher();
+                if (Flux && typeof Flux.dispatch === "function") {
+                    try { Flux.dispatch({ type: "CURRENT_USER_UPDATE", user: me }); } catch (_e) {}
+                    try { Flux.dispatch({ type: "USER_SETTINGS_ACCOUNT_SUBMIT_SUCCESS" }); } catch (_e2) {}
+                }
             }
             showToast(decoration ? "Decoration applied" : "Decoration cleared");
         }).catch(function (err) {
@@ -598,10 +639,626 @@ function selectDecoration(decoration) {
     return run();
 }
 
+function h(type, props) {
+    var React = getReact();
+    if (!React) return null;
+    var kids = [].slice.call(arguments, 2);
+    if (kids.length === 0) return React.createElement(type, props);
+    if (kids.length === 1) return React.createElement(type, props, kids[0]);
+    return React.createElement.apply(React, [type, props].concat(kids));
+}
+
+function findAssetId(name) {
+    var roots = metroRoots();
+    var i;
+    for (i = 0; i < roots.length; i++) {
+        var api = roots[i];
+        try {
+            if (api.assets && typeof api.assets.findAssetId === "function") {
+                var id = api.assets.findAssetId(name);
+                if (id != null) return id;
+            }
+        } catch (_e) {}
+    }
+    var mod = getMod();
+    try {
+        if (mod.api && mod.api.assets && typeof mod.api.assets.findAssetId === "function") {
+            var id2 = mod.api.assets.findAssetId(name);
+            if (id2 != null) return id2;
+        }
+    } catch (_e2) {}
+    var byName = findByProps("getAssetByName") || findByProps("registerAsset");
+    try {
+        if (byName && typeof byName.getAssetByName === "function") {
+            var asset = byName.getAssetByName(name);
+            if (asset && asset.id != null) return asset.id;
+            if (typeof asset === "number") return asset;
+        }
+    } catch (_e3) {}
+    return name;
+}
+
+function typeNameOf(node) {
+    if (!node) return "";
+    var t = node.type;
+    if (!t) return "";
+    if (typeof t === "string") return t;
+    return String((t.displayName || t.name || (t.type && (t.type.displayName || t.type.name)) || ""));
+}
+
+function isOfficialDecorNode(node) {
+    if (!node || typeof node !== "object" || !node.props) return false;
+    if (node.props.__mimeDecor) return false;
+    if (node.key === "mime-decor-picker") return false;
+    var n = typeNameOf(node);
+    if (/AvatarDecoration|DecorationPreview|CollectiblesAvatar|EditAvatarDecoration|AvatarDecorationSetting/i.test(n)) return true;
+    var p = node.props;
+    if (p.pendingAvatarDecoration !== undefined) return true;
+    if (p.avatarDecoration !== undefined && (p.onSelectAvatarDecoration || p.setPendingAvatarDecoration || p.onChangeAvatarDecoration || p.onAvatarDecorationChange)) return true;
+    if (p.section === "decoration" || p.id === "decoration" || p.setting === "decoration") return true;
+    var label = p.label || p.title || p.heading;
+    if (typeof label === "string" && /avatar decoration/i.test(label)) return true;
+    return false;
+}
+
+function injectDecorAboveOfficial(node, pickerEl) {
+    if (!node || typeof node !== "object" || !pickerEl) return false;
+    if (node.props && node.props.__mimeDecor) return true;
+    var kids = node.props && node.props.children;
+    if (kids == null) return false;
+    var isArr = Array.isArray(kids);
+    var arr = isArr ? kids : [kids];
+    var already = false;
+    var idx = -1;
+    var i;
+    for (i = 0; i < arr.length; i++) {
+        var c = arr[i];
+        if (c && ((c.props && c.props.__mimeDecor) || c.key === "mime-decor-picker")) already = true;
+        if (idx < 0 && isOfficialDecorNode(c)) idx = i;
+    }
+    if (already) return true;
+    if (idx >= 0) {
+        var next = arr.slice();
+        next.splice(idx, 0, pickerEl);
+        node.props.children = isArr ? next : (next.length === 1 ? next[0] : next);
+        return true;
+    }
+    for (i = 0; i < arr.length; i++) {
+        if (injectDecorAboveOfficial(arr[i], pickerEl)) return true;
+    }
+    return false;
+}
+
+function wrapExport(obj, key, afterFn) {
+    var orig = obj[key];
+    if (typeof orig !== "function") return null;
+    if (orig.__mimeDecorWrapped) return null;
+    function wrapped() {
+        var ret = orig.apply(this, arguments);
+        try {
+            var next = afterFn(arguments, ret);
+            if (next !== undefined) ret = next;
+        } catch (err) {
+            logError("wrap", key, err);
+        }
+        return ret;
+    }
+    wrapped.__mimeDecorWrapped = true;
+    try { Object.defineProperty(wrapped, "name", { value: orig.name }); } catch (_e) {}
+    wrapped.displayName = orig.displayName || orig.name;
+    try {
+        Object.keys(orig).forEach(function (k) {
+            try { wrapped[k] = orig[k]; } catch (_e2) {}
+        });
+    } catch (_e3) {}
+    obj[key] = wrapped;
+    unpatches.push(function () {
+        if (obj[key] === wrapped) obj[key] = orig;
+    });
+    return true;
+}
+
+function wrapComponentModule(mod, afterFn) {
+    if (!mod || typeof mod === "function") return false;
+    var ok = false;
+    if (typeof mod.default === "function" && wrapExport(mod, "default", afterFn)) ok = true;
+    if (typeof mod.type === "function" && wrapExport(mod, "type", afterFn)) ok = true;
+    if (mod.prototype && typeof mod.prototype.render === "function" && wrapExport(mod.prototype, "render", afterFn)) ok = true;
+    return ok;
+}
+
+function onEditProfileRender(_args, ret) {
+    var React = getReact();
+    if (!React || !ret) return ret;
+    var picker = React.createElement(EditProfileDecorBlock, { key: "mime-decor-picker", __mimeDecor: true });
+    injectDecorAboveOfficial(ret, picker);
+    return ret;
+}
+
+function patchNamedComponent(name) {
+    var roots = metroRoots();
+    var i;
+    for (i = 0; i < roots.length; i++) {
+        var r = roots[i];
+        var raw = null;
+        try { if (r.findByName) raw = r.findByName(name, false); } catch (_e) {}
+        if (raw && wrapComponentModule(raw, onEditProfileRender)) {
+            log("patched", name);
+            return true;
+        }
+        try { if (r.findByDisplayName) raw = r.findByDisplayName(name, false); } catch (_e2) {}
+        if (raw && wrapComponentModule(raw, onEditProfileRender)) {
+            log("patched display", name);
+            return true;
+        }
+        try { if (r.findByTypeName) raw = r.findByTypeName(name, false); } catch (_e3) {}
+        if (raw && wrapComponentModule(raw, onEditProfileRender)) {
+            log("patched type", name);
+            return true;
+        }
+    }
+    var named = findByName(name, false) || findByDisplayName(name, false) || findByTypeName(name, false);
+    if (named && wrapComponentModule(named, onEditProfileRender)) {
+        log("patched fallback", name);
+        return true;
+    }
+    return false;
+}
+
+function patchEditProfile() {
+    var names = [
+        "EditProfile",
+        "EditProfileScreen",
+        "UserSettingsEditProfile",
+        "UserSettingsEditProfileScreen",
+        "EditCurrentUserProfile",
+        "UserProfileEdit",
+        "UserProfileEditScreen",
+        "ProfileEditForm",
+        "ProfileCustomization",
+        "ProfileCustomizationScreen",
+        "UserSettingsProfile",
+        "CollectiblesProfileSettings",
+        "AvatarDecorationSettings",
+        "EditAvatarDecoration",
+        "AvatarDecorationSetting"
+    ];
+    var hit = 0;
+    for (var i = 0; i < names.length; i++) {
+        if (patchNamedComponent(names[i])) hit++;
+    }
+    log("edit-profile patches", hit);
+}
+
+function getSelectedDecoration() {
+    if (!selectedHash) return null;
+    var i;
+    var j;
+    for (i = 0; i < myDecorations.length; i++) {
+        if (myDecorations[i] && myDecorations[i].hash === selectedHash) return myDecorations[i];
+    }
+    for (i = 0; i < presets.length; i++) {
+        var decos = (presets[i] && presets[i].decorations) || [];
+        for (j = 0; j < decos.length; j++) {
+            if (decos[j] && decos[j].hash === selectedHash) return decos[j];
+        }
+    }
+    return null;
+}
+
+function presetFor(decoration) {
+    if (!decoration || !decoration.presetId) return null;
+    for (var i = 0; i < presets.length; i++) {
+        if (presets[i] && presets[i].id === decoration.presetId) return presets[i];
+    }
+    return null;
+}
+
+function currentAvatarUri() {
+    var user = getCurrentUser();
+    var resolver = findByProps("getUserAvatarURL") || findByProps("getUserAvatarURL", "getGuildMemberAvatarURL");
+    try {
+        if (resolver && user && typeof resolver.getUserAvatarURL === "function") {
+            return resolver.getUserAvatarURL(user, true, 128);
+        }
+    } catch (_e) {}
+    if (user && user.avatar) return "https://cdn.discordapp.com/avatars/" + user.id + "/" + user.avatar + ".png?size=128";
+    return null;
+}
+
+function hapticTap() {
+    var haptics = findByProps("triggerHapticFeedback");
+    try {
+        if (haptics && haptics.triggerHapticFeedback) haptics.triggerHapticFeedback(haptics.HapticFeedbackTypes && haptics.HapticFeedbackTypes.IMPACT_LIGHT);
+    } catch (_e) {}
+}
+
+function openCustomPage(title, render) {
+    var React = getReact();
+    var NavigationNative = findByProps("useNavigation", "NavigationContainer") || findByProps("useNavigation");
+    try {
+        var navigation = NavigationNative && NavigationNative.useNavigation && NavigationNative.useNavigation();
+        if (navigation && typeof navigation.push === "function") {
+            var routes = ["VendettaCustomPage", "BunnyCustomPage", "RAIN_CUSTOM_PAGE", "SNOW_CUSTOM_PAGE"];
+            for (var i = 0; i < routes.length; i++) {
+                try {
+                    navigation.push(routes[i], { title: title, render: render });
+                    return true;
+                } catch (_e) {}
+            }
+        }
+    } catch (_e2) {}
+    var Lazy = findByProps("openLazy", "hideActionSheet");
+    if (React && Lazy && typeof Lazy.openLazy === "function") {
+        function Sheet() {
+            var RN = getRN() || {};
+            var ScrollView = RN.ScrollView || RN.View;
+            return h(ScrollView, { style: { maxHeight: 520 } }, h(render, null));
+        }
+        try {
+            Lazy.openLazy(Promise.resolve({ default: Sheet }), "ActionSheet");
+            return true;
+        } catch (_e3) {}
+    }
+    return false;
+}
+
+function DecorCard(props) {
+    var RN = getRN() || {};
+    var View = RN.View;
+    var Pressable = RN.Pressable || RN.TouchableOpacity;
+    var Image = RN.Image;
+    if (!View || !Pressable) return null;
+    var selected = !!props.selected;
+    var disabled = !!props.disabled;
+    var inner = props.children;
+    if (!inner && Image && props.uri) {
+        inner = h(Image, { source: { uri: props.uri }, style: { width: 56, height: 56 } });
+    }
+    return h(Pressable, {
+        onPress: disabled ? undefined : function () {
+            hapticTap();
+            if (props.onPress) props.onPress();
+        },
+        onLongPress: disabled ? undefined : props.onLongPress,
+        disabled: disabled
+    }, h(View, {
+        style: {
+            width: 72,
+            height: 72,
+            borderRadius: 4,
+            backgroundColor: "#111214",
+            alignItems: "center",
+            justifyContent: "center",
+            borderWidth: selected ? 2 : 0,
+            borderColor: "#5865F2",
+            opacity: disabled ? 0.5 : 1
+        }
+    }, inner));
+}
+
+function CardButton(props) {
+    var RN = getRN() || {};
+    var View = RN.View;
+    var Text = RN.Text;
+    var Image = RN.Image;
+    var inner = [];
+    if (Image && props.source != null) {
+        inner.push(h(Image, { key: "icon", source: props.source, style: { width: 20, height: 20, marginBottom: 4, tintColor: "#dbdee1" } }));
+    }
+    if (Text) {
+        inner.push(h(Text, { key: "label", style: { color: "#dbdee1", fontSize: 12, fontWeight: "500" } }, props.label || ""));
+    }
+    return h(DecorCard, {
+        selected: props.selected,
+        disabled: props.disabled,
+        onPress: props.onPress
+    }, h(View, { style: { alignItems: "center", justifyContent: "center" } }, inner));
+}
+
+function DecorationTile(props) {
+    var decoration = props.decoration;
+    var selected = selectedHash === (decoration && decoration.hash);
+    var uri = decoImageUri(decoration);
+    var Cutout = findByName("CutoutableAvatarDecoration");
+    var child = null;
+    if (Cutout) {
+        child = h(Cutout, { avatarDecoration: decorationToAvatar(decoration), size: 56, animate: selected });
+    }
+    return h(DecorCard, {
+        uri: uri,
+        selected: selected,
+        disabled: props.disabled,
+        onPress: function () {
+            selectDecoration(selected ? null : decoration).then(function () {
+                if (props.onChanged) props.onChanged();
+            });
+        },
+        onLongPress: function () {
+            showToast(decoration.alt || decoration.hash);
+        }
+    }, child);
+}
+
+function AvatarDecorationPreviews(props) {
+    var RN = getRN() || {};
+    var View = RN.View;
+    var Image = RN.Image;
+    if (!View) return null;
+    var decoration = props.pendingAvatarDecoration;
+    var decoUri = null;
+    if (decoration) {
+        if (decoration.asset && /^(file|content|ph|data):/i.test(String(decoration.asset))) decoUri = decoration.asset;
+        else decoUri = getDecorAvatarDecorationURL(decoration, true) || decoImageUri(decoration);
+    }
+    var avatarUri = currentAvatarUri();
+    var Avatar = null;
+    var comps = (getMod().metro && getMod().metro.common && getMod().metro.common.components) || {};
+    if (comps.Avatar) Avatar = comps.Avatar;
+    var avatarEl = null;
+    if (Avatar) {
+        avatarEl = h(Avatar, { user: getCurrentUser(), size: "large", style: { transform: [{ scale: 3 }] } });
+    } else if (Image && avatarUri) {
+        avatarEl = h(Image, {
+            source: { uri: avatarUri },
+            style: { width: 80, height: 80, borderRadius: 40 }
+        });
+    }
+    return h(View, {
+        style: { flexDirection: "row", width: "100%", justifyContent: "center", alignItems: "center", paddingHorizontal: 16, paddingTop: 16 }
+    }, h(View, {
+        style: {
+            width: 208,
+            height: 208,
+            borderRadius: 4,
+            backgroundColor: "#111214",
+            alignItems: "center",
+            justifyContent: "center"
+        }
+    }, avatarEl, decoUri && Image ? h(Image, {
+        source: { uri: decoUri },
+        style: { position: "absolute", width: 180, height: 180 }
+    }) : null));
+}
+
+function DecorationPicker(props) {
+    var React = getReact();
+    var RN = getRN() || {};
+    var View = RN.View;
+    var Text = RN.Text;
+    var Pressable = RN.Pressable || RN.TouchableOpacity;
+    var FlatList = RN.FlatList;
+    var ScrollView = RN.ScrollView;
+    var ActivityIndicator = RN.ActivityIndicator;
+    if (!React || !View) return null;
+    var [, bump] = React.useState(0);
+    function refresh() { bump(function (n) { return n + 1; }); }
+    React.useEffect(function () {
+        loadPresets().then(refresh);
+        if (getToken()) refreshMine().then(refresh);
+    }, []);
+    var authorized = !!getToken();
+    var selected = getSelectedDecoration();
+    var selectedAvatar = selected ? decorationToAvatar(selected) : null;
+    var decorPreset = presetFor(selected);
+    var own = [];
+    var i;
+    for (i = 0; i < myDecorations.length; i++) {
+        if (myDecorations[i] && (myDecorations[i].presetId == null)) own.push(myDecorations[i]);
+    }
+    if (!own.length) own = myDecorations.slice();
+    var hasPending = myDecorations.some(function (d) { return d && d.reviewed === false; });
+    var disabled = !authorized;
+    var TextStyleSheet = (findByProps("TextStyleSheet") || {}).TextStyleSheet || {};
+    var Parser = findByProps("parse", "parseToAST");
+    var showUserProfile = (findByProps("showUserProfile") || {}).showUserProfile;
+    var UserUtils = findByProps("getUser", "fetchCurrentUser");
+    var titleStyle = TextStyleSheet["text-lg/semibold"] || { color: "#dbdee1", fontSize: 18, fontWeight: "600" };
+    var mutedStyle = TextStyleSheet.eyebrow || { color: "#949ba4", fontSize: 12, textTransform: "uppercase" };
+    var bodyStyle = TextStyleSheet["text-md/normal"] || { color: "#dbdee1", fontSize: 14 };
+
+    var meta = null;
+    if (selected && Text) {
+        var created = ["Created by "];
+        if (selected.authorId && Pressable) {
+            created.push(h(Pressable, {
+                key: "author",
+                onPress: function () {
+                    var uid = selected.authorId;
+                    try {
+                        if (showUserProfile) showUserProfile({ userId: uid });
+                        else if (UserUtils && UserUtils.getUser) UserUtils.getUser(uid);
+                    } catch (_e) {}
+                }
+            }, Parser && Parser.parse ? Parser.parse("<@" + selected.authorId + ">", true) : ("@" + selected.authorId)));
+        }
+        meta = h(View, { style: { marginTop: 12, paddingHorizontal: 16 } },
+            h(Text, { style: titleStyle }, selected.alt || selected.hash),
+            decorPreset ? h(Text, { style: [mutedStyle, { marginTop: 4 }] }, "Part of the " + decorPreset.name + " Preset") : null,
+            h(Text, { style: [bodyStyle, { marginTop: 4 }] }, created)
+        );
+    }
+
+    var tiles = [];
+    tiles.push(h(View, { key: "none", style: { marginRight: 4 } }, h(CardButton, {
+        source: findAssetId("img_none"),
+        label: "None",
+        selected: !selected,
+        disabled: disabled,
+        onPress: function () { selectDecoration(null).then(refresh); }
+    })));
+    for (i = 0; i < own.length; i++) {
+        tiles.push(h(View, { key: own[i].hash, style: { marginRight: 4 } }, h(DecorationTile, {
+            decoration: own[i],
+            disabled: disabled,
+            onChanged: refresh
+        })));
+    }
+    tiles.push(h(View, { key: "presets", style: { marginRight: 4 } }, h(CardButton, {
+        source: findAssetId("smile") || findAssetId("ReactionIcon") || findAssetId("ic_reaction_smile"),
+        label: "Presets",
+        selected: !!(selected && selected.presetId),
+        disabled: disabled,
+        onPress: function () { openCustomPage("Presets", PresetsPage); }
+    })));
+    tiles.push(h(View, { key: "new" }, h(CardButton, {
+        source: findAssetId("ic_add_24px"),
+        label: "New..",
+        disabled: disabled || hasPending,
+        onPress: function () {
+            if (hasPending) {
+                showToast("You already have a decoration pending review");
+                return;
+            }
+            openCustomPage("Submit a Decoration", CreateDecorationPage);
+        }
+    })));
+
+    var list;
+    if (FlatList) {
+        list = h(FlatList, {
+            horizontal: true,
+            showsHorizontalScrollIndicator: false,
+            data: tiles,
+            renderItem: function (info) { return info.item; },
+            keyExtractor: function (_item, index) { return String(index); },
+            snapToInterval: 74,
+            decelerationRate: "fast",
+            contentContainerStyle: { paddingHorizontal: 8, paddingVertical: 12 }
+        });
+    } else if (ScrollView) {
+        list = h(ScrollView, { horizontal: true, showsHorizontalScrollIndicator: false, contentContainerStyle: { paddingHorizontal: 8, paddingVertical: 12, flexDirection: "row" } }, tiles);
+    } else {
+        list = h(View, { style: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 8 } }, tiles);
+    }
+
+    var headerIcon = null;
+    if (!authorized && ActivityIndicator) headerIcon = null;
+    var FormTitle = ((getMod().metro && getMod().metro.common && getMod().metro.common.components && getMod().metro.common.components.FormTitle)
+        || (findByProps("FormTitle") && findByProps("FormTitle").FormTitle));
+    var titleRow = FormTitle
+        ? h(FormTitle, { title: "Decorations" })
+        : (Text ? h(Text, { style: { color: "#949ba4", fontSize: 12, fontWeight: "700", letterSpacing: 0.5, paddingHorizontal: 16, paddingTop: 8 } }, "DECORATIONS") : null);
+
+    return h(View, { __mimeDecor: true, style: { gap: 0 } },
+        h(AvatarDecorationPreviews, { pendingAvatarDecoration: selectedAvatar }),
+        meta,
+        titleRow,
+        list
+    );
+}
+
+function PresetsPage() {
+    var React = getReact();
+    var RN = getRN() || {};
+    var View = RN.View;
+    var Text = RN.Text;
+    var FlatList = RN.FlatList;
+    var ScrollView = RN.ScrollView;
+    if (!React || !View) return null;
+    var [, bump] = React.useState(0);
+    React.useEffect(function () {
+        loadPresets().then(function () { bump(function (n) { return n + 1; }); });
+    }, []);
+    function row(preset) {
+        var cards = [];
+        var decos = (preset && preset.decorations) || [];
+        for (var i = 0; i < decos.length; i++) {
+            cards.push(h(View, { key: decos[i].hash, style: { marginRight: 4 } }, h(DecorationTile, {
+                decoration: decos[i],
+                onChanged: function () { hideSheet(); }
+            })));
+        }
+        return h(View, { style: { marginBottom: 16 } },
+            Text ? h(Text, { style: { color: "#dbdee1", fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingBottom: 8 } }, preset.name) : null,
+            (preset.description && Text) ? h(Text, { style: { color: "#949ba4", fontSize: 13, paddingHorizontal: 16, paddingBottom: 8 } }, preset.description) : null,
+            h(View, { style: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 8 } }, cards)
+        );
+    }
+    if (FlatList) {
+        return h(FlatList, {
+            data: presets,
+            renderItem: function (info) { return row(info.item); },
+            keyExtractor: function (item, index) { return (item && item.id) || String(index); },
+            ListFooterComponent: function () { return h(View, { style: { height: 18 } }); }
+        });
+    }
+    var rows = [];
+    for (var i = 0; i < presets.length; i++) rows.push(h(View, { key: presets[i].id || i }, row(presets[i])));
+    return h(ScrollView, null, rows);
+}
+
+function CreateDecorationPage() {
+    var React = getReact();
+    var RN = getRN() || {};
+    var View = RN.View;
+    var Text = RN.Text;
+    var comps = (getMod().metro && getMod().metro.common && getMod().metro.common.components) || {};
+    var Button = comps.Button || comps.LegacyButton;
+    var TextInput = comps.TextInput;
+    if (!React || !View) return null;
+    var assetState = React.useState(null);
+    var altState = React.useState("");
+    var creatingState = React.useState(false);
+    var asset = assetState[0];
+    var setAsset = assetState[1];
+    var alt = altState[0];
+    var setAlt = altState[1];
+    var creating = creatingState[0];
+    var setCreating = creatingState[1];
+    var picker = findByProps("launchImageLibrary");
+    function pick() {
+        if (!picker || typeof picker.launchImageLibrary !== "function") {
+            showToast("Image picker unavailable");
+            return;
+        }
+        picker.launchImageLibrary({ mediaType: "photo" }, function (ret) {
+            if (!ret || ret.didCancel) return;
+            var picked = ret.assets && ret.assets[0];
+            if (picked) setAsset(picked);
+        });
+    }
+    function submit() {
+        if (!asset || !alt || creating) return;
+        setCreating(true);
+        var form = new FormData();
+        form.append("image", { uri: asset.uri, type: asset.type || "image/png", name: asset.fileName || "decoration.png" });
+        form.append("alt", alt);
+        authFetch("/users/@me/decoration", { method: "PUT", body: form }).then(function (r) { return r.json(); }).then(function () {
+            showToast("Decoration created and pending review");
+            refreshMine();
+            hideSheet();
+        }).catch(function (err) {
+            logError("create", err);
+            showToast("Failed to create decoration");
+            setCreating(false);
+        });
+    }
+    return h(View, { style: { padding: 16 } },
+        h(AvatarDecorationPreviews, { pendingAvatarDecoration: asset ? { asset: asset.uri, skuId: RAW_SKU_ID } : null }),
+        Text ? h(Text, { style: { color: "#949ba4", marginTop: 12, marginBottom: 8 } }, "File must be a PNG or APNG.") : null,
+        Button ? h(Button, { text: asset ? (asset.fileName || "Image selected") : "Select Image", onPress: pick }) : null,
+        TextInput ? h(TextInput, { label: "Decoration Name", placeholder: "e.g. Companion Cube", value: alt, onChange: setAlt, onChangeText: setAlt }) : null,
+        Button ? h(Button, { text: creating ? "Creating…" : "Create Decoration", disabled: !asset || !alt, onPress: submit }) : null
+    );
+}
+
+function EditProfileDecorBlock() {
+    var RN = getRN() || {};
+    var View = RN.View;
+    var Text = RN.Text;
+    if (!View) return h(DecorationPicker, null);
+    return h(View, { __mimeDecor: true, style: { marginBottom: 16, paddingBottom: 8 } },
+        Text ? h(Text, { style: { color: "#dbdee1", fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingTop: 8 } }, "Decor") : null,
+        h(DecorationPicker, null)
+    );
+}
+
 function start() {
     stop();
     patchStores();
     subscribeFlux();
+    patchEditProfile();
     loadConfig();
     loadPresets();
     var me = getCurrentUser();
@@ -627,8 +1284,6 @@ function SettingsComponent() {
     var RN = getRN() || {};
     var View = RN.View;
     var Text = RN.Text;
-    var Image = RN.Image;
-    var Pressable = RN.Pressable || RN.TouchableOpacity;
     var ScrollView = RN.ScrollView;
     var comps = (getMod().metro && getMod().metro.common && getMod().metro.common.components) || {};
     var Button = comps.Button || comps.LegacyButton;
@@ -640,73 +1295,35 @@ function SettingsComponent() {
     }, []);
     function refresh() { bump(function (n) { return n + 1; }); }
     var authorized = !!getToken();
-    var tiles = [];
-    function addTile(d, key) {
-        if (!d || !d.hash || !Pressable || !Image) return;
-        var selected = selectedHash === d.hash;
-        tiles.push(React.createElement(Pressable, {
-            key: key,
-            onPress: function () { selectDecoration(d).then(refresh); }
-        }, React.createElement(View, {
-            style: {
-                width: 72,
-                height: 72,
-                margin: 4,
-                borderRadius: 12,
-                overflow: "hidden",
-                borderWidth: selected ? 2 : 1,
-                borderColor: selected ? "#5865F2" : "#3f4147",
-                backgroundColor: "#1e1f22"
-            }
-        }, React.createElement(Image, {
-            source: { uri: decoImageUri(d) },
-            style: { width: 72, height: 72 }
-        }))));
-    }
-    var i;
-    var j;
-    for (i = 0; i < myDecorations.length; i++) addTile(myDecorations[i], "mine-" + myDecorations[i].hash);
-    for (i = 0; i < presets.length; i++) {
-        var p = presets[i];
-        var decos = (p && p.decorations) || [];
-        for (j = 0; j < decos.length; j++) addTile(decos[j], "pre-" + (p.id || i) + "-" + decos[j].hash);
-    }
     var children = [];
+    children.push(h(DecorationPicker, { key: "picker" }));
     if (Text) {
-        children.push(React.createElement(Text, {
+        children.push(h(Text, {
             key: "status",
-            style: { color: "#dbdee1", marginBottom: 8 }
-        }, authorized ? "Authorized — tap a decoration to equip." : "Tap Authorize (uses your Discord login). Then tap a tile to equip."));
+            style: { color: "#dbdee1", marginTop: 16, marginBottom: 8, paddingHorizontal: 12 }
+        }, authorized ? "Authorized with Decor." : "Authorize to equip decorations. Uses your Discord login."));
     }
     if (Button) {
-        children.push(React.createElement(Button, {
+        children.push(h(Button, {
             key: "auth",
             text: authorized ? "Re-authorize" : "Authorize with Decor",
             onPress: function () { authorize().then(refresh); setTimeout(refresh, 2000); }
         }));
-        children.push(React.createElement(Button, {
-            key: "none",
-            text: "None (clear decoration)",
-            onPress: function () { selectDecoration(null).then(refresh); }
-        }));
-        children.push(React.createElement(Button, {
+        if (authorized) {
+            children.push(h(Button, {
+                key: "logout",
+                text: "Log out",
+                onPress: function () { setToken(null); refresh(); }
+            }));
+        }
+        children.push(h(Button, {
             key: "reload",
             text: "Reload list",
             onPress: function () { refreshMine().then(refresh); }
         }));
     }
-    if (tiles.length && View) {
-        children.push(React.createElement(Text, {
-            key: "gridlabel",
-            style: { color: "#b5bac1", marginTop: 12, marginBottom: 4 }
-        }, "Equip"));
-        children.push(React.createElement(View, {
-            key: "grid",
-            style: { flexDirection: "row", flexWrap: "wrap" }
-        }, tiles));
-    }
     if (TextInput) {
-        children.push(React.createElement(TextInput, {
+        children.push(h(TextInput, {
             key: "paste",
             label: "Token fallback (only if authorize fails)",
             value: getToken() || "",
@@ -714,8 +1331,8 @@ function SettingsComponent() {
             onChangeText: function (v) { setToken(v); refresh(); }
         }));
     }
-    var inner = View ? React.createElement(View, { style: { padding: 12 } }, children) : children[0];
-    if (ScrollView) return React.createElement(ScrollView, { style: { flex: 1 } }, inner);
+    var inner = View ? h(View, { style: { paddingBottom: 40 } }, children) : children[0];
+    if (ScrollView) return h(ScrollView, { style: { flex: 1 } }, inner);
     return inner;
 }
 
@@ -734,5 +1351,8 @@ const plugin = definePlugin({
     queueFetch: queueFetch,
     handleFlux: handleFlux,
     decoImageUri: decoImageUri,
-    discordAuthorizeUrl: discordAuthorizeUrl
+    discordAuthorizeUrl: discordAuthorizeUrl,
+    isOfficialDecorNode: isOfficialDecorNode,
+    injectDecorAboveOfficial: injectDecorAboveOfficial,
+    DecorationPicker: DecorationPicker
 });
