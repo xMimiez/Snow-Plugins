@@ -148,6 +148,24 @@ function getReact() {
         || (typeof globalThis !== "undefined" && globalThis.React);
 }
 
+function getRN() {
+    var found = null;
+    eachClient(function (m) {
+        if (found) return;
+        var c = m.metro && m.metro.common;
+        if (c && c.ReactNative) found = c.ReactNative;
+    });
+    return found || findByProps("View", "Text", "Image") || findByProps("View", "Text");
+}
+
+function getDiscordToken() {
+    var auth = findByProps("getToken");
+    try {
+        if (auth && typeof auth.getToken === "function") return auth.getToken();
+    } catch (_e) {}
+    return null;
+}
+
 function getStorage() {
     if (_storage) return _storage;
     try { _storage = getMod().plugin.createStorage(); } catch (_e) { _storage = {}; }
@@ -391,51 +409,97 @@ function getWebView() {
 }
 
 function discordAuthorizeUrl() {
-    return "https://discord.com/api/oauth2/authorize"
+    return "https://discord.com/oauth2/authorize"
         + "?client_id=" + encodeURIComponent(CLIENT_ID)
         + "&redirect_uri=" + encodeURIComponent(AUTHORIZE_URL)
         + "&response_type=code&scope=identify";
 }
 
-function finishAuthFromRedirect(location) {
+function decoImageUri(decoration) {
+    var asset = decorationToAsset(decoration);
+    if (!asset) return null;
+    return CDN_URL + "/" + asset + ".png";
+}
+
+function exchangeDecorToken(location) {
     var url = String(location || "");
-    if (!url || url.indexOf(AUTHORIZE_URL) !== 0) return false;
-    if (url.indexOf("code=") < 0 && url.indexOf("error=") < 0) return false;
+    if (!url) return Promise.reject(new Error("no location"));
+    if (url.indexOf("http") !== 0 && url.charAt(0) === "/") url = "https://discord.com" + url;
+    if (url.indexOf(AUTHORIZE_URL) !== 0 && url.indexOf("code=") < 0) {
+        return Promise.reject(new Error("not a Decor redirect"));
+    }
     if (url.indexOf("client=") < 0) url += (url.indexOf("?") >= 0 ? "&" : "?") + "client=snow";
-    doFetch(url).then(function (r) { return r.text(); }).then(function (token) {
+    return doFetch(url).then(function (r) { return r.text(); }).then(function (token) {
         token = String(token || "").trim();
         if (!token || token.length < 8) throw new Error("empty token");
         setToken(token);
         hideSheet();
         showToast("Decor authorized");
-        refreshMine();
         log("authorized");
-    }).catch(function (err) {
+        return refreshMine();
+    });
+}
+
+function finishAuthFromRedirect(location) {
+    var url = String(location || "");
+    if (!url) return false;
+    var isDecor = url.indexOf(AUTHORIZE_URL) === 0 || (url.indexOf("decor.fieryflames.dev") >= 0 && url.indexOf("code=") >= 0);
+    if (!isDecor) return false;
+    if (url.indexOf("code=") < 0 && url.indexOf("error=") < 0) return false;
+    exchangeDecorToken(url).catch(function (err) {
         logError("authorize", err);
         showToast("Decor authorize failed");
     });
     return true;
 }
 
-function authorize() {
+function authorizeSilent() {
+    var discordToken = getDiscordToken();
+    if (!discordToken) return Promise.reject(new Error("no Discord token"));
+    var qs = "client_id=" + encodeURIComponent(CLIENT_ID)
+        + "&response_type=code"
+        + "&redirect_uri=" + encodeURIComponent(AUTHORIZE_URL)
+        + "&scope=identify";
+    return doFetch("https://discord.com/api/v9/oauth2/authorize?" + qs, {
+        method: "POST",
+        headers: {
+            Authorization: discordToken,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ authorize: true, permissions: "0", integration_type: 0 })
+    }).then(function (r) {
+        if (!r || !r.ok) throw new Error("http " + (r && r.status));
+        return r.json();
+    }).then(function (data) {
+        var loc = data && (data.location || data.redirect_to || data.redirect_uri);
+        if (!loc) throw new Error("no redirect");
+        return exchangeDecorToken(loc);
+    });
+}
+
+function authorizeWebView() {
     var React = getReact();
     var Lazy = findByProps("openLazy", "hideActionSheet");
     var WebView = getWebView();
+    var Sheet = findByProps("ActionSheet");
     var uri = discordAuthorizeUrl();
     if (React && Lazy && typeof Lazy.openLazy === "function" && WebView) {
         var handled = false;
         function AuthSheet() {
-            return React.createElement(WebView, {
+            var web = React.createElement(WebView, {
                 source: { uri: uri },
                 originWhitelist: ["*"],
-                style: { height: 520, width: "100%" },
+                incognito: false,
+                sharedCookiesEnabled: true,
+                thirdPartyCookiesEnabled: true,
+                style: { height: 520, width: "100%", backgroundColor: "#2b2d31" },
                 onNavigationStateChange: function (nav) {
                     if (handled || !nav || !nav.url) return;
                     if (finishAuthFromRedirect(nav.url)) handled = true;
                 },
                 onShouldStartLoadWithRequest: function (req) {
                     var u = req && req.url;
-                    if (u && u.indexOf(AUTHORIZE_URL) === 0) {
+                    if (u && (u.indexOf(AUTHORIZE_URL) === 0 || (u.indexOf("decor.fieryflames.dev") >= 0 && u.indexOf("code=") >= 0))) {
                         if (!handled) {
                             handled = true;
                             finishAuthFromRedirect(u);
@@ -445,61 +509,93 @@ function authorize() {
                     return true;
                 }
             });
+            if (Sheet && Sheet.ActionSheet) return React.createElement(Sheet.ActionSheet, null, web);
+            return web;
         }
         try {
             Lazy.openLazy(Promise.resolve({ default: AuthSheet }), "ActionSheet");
             log("opened WebView authorize");
-            return;
+            return true;
         } catch (err) {
             logError("openLazy authorize", err);
         }
     }
-    var Linking = findByProps("openURL", "openDeeplink") || findByProps("openURL");
-    if (Linking && typeof Linking.openURL === "function") {
-        try { Linking.openURL(uri); } catch (_e2) {}
-        showToast("Finish login, then paste the Decor token in settings");
-        return;
-    }
-    showToast("No WebView — paste a Decor token in settings");
+    return false;
+}
+
+function authorize() {
+    showToast("Authorizing Decor…");
+    return authorizeSilent().catch(function (err) {
+        logError("silent auth", err);
+        if (authorizeWebView()) return;
+        var Linking = findByProps("openURL", "openDeeplink") || findByProps("openURL");
+        if (Linking && typeof Linking.openURL === "function") {
+            try { Linking.openURL(discordAuthorizeUrl()); } catch (_e2) {}
+            showToast("Finish login, then paste the Decor token in settings");
+            return;
+        }
+        showToast("Could not authorize — paste a Decor token in settings");
+    });
+}
+
+function loadPresets() {
+    return doFetch(API_URL + "/decorations/presets").then(function (r) { return r.json(); }).then(function (p) {
+        presets = p || [];
+        log("presets", presets.length);
+        return presets;
+    }).catch(function (err) {
+        logError("presets", err);
+        return [];
+    });
 }
 
 function refreshMine() {
-    if (!getToken()) return Promise.resolve();
-    return Promise.all([
-        authFetch("/users/@me/decorations").then(function (r) { return r.json(); }).catch(function () { return []; }),
-        authFetch("/users/@me/decoration").then(function (r) { return r.json(); }).catch(function () { return null }),
-        doFetch(API_URL + "/decorations/presets").then(function (r) { return r.json(); }).catch(function () { return []; })
-    ]).then(function (parts) {
-        myDecorations = parts[0] || [];
-        var selected = parts[1];
-        selectedHash = selected && selected.hash ? selected.hash : null;
-        presets = parts[2] || [];
+    var jobs = [loadPresets()];
+    if (getToken()) {
+        jobs.push(authFetch("/users/@me/decorations").then(function (r) { return r.json(); }).catch(function () { return []; }));
+        jobs.push(authFetch("/users/@me/decoration").then(function (r) { return r.json(); }).catch(function () { return null; }));
+    }
+    return Promise.all(jobs).then(function (parts) {
+        if (parts[1]) myDecorations = parts[1] || [];
+        if (parts[2] !== undefined) {
+            var selected = parts[2];
+            selectedHash = selected && selected.hash ? selected.hash : null;
+        }
         log("mine", myDecorations.length, "presets", presets.length);
     });
 }
 
 function selectDecoration(decoration) {
-    if (!getToken()) {
-        showToast("Authorize with Decor first");
-        return Promise.resolve();
-    }
-    var body = new FormData();
-    if (!decoration) body.append("hash", "null");
-    else body.append("hash", decoration.hash);
-    return authFetch("/users/@me/decoration", { method: "PUT", body: body }).then(function () {
-        selectedHash = decoration ? decoration.hash : null;
-        var me = getCurrentUser();
-        var asset = decoration ? decorationToAsset(decoration) : null;
-        if (me) {
-            applyDecorationToUser(me, asset);
-            if (me.id) usersDecorations[me.id] = asset;
-            stampUserFromStore(me.id, asset);
+    var run = function () {
+        if (!getToken()) {
+            showToast("Authorize with Decor first");
+            return Promise.resolve();
         }
-        showToast(decoration ? "Decoration applied" : "Decoration cleared");
-    }).catch(function (err) {
-        logError("select", err);
-        showToast("Failed to apply decoration");
-    });
+        var body = new FormData();
+        if (!decoration) body.append("hash", "null");
+        else body.append("hash", decoration.hash);
+        return authFetch("/users/@me/decoration", { method: "PUT", body: body }).then(function () {
+            selectedHash = decoration ? decoration.hash : null;
+            var me = getCurrentUser();
+            var asset = decoration ? decorationToAsset(decoration) : null;
+            if (me) {
+                applyDecorationToUser(me, asset);
+                if (me.id) usersDecorations[me.id] = asset;
+                stampUserFromStore(me.id, asset);
+            }
+            showToast(decoration ? "Decoration applied" : "Decoration cleared");
+        }).catch(function (err) {
+            logError("select", err);
+            showToast("Failed to apply decoration");
+        });
+    };
+    if (!getToken()) {
+        return authorizeSilent().then(run).catch(function () {
+            authorize();
+            return Promise.resolve();
+        });
+    }
+    return run();
 }
 
 function start() {
@@ -507,6 +603,7 @@ function start() {
     patchStores();
     subscribeFlux();
     loadConfig();
+    loadPresets();
     var me = getCurrentUser();
     if (me) queueFetch(me.id, true);
     if (getToken()) refreshMine();
@@ -527,62 +624,99 @@ function stop() {
 function SettingsComponent() {
     var React = getReact();
     if (!React) return null;
+    var RN = getRN() || {};
+    var View = RN.View;
+    var Text = RN.Text;
+    var Image = RN.Image;
+    var Pressable = RN.Pressable || RN.TouchableOpacity;
+    var ScrollView = RN.ScrollView;
     var comps = (getMod().metro && getMod().metro.common && getMod().metro.common.components) || {};
-    var TableRowGroup = comps.TableRowGroup;
-    var TableRow = comps.TableRow;
     var Button = comps.Button || comps.LegacyButton;
-    var [, bump] = React.useState(0);
-    function refresh() { bump(function (n) { return n + 1; }); }
-    var children = [];
-    var authorized = !!getToken();
     var TextInput = comps.TextInput;
+    var [, bump] = React.useState(0);
+    React.useEffect(function () {
+        loadPresets().then(function () { bump(function (n) { return n + 1; }); });
+        if (getToken()) refreshMine().then(function () { bump(function (n) { return n + 1; }); });
+    }, []);
+    function refresh() { bump(function (n) { return n + 1; }); }
+    var authorized = !!getToken();
+    var tiles = [];
+    function addTile(d, key) {
+        if (!d || !d.hash || !Pressable || !Image) return;
+        var selected = selectedHash === d.hash;
+        tiles.push(React.createElement(Pressable, {
+            key: key,
+            onPress: function () { selectDecoration(d).then(refresh); }
+        }, React.createElement(View, {
+            style: {
+                width: 72,
+                height: 72,
+                margin: 4,
+                borderRadius: 12,
+                overflow: "hidden",
+                borderWidth: selected ? 2 : 1,
+                borderColor: selected ? "#5865F2" : "#3f4147",
+                backgroundColor: "#1e1f22"
+            }
+        }, React.createElement(Image, {
+            source: { uri: decoImageUri(d) },
+            style: { width: 72, height: 72 }
+        }))));
+    }
+    var i;
+    var j;
+    for (i = 0; i < myDecorations.length; i++) addTile(myDecorations[i], "mine-" + myDecorations[i].hash);
+    for (i = 0; i < presets.length; i++) {
+        var p = presets[i];
+        var decos = (p && p.decorations) || [];
+        for (j = 0; j < decos.length; j++) addTile(decos[j], "pre-" + (p.id || i) + "-" + decos[j].hash);
+    }
+    var children = [];
+    if (Text) {
+        children.push(React.createElement(Text, {
+            key: "status",
+            style: { color: "#dbdee1", marginBottom: 8 }
+        }, authorized ? "Authorized — tap a decoration to equip." : "Tap Authorize (uses your Discord login). Then tap a tile to equip."));
+    }
+    if (Button) {
+        children.push(React.createElement(Button, {
+            key: "auth",
+            text: authorized ? "Re-authorize" : "Authorize with Decor",
+            onPress: function () { authorize().then(refresh); setTimeout(refresh, 2000); }
+        }));
+        children.push(React.createElement(Button, {
+            key: "none",
+            text: "None (clear decoration)",
+            onPress: function () { selectDecoration(null).then(refresh); }
+        }));
+        children.push(React.createElement(Button, {
+            key: "reload",
+            text: "Reload list",
+            onPress: function () { refreshMine().then(refresh); }
+        }));
+    }
+    if (tiles.length && View) {
+        children.push(React.createElement(Text, {
+            key: "gridlabel",
+            style: { color: "#b5bac1", marginTop: 12, marginBottom: 4 }
+        }, "Equip"));
+        children.push(React.createElement(View, {
+            key: "grid",
+            style: { flexDirection: "row", flexWrap: "wrap" }
+        }, tiles));
+    }
     if (TextInput) {
         children.push(React.createElement(TextInput, {
             key: "paste",
-            label: "Decor token (paste if WebView cannot finish)",
+            label: "Token fallback (only if authorize fails)",
             value: getToken() || "",
             onChange: function (v) { setToken(v); refresh(); },
             onChangeText: function (v) { setToken(v); refresh(); }
         }));
     }
-    if (Button) {
-        children.push(React.createElement(Button, {
-            key: "auth",
-            text: authorized ? "Re-authorize Decor" : "Authorize with Decor",
-            onPress: function () { authorize(); setTimeout(refresh, 1500); }
-        }));
-        if (authorized) {
-            children.push(React.createElement(Button, {
-                key: "clear",
-                text: "Clear my decoration",
-                onPress: function () { selectDecoration(null).then(refresh); }
-            }));
-            children.push(React.createElement(Button, {
-                key: "reload",
-                text: "Reload presets",
-                onPress: function () { refreshMine().then(refresh); }
-            }));
-        }
-    }
-    function addDeco(d, prefix) {
-        if (!d || !d.hash || !TableRow) return;
-        children.push(React.createElement(TableRow, {
-            key: prefix + d.hash,
-            label: (d.alt || d.hash) + (selectedHash === d.hash ? " (selected)" : ""),
-            onPress: function () { selectDecoration(d).then(refresh); }
-        }));
-    }
-    var i;
-    for (i = 0; i < myDecorations.length; i++) addDeco(myDecorations[i], "mine-");
-    for (i = 0; i < presets.length; i++) {
-        var p = presets[i];
-        var decos = (p && p.decorations) || [];
-        for (var j = 0; j < decos.length; j++) addDeco(decos[j], "pre-");
-    }
-    if (TableRowGroup) return React.createElement(TableRowGroup, { title: "Decor" }, children);
-    var RN = findByProps("View", "Text");
-    if (RN && RN.View) return React.createElement(RN.View, { style: { padding: 12 } }, children);
-    return children[0] || null;
+    var inner = View ? React.createElement(View, { style: { padding: 12 } }, children) : children[0];
+    if (ScrollView) return React.createElement(ScrollView, { style: { flex: 1 } }, inner);
+    return inner;
 }
 
 const plugin = definePlugin({
@@ -598,5 +732,7 @@ const plugin = definePlugin({
     decorationToAsset: decorationToAsset,
     applyDecorationToUser: applyDecorationToUser,
     queueFetch: queueFetch,
-    handleFlux: handleFlux
+    handleFlux: handleFlux,
+    decoImageUri: decoImageUri,
+    discordAuthorizeUrl: discordAuthorizeUrl
 });
