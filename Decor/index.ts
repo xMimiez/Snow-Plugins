@@ -17,6 +17,24 @@ var bulkTimer = null;
 var presets = [];
 var myDecorations = [];
 var selectedHash = null;
+var selectedDecorationObj = null;
+var selectionEpoch = 0;
+var selectionListeners = [];
+
+function notifySelection() {
+    for (var i = 0; i < selectionListeners.length; i++) {
+        try { selectionListeners[i](); } catch (_e) {}
+    }
+}
+
+function subscribeSelection(fn) {
+    if (typeof fn !== "function") return function () {};
+    selectionListeners.push(fn);
+    return function () {
+        var i = selectionListeners.indexOf(fn);
+        if (i >= 0) selectionListeners.splice(i, 1);
+    };
+}
 
 var BASE_URL = "https://decor.fieryflames.dev";
 var API_URL = BASE_URL + "/api";
@@ -680,7 +698,9 @@ function loadPresets() {
 }
 
 function applySelectedLocally(decoration) {
+    selectionEpoch++;
     selectedHash = decoration && decoration.hash ? decoration.hash : null;
+    selectedDecorationObj = decoration || null;
     var me = getCurrentUser();
     var asset = decoration ? decorationToAsset(decoration) : null;
     if (me && me.id) {
@@ -693,6 +713,7 @@ function applySelectedLocally(decoration) {
             try { Flux.dispatch({ type: "USER_UPDATE", user: me }); } catch (_e2) {}
         }
     }
+    notifySelection();
 }
 
 function refreshMine() {
@@ -701,13 +722,16 @@ function refreshMine() {
         jobs.push(authFetch("/users/@me/decorations").then(function (r) { return r.json(); }).catch(function () { return []; }));
         jobs.push(authFetch("/users/@me/decoration").then(function (r) { return r.json(); }).catch(function () { return null; }));
     }
+    var epoch = selectionEpoch;
     return Promise.all(jobs).then(function (parts) {
+        if (epoch !== selectionEpoch) return;
         if (parts[1]) myDecorations = Array.isArray(parts[1]) ? parts[1] : [];
         if (parts[2] !== undefined) {
             var selected = parts[2];
             applySelectedLocally(selected && selected.hash ? selected : null);
         }
         log("mine", myDecorations.length, "presets", presets.length);
+        notifySelection();
     }).catch(function (err) {
         if (String(err && err.message) === "unauthorized" && !refreshMine._retrying) {
             refreshMine._retrying = true;
@@ -739,8 +763,8 @@ function selectDecoration(decoration) {
             showToast("Authorize with Decor first");
             return Promise.resolve();
         }
+        applySelectedLocally(decoration);
         return putDecoration(decoration).then(function () {
-            applySelectedLocally(decoration);
             showToast(decoration ? "Decoration applied" : "Decoration cleared");
         }).catch(function (err) {
             logError("select", err);
@@ -982,6 +1006,7 @@ function patchEditProfile() {
 
 function getSelectedDecoration() {
     if (!selectedHash) return null;
+    if (selectedDecorationObj && selectedDecorationObj.hash === selectedHash) return selectedDecorationObj;
     var i;
     var j;
     for (i = 0; i < myDecorations.length; i++) {
@@ -1347,8 +1372,10 @@ function DecorationPicker(props) {
     var [, bump] = React.useState(0);
     function refresh() { bump(function (n) { return n + 1; }); }
     React.useEffect(function () {
+        var unsub = subscribeSelection(refresh);
         loadPresets().then(refresh);
         if (getToken()) refreshMine().then(refresh);
+        return unsub;
     }, []);
     var authorized = !!getToken();
     var selected = getSelectedDecoration();
@@ -1360,6 +1387,13 @@ function DecorationPicker(props) {
         if (myDecorations[i] && (myDecorations[i].presetId == null)) own.push(myDecorations[i]);
     }
     if (!own.length) own = myDecorations.slice();
+    if (selected && selected.hash) {
+        var inOwn = false;
+        for (i = 0; i < own.length; i++) {
+            if (own[i] && own[i].hash === selected.hash) { inOwn = true; break; }
+        }
+        if (!inOwn) own = [selected].concat(own);
+    }
     var hasPending = myDecorations.some(function (d) { return d && d.reviewed === false; });
     var disabled = !authorized;
     var TextStyleSheet = (findByProps("TextStyleSheet") || {}).TextStyleSheet || {};
@@ -1459,8 +1493,11 @@ function PresetsPage() {
     var state = React.useState(presets.slice ? presets.slice() : []);
     var list = state[0] || [];
     var setList = state[1];
+    var [, bump] = React.useState(0);
     React.useEffect(function () {
+        var unsub = subscribeSelection(function () { bump(function (n) { return n + 1; }); });
         loadPresets().then(function (p) { setList(p || []); });
+        return unsub;
     }, []);
     var rows = [];
     var i;
@@ -1480,7 +1517,10 @@ function PresetsPage() {
             cards.push(h(DecorationTile, {
                 key: decos[j].hash,
                 decoration: decos[j],
-                onChanged: function () { closeDecorScreen(); }
+                onChanged: function () {
+                    notifySelection();
+                    setTimeout(closeDecorScreen, 50);
+                }
             }));
         }
         rows.push(h(View, { key: preset.id || String(i), style: { marginBottom: 20 } },
