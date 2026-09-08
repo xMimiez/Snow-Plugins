@@ -2,10 +2,10 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.decor",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "display": {
     "name": "Decor",
-    "description": "See and use custom avatar decorations from Decor (presets + other users).",
+    "description": "Custom avatar decorations with an official-style editor above Discord's in Edit Profile.",
     "authors": [
       {
         "name": "Fiery",
