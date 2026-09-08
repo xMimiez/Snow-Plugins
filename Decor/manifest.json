@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.decor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "display": {
     "name": "Decor",
     "description": "See and use custom avatar decorations from Decor (presets + other users).",
