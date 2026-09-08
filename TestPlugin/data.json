@@ -1,0 +1,5 @@
+{
+  "name": "TestPlugin",
+  "token": "DATA_JSON_OK",
+  "files": ["manifest.json", "index.ts", "extra.js", "lib/math.js", "data.json"]
+}
