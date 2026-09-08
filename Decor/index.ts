@@ -8,6 +8,7 @@
   https://github.com/Equicord/Equicord/tree/main/src/plugins/decor
   https://github.com/decor-discord/vendetta-plugin
   https://codeberg.org/raincord/rain/src/commit/333142c78140586c458002bda0f502e7d4053fdf/src/plugins/decor
+  build: 1.1.4
 */
 var unpatches = [];
 var _storage;
