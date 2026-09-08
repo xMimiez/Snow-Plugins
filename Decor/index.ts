@@ -19,7 +19,11 @@ var myDecorations = [];
 var selectedHash = null;
 var selectedDecorationObj = null;
 var selectionEpoch = 0;
+var selectionHydrated = false;
 var selectionListeners = [];
+var putInFlight = null;
+var lastPutKey = undefined;
+var createDraft = { asset: null, alt: "" };
 
 function notifySelection() {
     for (var i = 0; i < selectionListeners.length; i++) {
@@ -381,9 +385,20 @@ function bulkFetch() {
     if (!ids.length) return Promise.resolve();
     return getUsersDecorations(ids).then(function (map) {
         map = map || {};
+        var me = getCurrentUser();
+        var meId = me && me.id;
         for (var i = 0; i < ids.length; i++) {
             var id = ids[i];
             var deco = Object.prototype.hasOwnProperty.call(map, id) ? map[id] : null;
+            if (meId && id === meId && selectionHydrated) {
+                var local = selectedDecorationObj ? decorationToAsset(selectedDecorationObj) : (selectedHash || null);
+                if (deco && selectedHash && String(deco).indexOf(selectedHash) >= 0) {
+                    usersDecorations[id] = deco;
+                } else {
+                    usersDecorations[id] = local;
+                }
+                continue;
+            }
             usersDecorations[id] = deco;
             if (deco) stampUserFromStore(id, deco);
         }
@@ -950,6 +965,7 @@ function loadPresets() {
 
 function applySelectedLocally(decoration) {
     selectionEpoch++;
+    selectionHydrated = true;
     selectedHash = decoration && decoration.hash ? decoration.hash : null;
     selectedDecorationObj = decoration || null;
     var me = getCurrentUser();
@@ -977,9 +993,10 @@ function refreshMine() {
     return Promise.all(jobs).then(function (parts) {
         if (epoch !== selectionEpoch) return;
         if (parts[1]) myDecorations = Array.isArray(parts[1]) ? parts[1] : [];
-        if (parts[2] !== undefined) {
+        if (parts[2] !== undefined && !selectionHydrated) {
             var selected = parts[2];
             applySelectedLocally(selected && selected.hash ? selected : null);
+            selectionHydrated = true;
         }
         log("mine", myDecorations.length, "presets", presets.length);
         notifySelection();
@@ -997,19 +1014,19 @@ function refreshMine() {
 
 function putDecoration(decoration) {
     var hash = decoration && decoration.hash ? decoration.hash : null;
-    return authFetch("/users/@me/decoration", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hash: hash })
-    }).catch(function () {
-        var body = new FormData();
-        body.append("hash", hash == null ? "null" : hash);
-        return authFetch("/users/@me/decoration", { method: "PUT", body: body });
-    }).then(function (r) {
-        var me = getCurrentUser();
-        if (me && me.id) queueFetch(me.id, true);
+    var key = hash == null ? "null" : String(hash);
+    if (putInFlight && lastPutKey === key) return putInFlight;
+    lastPutKey = key;
+    var body = new FormData();
+    body.append("hash", hash == null ? "null" : hash);
+    putInFlight = authFetch("/users/@me/decoration", { method: "PUT", body: body }).then(function (r) {
+        putInFlight = null;
         return r;
+    }).catch(function (err) {
+        putInFlight = null;
+        throw err;
     });
+    return putInFlight;
 }
 
 function selectDecoration(decoration) {
@@ -1018,12 +1035,18 @@ function selectDecoration(decoration) {
             showToast("Authorize with Decor first");
             return Promise.resolve();
         }
+        var nextHash = decoration && decoration.hash ? decoration.hash : null;
+        if ((nextHash || null) === (selectedHash || null) && lastPutKey === (nextHash == null ? "null" : String(nextHash))) {
+            applySelectedLocally(decoration);
+            return Promise.resolve();
+        }
         applySelectedLocally(decoration);
         return putDecoration(decoration).then(function () {
             showToast(decoration ? "Decoration applied" : "Decoration cleared");
         }).catch(function (err) {
             logError("select", err);
             if (String(err && err.message) === "unauthorized") {
+                lastPutKey = undefined;
                 return authorizeSilent().then(function () { return putDecoration(decoration); }).then(function () {
                     applySelectedLocally(decoration);
                     showToast(decoration ? "Decoration applied" : "Decoration cleared");
@@ -1710,21 +1733,33 @@ function DecorationPicker(props) {
         disabled: disabled,
         onPress: function () { selectDecoration(null).then(refresh); }
     }));
-    for (i = 0; i < own.length; i++) {
+    if (selected) {
         tiles.push(h(DecorationTile, {
-            key: own[i].hash,
-            decoration: own[i],
+            key: selected.hash,
+            decoration: selected,
             disabled: disabled,
             onChanged: refresh
         }));
     }
+    tiles.push(h(CardButton, {
+        key: "custom",
+        source: assetSource(["ic_image", "ImageIcon", "ic_image_24px", "ic_gallery_24px"]),
+        label: "Custom",
+        selected: !!(selected && (selected.presetId == null || selected.presetId === undefined)),
+        disabled: false,
+        onPress: function () {
+            if (!forceOpenSheet("Custom", CustomPage)) openCustomPage("Custom", CustomPage);
+        }
+    }));
     tiles.push(h(CardButton, {
         key: "presets",
         source: assetSource(["smile", "ReactionIcon", "ic_reaction_smile", "ic_emoji_24px"]),
         label: "Presets",
         selected: !!(selected && selected.presetId),
         disabled: disabled,
-        onPress: function () { openCustomPage("Presets", PresetsPage); }
+        onPress: function () {
+            if (!forceOpenSheet("Presets", PresetsPage)) openCustomPage("Presets", PresetsPage);
+        }
     }));
     tiles.push(h(CardButton, {
         key: "new",
@@ -1805,6 +1840,60 @@ function PresetsPage() {
         }, rows);
     }
     return h(View, { style: { flex: 1, backgroundColor: "#111214", paddingTop: 8 } }, rows);
+}
+
+function personalDecorations() {
+    var out = [];
+    for (var i = 0; i < myDecorations.length; i++) {
+        if (myDecorations[i] && (myDecorations[i].presetId == null || myDecorations[i].presetId === undefined)) {
+            out.push(myDecorations[i]);
+        }
+    }
+    return out;
+}
+
+function CustomPage() {
+    var React = getReact();
+    var RN = getRN() || {};
+    var View = RN.View;
+    var Text = RN.Text;
+    var ScrollView = RN.ScrollView;
+    if (!React || !View) return null;
+    var [, bump] = React.useState(0);
+    React.useEffect(function () {
+        var unsub = subscribeSelection(function () { bump(function (n) { return n + 1; }); });
+        if (getToken()) refreshMine().then(function () { bump(function (n) { return n + 1; }); });
+        return unsub;
+    }, []);
+    var mine = personalDecorations();
+    var cards = [];
+    for (var i = 0; i < mine.length; i++) {
+        cards.push(h(DecorationTile, {
+            key: mine[i].hash,
+            decoration: mine[i],
+            onChanged: function () {
+                notifySelection();
+                setTimeout(closeDecorScreen, 50);
+            }
+        }));
+    }
+    var inner = [];
+    inner.push(Text ? h(Text, {
+        key: "title",
+        style: { color: "#dbdee1", fontSize: 16, fontWeight: "600", paddingHorizontal: 16, paddingBottom: 8 }
+    }, "Your decorations") : null);
+    inner.push(Text ? h(Text, {
+        key: "sub",
+        style: { color: "#949ba4", fontSize: 13, paddingHorizontal: 16, paddingBottom: 12 }
+    }, mine.length ? "Tap one to equip it." : "Nothing here yet. Use New to submit a PNG or APNG.") : null);
+    if (cards.length) inner.push(h(View, { key: "grid", style: { paddingBottom: 16 } }, HorizontalTiles(cards)));
+    if (ScrollView) {
+        return h(ScrollView, {
+            style: { flex: 1, backgroundColor: "#111214" },
+            contentContainerStyle: { paddingTop: 8, paddingBottom: 40 }
+        }, inner);
+    }
+    return h(View, { style: { flex: 1, backgroundColor: "#111214", paddingTop: 8 } }, inner);
 }
 
 function normalizePickedImage(ret) {
@@ -1893,8 +1982,8 @@ function CreateDecorationPage() {
     var Button = comps.Button || comps.LegacyButton;
     var TextInput = comps.TextInput;
     if (!React || !View) return null;
-    var assetState = React.useState(null);
-    var altState = React.useState("");
+    var assetState = React.useState(createDraft.asset);
+    var altState = React.useState(createDraft.alt || "");
     var creatingState = React.useState(false);
     var asset = assetState[0];
     var setAsset = assetState[1];
@@ -1903,7 +1992,17 @@ function CreateDecorationPage() {
     var creating = creatingState[0];
     var setCreating = creatingState[1];
     function pick() {
-        pickImage(function (picked) { setAsset(picked); });
+        createDraft.alt = alt;
+        closeDecorScreen();
+        hideSheet();
+        setTimeout(function () {
+            pickImage(function (picked) {
+                createDraft.asset = picked;
+                if (!forceOpenSheet("Submit a Decoration", CreateDecorationPage)) {
+                    openCustomPage("Submit a Decoration", CreateDecorationPage);
+                }
+            });
+        }, 400);
     }
     function submit() {
         if (!asset || !alt || creating) return;
@@ -1912,10 +2011,22 @@ function CreateDecorationPage() {
             var form = new FormData();
             form.append("image", { uri: uri, type: asset.type || "image/png", name: asset.fileName || "decoration.png" });
             form.append("alt", alt);
-            return authFetch("/users/@me/decoration", { method: "PUT", body: form }).then(function (r) { return r.json ? r.json() : r; }).then(function () {
+            return authFetch("/users/@me/decoration", { method: "PUT", body: form }).then(function (r) { return r.json ? r.json() : r; }).then(function (created) {
+                createDraft.asset = null;
+                createDraft.alt = "";
+                if (created && created.hash) {
+                    var exists = false;
+                    for (var i = 0; i < myDecorations.length; i++) {
+                        if (myDecorations[i] && myDecorations[i].hash === created.hash) exists = true;
+                    }
+                    if (!exists) myDecorations = myDecorations.concat([created]);
+                }
                 showToast("Decoration created and pending review");
                 refreshMine();
                 closeDecorScreen();
+                setTimeout(function () {
+                    if (!forceOpenSheet("Custom", CustomPage)) openCustomPage("Custom", CustomPage);
+                }, 200);
             });
         }
         var uri = asset.uri;
@@ -1939,7 +2050,13 @@ function CreateDecorationPage() {
         h(AvatarDecorationPreviews, { key: "preview", pendingAvatarDecoration: asset ? { asset: asset.uri, skuId: RAW_SKU_ID } : null }),
         Text ? h(Text, { key: "hint", style: { color: "#949ba4", marginTop: 16, marginBottom: 12, lineHeight: 18 } }, "File must be a PNG or APNG.") : null,
         Button ? h(View, { key: "pick", style: { marginBottom: 12 } }, h(Button, { text: asset ? (asset.fileName || "Image selected") : "Select Image", onPress: pick })) : null,
-        TextInput ? h(View, { key: "name", style: { marginBottom: 16 } }, h(TextInput, { label: "Decoration Name", placeholder: "e.g. Companion Cube", value: alt, onChange: setAlt, onChangeText: setAlt })) : null,
+        TextInput ? h(View, { key: "name", style: { marginBottom: 16 } }, h(TextInput, {
+            label: "Decoration Name",
+            placeholder: "e.g. Companion Cube",
+            value: alt,
+            onChange: function (v) { createDraft.alt = v; setAlt(v); },
+            onChangeText: function (v) { createDraft.alt = v; setAlt(v); }
+        })) : null,
         Button ? h(Button, { key: "go", text: creating ? "Creating…" : "Create Decoration", disabled: !asset || !alt, onPress: submit }) : null
     ];
     var ScrollView = RN.ScrollView;
