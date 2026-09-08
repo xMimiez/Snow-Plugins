@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.0.7
+  build: 1.0.8
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -1090,9 +1090,8 @@ function makeInlineReplyRow(userId, status) {
         style: {
             alignSelf: "stretch",
             alignItems: "flex-end",
-            marginTop: -32,
-            marginRight: 8,
-            marginBottom: 4,
+            paddingRight: 12,
+            paddingVertical: 6,
             zIndex: 20,
             elevation: 8
         }
@@ -1117,7 +1116,11 @@ function injectInlineInScroll(node, userId, status) {
     }
     var props = node.props || {};
     var name = getTypeName(node.type);
-    if (isScrollName(name)) {
+    var isScroll = isScrollName(name)
+        || typeof props.onScroll === "function"
+        || props.scrollEventThrottle != null
+        || !!props.contentContainerStyle;
+    if (isScroll) {
         var ch = props.children;
         var list = Array.isArray(ch) ? ch.slice() : (ch != null ? [ch] : []);
         var insertAt = list.length > 2 ? 3 : list.length;
@@ -1256,24 +1259,36 @@ function wrapSheetWithFloatingButton(res, userId, status) {
     return wrapped || res;
 }
 
+function forceInjectReply(res, userId, status) {
+    var injected = injectInlineInScroll(res, userId, status);
+    if (injected && injected.did && injected.node) return injected.node;
+    if (res && res.props && typeof res.props.children !== "undefined") {
+        var ch = res.props.children;
+        var list = Array.isArray(ch) ? ch.slice() : [ch];
+        var insertAt = Math.min(1, list.length);
+        list.splice(insertAt, 0, makeInlineReplyRow(userId, status));
+        return h(res.type, Object.assign({}, res.props, { children: list })) || res;
+    }
+    var RN = getRN() || {};
+    if (RN.View) return h(RN.View, { style: { flex: 1 } }, makeInlineReplyRow(userId, status), res);
+    return res;
+}
+
 function afterProfileRender(args, res) {
     var props = args && args[0];
-    var userId = userIdFromProps(props);
+    var userId = userIdFromProps(props) || profileUserId;
     if (!userId && props && props.user) userId = props.user.id || props.user.userId;
     if (!userId) return overlayAnchored ? res : injectOverlay(res);
     if (shouldSkipUser(userId)) return overlayAnchored ? res : injectOverlay(res);
-    var status = statusFromProps(props) || customStatusForUser(userId);
-    if (!status || !res) return overlayAnchored ? res : injectOverlay(res);
+    var status = statusFromProps(props) || customStatusForUser(userId) || { text: "", emojiName: null };
+    if (!res) return res;
     var decorated = res;
     try { decorated = decorateProfileTree(res, userId, status); } catch (err) { logError("decorateProfile", err); }
     if (!treeHasArrow(decorated)) {
         try { decorated = decorateTree(res, userId, status); } catch (err2) { logError("decorate", err2); }
     }
     if (!treeHasArrow(decorated)) {
-        try {
-            var injected = injectInlineInScroll(decorated, userId, status);
-            if (injected && injected.node) decorated = injected.node;
-        } catch (err3) { logError("injectScroll", err3); }
+        try { decorated = forceInjectReply(decorated, userId, status); } catch (err3) { logError("forceInject", err3); }
     }
     if (!overlayAnchored) decorated = injectOverlay(decorated);
     return decorated;
@@ -1481,39 +1496,77 @@ function patchProfileComponents() {
     return total;
 }
 
+function userIdFromProfileKey(key) {
+    if (!key) return null;
+    var m = String(key).match(/UserProfile[_-]?(\d{16,22})/i);
+    return m ? m[1] : null;
+}
+
 function isProfileSheetKey(key) {
     if (!key) return false;
     var s = String(key);
-    return /UserProfile/i.test(s) && !/Edit|Settings|Preview/i.test(s);
+    if (/Edit|Settings|Preview/i.test(s)) return false;
+    return /UserProfile/i.test(s) || !!userIdFromProfileKey(s);
 }
 
-function patchOpenLazy() {
-    var sheet = findByProps("openLazy", "hideActionSheet") || findByProps("openLazy");
-    if (!sheet || typeof sheet.openLazy !== "function" || sheet.openLazy.__mimeRtsWrapped) return false;
-    var orig = sheet.openLazy;
-    sheet.openLazy = function (factory, key, props) {
-        if (isProfileSheetKey(key) && typeof factory === "function") {
-            var origFactory = factory;
-            arguments[0] = function () {
-                var out = origFactory.apply(this, arguments);
-                function wrapMod(mod) {
-                    var target = mod;
-                    if (mod && !mod.default && typeof mod === "function") target = { default: mod };
-                    wrapComponentModule(target, afterProfileRender, { gateProfile: true });
-                    return mod;
-                }
-                if (out && typeof out.then === "function") return out.then(wrapMod);
-                return wrapMod(out);
-            };
-        }
-        return orig.apply(this, arguments);
-    };
-    sheet.openLazy.__mimeRtsWrapped = true;
-    unpatches.push(function () {
-        if (sheet.openLazy.__mimeRtsWrapped) sheet.openLazy = orig;
+function wrapProfileModule(mod) {
+    if (!mod) return mod;
+    var target = mod;
+    if (typeof mod === "function") target = { default: mod };
+    wrapComponentModule(target, afterProfileRender, { gateProfile: true });
+    return mod;
+}
+
+function wrapFactory(factory) {
+    if (typeof factory === "function") {
+        return function () {
+            var out = factory.apply(this, arguments);
+            if (out && typeof out.then === "function") return out.then(wrapProfileModule);
+            return wrapProfileModule(out);
+        };
+    }
+    if (factory && typeof factory.then === "function") return factory.then(wrapProfileModule);
+    wrapProfileModule(factory);
+    return factory;
+}
+
+function patchActionSheetOpen() {
+    var sheet = findByProps("openLazy", "hideActionSheet")
+        || findByProps("openLazy")
+        || findByProps("open", "hideActionSheet");
+    if (!sheet) return false;
+    var ok = false;
+    ["openLazy", "open"].forEach(function (method) {
+        if (typeof sheet[method] !== "function" || sheet[method].__mimeRtsWrapped) return;
+        var orig = sheet[method];
+        sheet[method] = function () {
+            var args = Array.prototype.slice.call(arguments);
+            var key = null;
+            var props = null;
+            var fi = -1;
+            var i;
+            for (i = 0; i < args.length; i++) {
+                var a = args[i];
+                if (typeof a === "string" && isProfileSheetKey(a)) key = a;
+                if (a && typeof a === "object" && typeof a.then !== "function" && (a.userId || a.user || a.guildId || a.channelId || a.userID)) props = a;
+                if (fi < 0 && (typeof a === "function" || (a && typeof a.then === "function") || (a && (a.default || a.type)))) fi = i;
+            }
+            if (key) {
+                var uid = userIdFromProfileKey(key) || userIdFromProps(props);
+                enterProfile([{ userId: uid, user: props && props.user }]);
+                log("profile sheet", key, uid);
+                if (fi >= 0) args[fi] = wrapFactory(args[fi]);
+            }
+            return orig.apply(this, args);
+        };
+        sheet[method].__mimeRtsWrapped = true;
+        unpatches.push(function () {
+            if (sheet[method].__mimeRtsWrapped) sheet[method] = orig;
+        });
+        ok = true;
+        log("patched ActionSheet." + method);
     });
-    log("patched openLazy");
-    return true;
+    return ok;
 }
 
 function patchHideActionSheet() {
@@ -1544,7 +1597,7 @@ function start() {
     profileUserId = null;
     patchStatusComponents();
     patchProfileComponents();
-    patchOpenLazy();
+    patchActionSheetOpen();
     patchHideActionSheet();
     patchOverlayAnchor();
     log("started");
@@ -1584,5 +1637,7 @@ const plugin = definePlugin({
     afterStatusRender: afterStatusRender,
     enterProfile: enterProfile,
     leaveProfile: leaveProfile,
+    userIdFromProfileKey: userIdFromProfileKey,
+    isProfileSheetKey: isProfileSheetKey,
     QUICK_REACTS: QUICK_REACTS
 });
