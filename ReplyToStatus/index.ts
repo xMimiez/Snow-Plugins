@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.0.1
+  build: 1.0.2
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -368,6 +368,13 @@ function userIdFromProps(props) {
     if (props.user && props.user.id) return String(props.user.id);
     if (props.member && props.member.userId) return String(props.member.userId);
     if (props.member && props.member.user && props.member.user.id) return String(props.member.user.id);
+    if (props.displayProfile && (props.displayProfile.userId || props.displayProfile.user_id)) {
+        return String(props.displayProfile.userId || props.displayProfile.user_id);
+    }
+    if (props.userProfile && (props.userProfile.userId || props.userProfile.user_id)) {
+        return String(props.userProfile.userId || props.userProfile.user_id);
+    }
+    if (props.profile && props.profile.userId) return String(props.profile.userId);
     if (props.message && props.message.author && props.message.author.id) return String(props.message.author.id);
     if (typeof props.id === "string" && /^\d{16,}$/.test(props.id)) return props.id;
     return null;
@@ -838,19 +845,103 @@ function injectOverlay(el) {
     return el;
 }
 
-function attachLongPress(el, userId, status) {
-    var React = getReact();
+function collectText(node, acc, depth) {
+    if (depth > 10 || node == null) return acc;
+    if (typeof node === "string" || typeof node === "number") {
+        acc.push(String(node));
+        return acc;
+    }
+    if (Array.isArray(node)) {
+        for (var i = 0; i < node.length; i++) collectText(node[i], acc, depth + 1);
+        return acc;
+    }
+    if (typeof node === "object" && node.props) {
+        if (typeof node.props.children !== "undefined") collectText(node.props.children, acc, depth + 1);
+        if (typeof node.props.text === "string") acc.push(node.props.text);
+        if (typeof node.props.accessibilityLabel === "string") acc.push(node.props.accessibilityLabel);
+    }
+    return acc;
+}
+
+function nodeHasStatus(node, status) {
+    if (!status) return false;
+    var txt = collectText(node, [], 0).join(" ");
+    if (status.text && txt.indexOf(status.text) >= 0) return true;
+    if (!status.text && status.emojiName && txt.indexOf(status.emojiName) >= 0) return true;
+    return false;
+}
+
+function isSmallStatusNode(node, status) {
+    if (!node || !node.props || node.__mimeRtsDecorated) return false;
+    if (!nodeHasStatus(node, status)) return false;
+    var txt = collectText(node, [], 0).join(" ");
+    var seed = status.text || status.emojiName || "";
+    var extra = status.emojiId ? 48 : 32;
+    if (txt.length > seed.length + extra) return false;
+    return true;
+}
+
+function wrapWithReplyArrow(el, userId, status) {
+    if (!el || el.__mimeRtsDecorated) return el;
     var RN = getRN() || {};
+    var View = RN.View;
+    var Text = RN.Text;
     var Pressable = RN.Pressable || RN.TouchableOpacity || RN.TouchableHighlight;
-    if (!React || !Pressable || !el) return el;
+    if (!View || !Pressable) return el;
+    var t = themeColors();
     function fire() {
         openReplyWindow(userId, status || customStatusForUser(userId));
     }
-    return h(Pressable, {
-        onLongPress: fire,
-        delayLongPress: 380,
-        unstable_pressDelay: 0
-    }, el);
+    var btn = h(Pressable, {
+        onPress: fire,
+        hitSlop: 10,
+        accessibilityLabel: "Reply to Status",
+        style: {
+            position: "absolute",
+            top: 4,
+            right: 4,
+            width: 24,
+            height: 24,
+            borderRadius: 12,
+            backgroundColor: t.brand,
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 80,
+            elevation: 8
+        }
+    }, h(Text, { style: { color: "#fff", fontSize: 13, fontWeight: "700", marginTop: -1 } }, "\u21A9"));
+    var wrapped = h(View, {
+        pointerEvents: "box-none",
+        style: { position: "relative", overflow: "visible", alignSelf: "flex-start" }
+    }, el, btn);
+    if (wrapped) wrapped.__mimeRtsDecorated = true;
+    return wrapped || el;
+}
+
+function decorateTree(node, userId, status) {
+    if (!node || typeof node !== "object") return node;
+    if (node.__mimeRtsDecorated) return node;
+    if (Array.isArray(node)) {
+        for (var i = 0; i < node.length; i++) node[i] = decorateTree(node[i], userId, status);
+        return node;
+    }
+    if (!node.props) return node;
+    var ch = node.props.children;
+    var childWrapped = false;
+    if (Array.isArray(ch)) {
+        for (var j = 0; j < ch.length; j++) {
+            var next = decorateTree(ch[j], userId, status);
+            if (next !== ch[j]) childWrapped = true;
+            ch[j] = next;
+        }
+    } else if (ch && typeof ch === "object") {
+        var nch = decorateTree(ch, userId, status);
+        if (nch !== ch) childWrapped = true;
+        node.props.children = nch;
+    }
+    if (childWrapped) return node;
+    if (isSmallStatusNode(node, status)) return wrapWithReplyArrow(node, userId, status);
+    return node;
 }
 
 function afterStatusRender(args, res) {
@@ -859,44 +950,95 @@ function afterStatusRender(args, res) {
     if (!userId) return res;
     if (shouldSkipUser(userId)) return res;
     var status = statusFromProps(props) || customStatusForUser(userId);
-    if (!status) return res;
-    return attachLongPress(res, userId, status);
+    if (!status || !res) return res;
+    return wrapWithReplyArrow(res, userId, status);
 }
 
-function resolveComponent(name) {
-    return findByName(name)
-        || findByDisplayName(name)
-        || findByTypeName(name)
-        || findByName(name, false)
-        || findByDisplayName(name, false);
+function afterProfileRender(args, res) {
+    var props = args && args[0];
+    var userId = userIdFromProps(props);
+    if (!userId) return res;
+    if (shouldSkipUser(userId)) return overlayAnchored ? res : injectOverlay(res);
+    var status = statusFromProps(props) || customStatusForUser(userId);
+    if (!status || !res) return overlayAnchored ? res : injectOverlay(res);
+    var decorated = res;
+    try { decorated = decorateTree(res, userId, status); } catch (err) { logError("decorate", err); }
+    if (!overlayAnchored) decorated = injectOverlay(decorated);
+    return decorated;
 }
 
-function patchComponentModule(comp, label) {
-    if (!comp) return 0;
-    var n = 0;
-    if (typeof comp === "function") {
-        var holder = { default: comp };
-        if (patchMethod("after", holder, "default", afterStatusRender)) n++;
-        if (comp.prototype && typeof comp.prototype.render === "function") {
-            if (patchMethod("after", comp.prototype, "render", function (args, res) {
-                return afterStatusRender([this && this.props], res);
-            })) n++;
+function wrapExport(obj, key, afterFn) {
+    var orig = obj[key];
+    if (typeof orig !== "function") return null;
+    if (orig.__mimeRtsWrapped) return null;
+    function wrapped() {
+        var ret = orig.apply(this, arguments);
+        try {
+            var next = afterFn(arguments, ret);
+            if (next !== undefined) ret = next;
+        } catch (err) {
+            logError("wrap", key, err);
         }
-        if (typeof comp.type === "function") {
-            if (patchMethod("after", comp, "type", afterStatusRender)) n++;
-        }
-        log("patched fn", label, n);
-        return n;
+        return ret;
     }
-    var keys = ["default", "Z", "ZP", "AZ", "render"];
-    for (var i = 0; i < keys.length; i++) {
-        if (typeof comp[keys[i]] === "function") {
-            if (patchMethod("after", comp, keys[i], afterStatusRender)) n++;
-        }
-    }
-    if (n) log("patched", label, n);
-    return n;
+    wrapped.__mimeRtsWrapped = true;
+    try { Object.defineProperty(wrapped, "name", { value: orig.name }); } catch (_e) {}
+    wrapped.displayName = orig.displayName || orig.name;
+    try {
+        Object.keys(orig).forEach(function (k) {
+            try { wrapped[k] = orig[k]; } catch (_e2) {}
+        });
+    } catch (_e3) {}
+    obj[key] = wrapped;
+    unpatches.push(function () {
+        if (obj[key] === wrapped) obj[key] = orig;
+    });
+    return true;
 }
+
+function wrapComponentModule(mod, afterFn) {
+    if (!mod) return false;
+    if (typeof mod === "function") return false;
+    var ok = false;
+    if (typeof mod.default === "function" && wrapExport(mod, "default", afterFn)) ok = true;
+    if (typeof mod.type === "function" && wrapExport(mod, "type", afterFn)) ok = true;
+    if (typeof mod.Z === "function" && wrapExport(mod, "Z", afterFn)) ok = true;
+    if (typeof mod.ZP === "function" && wrapExport(mod, "ZP", afterFn)) ok = true;
+    if (mod.prototype && typeof mod.prototype.render === "function" && wrapExport(mod.prototype, "render", afterFn)) ok = true;
+    return ok;
+}
+
+function patchNamedComponent(name, afterFn) {
+    var roots = metroRoots();
+    var i;
+    for (i = 0; i < roots.length; i++) {
+        var r = roots[i];
+        var raw = null;
+        try { if (r.findByName) raw = r.findByName(name, false); } catch (_e) {}
+        if (raw && wrapComponentModule(raw, afterFn)) {
+            log("patched", name);
+            return true;
+        }
+        try { if (r.findByDisplayName) raw = r.findByDisplayName(name, false); } catch (_e2) {}
+        if (raw && wrapComponentModule(raw, afterFn)) {
+            log("patched display", name);
+            return true;
+        }
+        try { if (r.findByTypeName) raw = r.findByTypeName(name, false); } catch (_e3) {}
+        if (raw && wrapComponentModule(raw, afterFn)) {
+            log("patched type", name);
+            return true;
+        }
+    }
+    var named = findByName(name, false) || findByDisplayName(name, false) || findByTypeName(name, false);
+    if (named && wrapComponentModule(named, afterFn)) {
+        log("patched fallback", name);
+        return true;
+    }
+    return false;
+}
+
+var overlayAnchored = false;
 
 function patchStatusComponents() {
     var names = [
@@ -909,32 +1051,45 @@ function patchStatusComponents() {
         "ActivityStatus",
         "CustomStatusText",
         "ProfileCustomStatusSection",
-        "UserProfileStatus",
-        "Status"
+        "UserProfileStatus"
     ];
     var total = 0;
     for (var i = 0; i < names.length; i++) {
-        total += patchComponentModule(resolveComponent(names[i]), names[i]);
-        var byProps = findByProps(names[i]);
-        if (byProps && byProps !== resolveComponent(names[i])) {
-            total += patchComponentModule(byProps, names[i] + ".props");
-        }
+        if (patchNamedComponent(names[i], afterStatusRender)) total++;
     }
     log("status component patches", total);
     return total;
 }
 
-function patchOverlayAnchor() {
-    var names = ["App", "AppContainer", "MainApp", "Chat", "ConnectedChat", "UserProfileModal", "UserProfile"];
+function patchProfileComponents() {
+    var names = [
+        "UserProfile",
+        "UserProfileModal",
+        "UserProfileHeader",
+        "UserProfileCard",
+        "UserProfileInfo",
+        "UserProfileTopSection",
+        "ProfileHeader",
+        "ProfilePrimaryInfo",
+        "UserProfileBannerInfo",
+        "DisplayProfile",
+        "UserProfileSimplified"
+    ];
+    var total = 0;
     for (var i = 0; i < names.length; i++) {
-        var comp = resolveComponent(names[i]);
-        if (!comp) continue;
-        var target = typeof comp === "function" ? { default: comp } : comp;
-        var method = typeof comp === "function" ? "default" : (target.default ? "default" : (target.Z ? "Z" : null));
-        if (!method) continue;
-        if (patchMethod("after", target, method, function (_args, res) {
+        if (patchNamedComponent(names[i], afterProfileRender)) total++;
+    }
+    log("profile patches", total);
+    return total;
+}
+
+function patchOverlayAnchor() {
+    var names = ["App", "AppContainer", "MainApp", "Chat", "ConnectedChat"];
+    for (var i = 0; i < names.length; i++) {
+        if (patchNamedComponent(names[i], function (_args, res) {
             return injectOverlay(res);
         })) {
+            overlayAnchored = true;
             log("overlay host on", names[i]);
             return true;
         }
@@ -942,52 +1097,10 @@ function patchOverlayAnchor() {
     return false;
 }
 
-function tryNativeRespondScreen(userId) {
-    var native = findNativeStatusReply();
-    if (native && typeof native.openRespondToStatus === "function") {
-        try { native.openRespondToStatus(userId); return true; } catch (_e) {}
-    }
-    var screens = ["RespondToStatus", "StatusReply", "CustomStatusReply", "ReplyToStatus"];
-    var nav = findByProps("pushLazy", "push") || findByProps("navigate", "push") || findByProps("push");
-    if (!nav) return false;
-    for (var i = 0; i < screens.length; i++) {
-        var Comp = resolveComponent(screens[i]);
-        if (!Comp) continue;
-        try {
-            if (typeof nav.push === "function") {
-                nav.push(screens[i], { userId: userId });
-                return true;
-            }
-        } catch (_e2) {}
-    }
-    return false;
-}
-
-function openFromHold(userId, status) {
-    if (tryNativeRespondScreen(userId)) return true;
-    return openReplyWindow(userId, status);
-}
-
-function afterStatusRenderOpen(args, res) {
-    var props = args && args[0];
-    var userId = userIdFromProps(props);
-    if (!userId) return res;
-    if (shouldSkipUser(userId)) return res;
-    var status = statusFromProps(props) || customStatusForUser(userId);
-    if (!status) return res;
-    var React = getReact();
-    var RN = getRN() || {};
-    var Pressable = RN.Pressable || RN.TouchableOpacity;
-    if (!React || !Pressable || !res) return res;
-    return h(Pressable, {
-        onLongPress: function () { openFromHold(userId, status); },
-        delayLongPress: 380
-    }, res);
-}
-
 function start() {
-    afterStatusRender = afterStatusRenderOpen;
+    overlayAnchored = false;
     patchStatusComponents();
+    patchProfileComponents();
     patchOverlayAnchor();
     log("started");
 }
@@ -1016,5 +1129,8 @@ const plugin = definePlugin({
     statusApiObject: statusApiObject,
     openReplyWindow: openReplyWindow,
     sendStatusReply: sendStatusReply,
+    wrapWithReplyArrow: wrapWithReplyArrow,
+    decorateTree: decorateTree,
+    isSmallStatusNode: isSmallStatusNode,
     QUICK_REACTS: QUICK_REACTS
 });
