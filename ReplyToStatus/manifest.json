@@ -1,0 +1,20 @@
+{
+  "spec": 3,
+  "type": "plugin",
+  "id": "mime.replytostatus",
+  "version": "1.0.0",
+  "display": {
+    "name": "ReplyToStatus",
+    "description": "Long-press a custom status to open Discord's Reply to Status window (desktop-only feature on mobile).",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.ts",
+  "extras": {
+    "bunny": {}
+  }
+}
