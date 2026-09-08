@@ -484,6 +484,10 @@ function decorationUrlFromOpts(opts) {
 
 function avatarPixelSize(size) {
     if (typeof size === "number" && size > 0) return size;
+    if (size && typeof size === "object") {
+        if (typeof size.size === "number") return size.size;
+        if (typeof size.width === "number") return size.width;
+    }
     var named = {
         xxxsmall: 16, xxsmall: 20, xsmall: 24, extraSmall: 16, small: 32, medium: 40,
         large: 80, xlarge: 120, xxlarge: 160, xxxlarge: 192,
@@ -501,13 +505,32 @@ function avatarPixelSize(size) {
     return 32;
 }
 
-function addDecorOverlay(ret, uri, size) {
-    var React = getReact();
+function styleDim(style, key) {
+    if (!style) return null;
+    if (Array.isArray(style)) {
+        for (var i = style.length - 1; i >= 0; i--) {
+            var v = styleDim(style[i], key);
+            if (typeof v === "number") return v;
+        }
+        return null;
+    }
+    if (typeof style[key] === "number") return style[key];
+    return null;
+}
+
+function resolveAvatarSize(props, ret) {
+    var w = styleDim(props && props.style, "width") || styleDim(ret && ret.props && ret.props.style, "width");
+    var h = styleDim(props && props.style, "height") || styleDim(ret && ret.props && ret.props.style, "height");
+    if (w && h) return Math.min(w, h);
+    if (w) return w;
+    return avatarPixelSize(props && (props.size || props.avatarSize));
+}
+
+function overlayEl(uri, size) {
     var RN = getRN() || {};
-    var View = RN.View;
     var Image = RN.Image;
-    if (!React || !View || !Image || !uri || !ret) return ret;
-    var overlay = h(Image, {
+    if (!Image || !uri) return null;
+    return h(Image, {
         key: "mime-decor-overlay",
         source: { uri: uri },
         pointerEvents: "none",
@@ -521,16 +544,41 @@ function addDecorOverlay(ret, uri, size) {
             zIndex: 2
         }
     });
-    function hasOverlay(node) {
-        if (!node) return false;
-        if (node.key === "mime-decor-overlay") return true;
-        var kids = node.props && node.props.children;
-        if (!kids) return false;
-        if (!Array.isArray(kids)) return hasOverlay(kids);
-        for (var i = 0; i < kids.length; i++) if (hasOverlay(kids[i])) return true;
+}
+
+function swapOverlayChild(node, uri, size) {
+    if (!node || !node.props) return false;
+    var kids = node.props.children;
+    var overlay = uri ? overlayEl(uri, size) : null;
+    if (Array.isArray(kids)) {
+        var idx = -1;
+        for (var i = 0; i < kids.length; i++) {
+            if (kids[i] && kids[i].key === "mime-decor-overlay") { idx = i; break; }
+        }
+        if (idx >= 0) {
+            var next = kids.slice();
+            if (overlay) next[idx] = overlay;
+            else next.splice(idx, 1);
+            node.props.children = next;
+            return true;
+        }
         return false;
     }
-    if (hasOverlay(ret)) return ret;
+    if (kids && kids.key === "mime-decor-overlay") {
+        node.props.children = overlay;
+        return true;
+    }
+    return false;
+}
+
+function addDecorOverlay(ret, uri, size) {
+    var RN = getRN() || {};
+    var View = RN.View;
+    if (!ret) return ret;
+    if (swapOverlayChild(ret, uri, size)) return ret;
+    if (!uri) return ret;
+    var overlay = overlayEl(uri, size);
+    if (!overlay) return ret;
     var t = ret.type;
     var native = typeof t === "string";
     if (native || !ret.props) {
@@ -547,17 +595,63 @@ function addDecorOverlay(ret, uri, size) {
     return ret;
 }
 
-function overlayFromProps(args, ret) {
-    var props = (args && args[0]) || {};
+function stripOfficialDecorArgs(args) {
+    var props = args && args[0];
+    if (!props || props.__mimeDecorPreview) return args;
     var user = props.user || props.guildMember || null;
     var uid = props.userId || (user && user.id);
-    if (!uid && user) stampIfKnown(user);
-    var asset = decorationForUserId(uid);
-    if (!asset && user && user.avatarDecoration && user.avatarDecoration.skuId === SKU_ID) {
-        asset = user.avatarDecoration.asset;
+    if (!uid || !decorationForUserId(uid)) return args;
+    var next = Object.assign({}, props, {
+        avatarDecoration: null,
+        pendingAvatarDecoration: null
+    });
+    if (user) {
+        next.user = Object.assign({}, user, {
+            avatarDecoration: null,
+            avatarDecorationData: null,
+            avatar_decoration_data: null
+        });
     }
-    if (!asset) return ret;
-    return addDecorOverlay(ret, decoUrlFromAsset(asset, true), avatarPixelSize(props.size));
+    var out = [].slice.call(args);
+    out[0] = next;
+    return out;
+}
+
+function overlayFromProps(args, ret) {
+    var props = (args && args[0]) || {};
+    if (props.__mimeDecorPreview) return ret;
+    var user = props.user || props.guildMember || null;
+    var uid = props.userId || (user && user.id);
+    if (!uid) return ret;
+    var asset = decorationForUserId(uid);
+    var size = resolveAvatarSize(props, ret);
+    if (!asset) return addDecorOverlay(ret, null, size);
+    return addDecorOverlay(ret, decoUrlFromAsset(asset, true), size);
+}
+
+function wrapAvatarExport(obj, key) {
+    var orig = obj[key];
+    if (typeof orig !== "function" || orig.__mimeDecorAvatar) return false;
+    function wrapped() {
+        var args = stripOfficialDecorArgs(arguments);
+        var ret = orig.apply(this, args);
+        try { ret = overlayFromProps(args, ret); } catch (err) { logError("avatar overlay", err); }
+        return ret;
+    }
+    wrapped.__mimeDecorAvatar = true;
+    obj[key] = wrapped;
+    unpatches.push(function () {
+        if (obj[key] === wrapped) obj[key] = orig;
+    });
+    return true;
+}
+
+function wrapAvatarModule(mod) {
+    if (!mod) return;
+    if (typeof mod === "function") return;
+    if (typeof mod.default === "function") wrapAvatarExport(mod, "default");
+    if (typeof mod.type === "function") wrapAvatarExport(mod, "type");
+    if (mod.prototype && typeof mod.prototype.render === "function") wrapAvatarExport(mod.prototype, "render");
 }
 
 function patchUrlResolver(resolver) {
@@ -573,15 +667,6 @@ function patchUrlResolver(resolver) {
     if (resolver.default) patchUrlResolver(resolver.default);
 }
 
-function patchAvatarComponent(comp) {
-    if (!comp) return;
-    if (typeof comp === "function") {
-        var holder = { render: comp };
-        // can't replace Discord's import of the function without module object
-    }
-    wrapComponentModule(comp, overlayFromProps);
-}
-
 function patchAvatars() {
     var i;
     var list = findByPropsAll("getAvatarDecorationURL");
@@ -591,25 +676,15 @@ function patchAvatars() {
     patchUrlResolver(findByProps("getAvatarDecorationURL"));
 
     var sizes = findByProps("AvatarSizes");
-    if (sizes) {
-        patchAvatarComponent(sizes);
-        if (sizes.default) patchAvatarComponent(sizes.default);
-        if (sizes.type && sizes.type.render) wrapComponentModule({ type: sizes.type }, overlayFromProps);
-        else if (sizes.type) patchAvatarComponent({ default: sizes.type });
-        if (typeof sizes.type === "function") {
-            wrapComponentModule({ type: sizes }, overlayFromProps);
-        }
-    }
-    var comps = (getMod().metro && getMod().metro.common && getMod().metro.common.components) || {};
-    if (comps.Avatar) patchAvatarComponent(typeof comps.Avatar === "function" ? { default: comps.Avatar } : comps.Avatar);
+    if (sizes) wrapAvatarModule(sizes);
 
-    var names = ["Avatar", "UserAvatar", "DisplayAvatar", "ForcedAvatar", "GuildIcon"];
+    var comps = (getMod().metro && getMod().metro.common && getMod().metro.common.components) || {};
+    if (comps.Avatar) wrapAvatarModule(typeof comps.Avatar === "function" ? { default: comps.Avatar } : comps.Avatar);
+
+    var names = ["Avatar", "UserAvatar", "DisplayAvatar"];
     for (i = 0; i < names.length; i++) {
-        patchNamedComponent(names[i], overlayFromProps);
-        var raw = findByName(names[i], false) || findByDisplayName(names[i], false);
-        if (raw) wrapComponentModule(raw, overlayFromProps);
-        var fn = findByName(names[i], true);
-        if (typeof fn === "function") wrapComponentModule({ default: fn }, overlayFromProps);
+        var raw = findByName(names[i], false) || findByDisplayName(names[i], false) || findByTypeName(names[i], false);
+        if (raw) wrapAvatarModule(raw);
     }
     log("patched avatars");
 }
@@ -1302,6 +1377,26 @@ function DecorScreenShell(props) {
     }, header, h(View, { style: { flex: 1, backgroundColor: "#111214" } }, body));
 }
 
+function forceOpenSheet(title, render) {
+    var React = getReact();
+    var Lazy = findByProps("openLazy", "hideActionSheet");
+    var SheetMod = findByProps("ActionSheet");
+    if (!React || !Lazy || typeof Lazy.openLazy !== "function") return false;
+    function Sheet() {
+        var page = h(DecorScreenShell, { title: title, page: render });
+        var host = SheetMod && SheetMod.ActionSheet;
+        if (host) return h(host, { style: { flex: 1, backgroundColor: "#111214" } }, page);
+        return page;
+    }
+    try {
+        Lazy.openLazy(Promise.resolve({ default: Sheet }), "ActionSheet");
+        return true;
+    } catch (err) {
+        logError("forceOpenSheet", err);
+        return false;
+    }
+}
+
 function openCustomPage(title, render) {
     var React = getReact();
     if (!React) return false;
@@ -1515,7 +1610,7 @@ function AvatarDecorationPreviews(props) {
     if (comps.Avatar) Avatar = comps.Avatar;
     var avatarEl = null;
     if (Avatar) {
-        avatarEl = h(Avatar, { user: getCurrentUser(), size: "large", style: { transform: [{ scale: 3 }] } });
+        avatarEl = h(Avatar, { user: getCurrentUser(), size: "large", __mimeDecorPreview: true, style: { transform: [{ scale: 3 }] } });
     } else if (Image && avatarUri) {
         avatarEl = h(Image, {
             source: { uri: avatarUri },
@@ -1635,14 +1730,8 @@ function DecorationPicker(props) {
         key: "new",
         source: assetSource(["ic_add_24px", "PlusSmallIcon", "ic_plus_24px", "PlusIcon"]),
         label: "New",
-        disabled: disabled || hasPending,
-        onPress: function () {
-            if (hasPending) {
-                showToast("You already have a decoration pending review");
-                return;
-            }
-            openCustomPage("Submit a Decoration", CreateDecorationPage);
-        }
+        disabled: false,
+        onPress: function () { openCreateDecoration(); }
     }));
 
     var list = HorizontalTiles(tiles);
@@ -1718,6 +1807,83 @@ function PresetsPage() {
     return h(View, { style: { flex: 1, backgroundColor: "#111214", paddingTop: 8 } }, rows);
 }
 
+function normalizePickedImage(ret) {
+    if (!ret || ret.didCancel || ret.cancelled || ret.error) return null;
+    var a = (ret.assets && ret.assets[0]) || ret;
+    var uri = a.uri || a.path || a.fileCopyUri || a.filePath;
+    if (!uri && typeof ret === "string") uri = ret;
+    if (!uri) return null;
+    if (uri.indexOf("/") === 0 && uri.indexOf("file:") !== 0) uri = "file://" + uri;
+    return {
+        uri: uri,
+        type: a.type || a.mimeType || "image/png",
+        fileName: a.fileName || a.name || "decoration.png"
+    };
+}
+
+function pickImage(cb) {
+    var opts = { mediaType: "photo", quality: 1, selectionLimit: 1 };
+    function done(ret) {
+        var n = normalizePickedImage(ret);
+        if (n) cb(n);
+        else if (ret && !ret.didCancel && !ret.cancelled) showToast("Could not read that image");
+    }
+    var lib = findByProps("launchImageLibrary", "launchCamera") || findByProps("launchImageLibrary");
+    if (lib && typeof lib.launchImageLibrary === "function") {
+        try { lib.launchImageLibrary(opts, done); return true; } catch (_e) {}
+    }
+    var RN = getRN() || {};
+    var NM = RN.NativeModules || {};
+    var mgr = NM.ImagePickerManager || NM.RNCImagePicker || NM.RNImagePicker || NM.NativeImagePicker;
+    if (mgr) {
+        try {
+            if (typeof mgr.launchImageLibrary === "function") { mgr.launchImageLibrary(opts, done); return true; }
+            if (typeof mgr.showImagePicker === "function") { mgr.showImagePicker(opts, done); return true; }
+        } catch (_e2) {}
+    }
+    var doc = findByProps("pickFile") || findByProps("pick", "types") || findByProps("getDocumentAsync");
+    if (doc) {
+        try {
+            if (typeof doc.pickFile === "function") {
+                Promise.resolve(doc.pickFile({ type: "image/*" })).then(done).catch(function () {});
+                return true;
+            }
+            if (typeof doc.pick === "function") {
+                Promise.resolve(doc.pick({ type: ["image/*", "image/png"] })).then(done).catch(function () {});
+                return true;
+            }
+            if (typeof doc.getDocumentAsync === "function") {
+                Promise.resolve(doc.getDocumentAsync({ type: "image/*" })).then(done).catch(function () {});
+                return true;
+            }
+        } catch (_e3) {}
+    }
+    showToast("No image picker on this Discord build");
+    return false;
+}
+
+function openCreateDecoration() {
+    var pending = myDecorations.some(function (d) { return d && d.reviewed === false; });
+    if (pending) {
+        showToast("You already have a decoration pending review");
+        return;
+    }
+    function go() {
+        if (forceOpenSheet("Submit a Decoration", CreateDecorationPage)) return;
+        if (openCustomPage("Submit a Decoration", CreateDecorationPage)) return;
+        showToast("Could not open the create screen");
+    }
+    if (!getToken()) {
+        showToast("Authorizing…");
+        ensureAuth().then(function (tok) {
+            if (tok) go();
+            else authorize();
+        });
+        return;
+    }
+    go();
+}
+
 function CreateDecorationPage() {
     var React = getReact();
     var RN = getRN() || {};
@@ -1736,29 +1902,34 @@ function CreateDecorationPage() {
     var setAlt = altState[1];
     var creating = creatingState[0];
     var setCreating = creatingState[1];
-    var picker = findByProps("launchImageLibrary");
     function pick() {
-        if (!picker || typeof picker.launchImageLibrary !== "function") {
-            showToast("Image picker unavailable");
-            return;
-        }
-        picker.launchImageLibrary({ mediaType: "photo" }, function (ret) {
-            if (!ret || ret.didCancel) return;
-            var picked = ret.assets && ret.assets[0];
-            if (picked) setAsset(picked);
-        });
+        pickImage(function (picked) { setAsset(picked); });
     }
     function submit() {
         if (!asset || !alt || creating) return;
         setCreating(true);
-        var form = new FormData();
-        form.append("image", { uri: asset.uri, type: asset.type || "image/png", name: asset.fileName || "decoration.png" });
-        form.append("alt", alt);
-        authFetch("/users/@me/decoration", { method: "PUT", body: form }).then(function (r) { return r.json(); }).then(function () {
-            showToast("Decoration created and pending review");
-            refreshMine();
-            closeDecorScreen();
-        }).catch(function (err) {
+        function send(uri) {
+            var form = new FormData();
+            form.append("image", { uri: uri, type: asset.type || "image/png", name: asset.fileName || "decoration.png" });
+            form.append("alt", alt);
+            return authFetch("/users/@me/decoration", { method: "PUT", body: form }).then(function (r) { return r.json ? r.json() : r; }).then(function () {
+                showToast("Decoration created and pending review");
+                refreshMine();
+                closeDecorScreen();
+            });
+        }
+        var uri = asset.uri;
+        var NM = RN.NativeModules || {};
+        var fm = NM.DCDFileManager || NM.RTNFileManager;
+        var path = uri;
+        if (path && path.indexOf("file://") === 0) path = path.slice(7);
+        var needB64 = RN.Platform && RN.Platform.OS === "ios" && fm && typeof fm.readFile === "function";
+        var job = needB64
+            ? Promise.resolve(fm.readFile(path, "base64")).then(function (b64) {
+                return send("data:" + (asset.type || "image/png") + ";base64," + b64);
+            })
+            : send(uri);
+        job.catch(function (err) {
             logError("create", err);
             showToast("Failed to create decoration");
             setCreating(false);
@@ -1891,6 +2062,8 @@ const plugin = definePlugin({
     discordAuthorizeUrl: discordAuthorizeUrl,
     avatarPixelSize: avatarPixelSize,
     decoUrlFromAsset: decoUrlFromAsset,
+    resolveAvatarSize: resolveAvatarSize,
+    normalizePickedImage: normalizePickedImage,
     decorationUrlFromOpts: decorationUrlFromOpts,
     isOfficialDecorNode: isOfficialDecorNode,
     injectDecorAboveOfficial: injectDecorAboveOfficial,
