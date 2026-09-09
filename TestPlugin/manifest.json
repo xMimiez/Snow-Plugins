@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.testplugin",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "display": {
     "name": "TestPlugin",
     "description": "Tests whether Snow can load extra files besides index.ts. Run /testplugin.",
