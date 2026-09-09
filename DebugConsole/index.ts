@@ -1,14 +1,11 @@
-/* Debug Console — Snow/Bunny spec-3. Captures console + errors and shows them in-app. */
+/* Debug Console — Snow spec-3. Snow SDK: capture bunny during eval. */
+var B = (typeof bunny !== "undefined" && bunny) || (typeof snow !== "undefined" && snow) || null;
 var lines = [];
 var unhooks = [];
 var MAX = 400;
-var listeners = [];
-var updateTimer = null;
-var sequence = 0;
-var running = false;
-var CONSOLE_KEY = "mime-debug-console";
 
 function getMod() {
+    if (B && (B.commands || B.metro || B.ui || B.api || B.plugin)) return B;
     var list = [];
     try { if (typeof snow !== "undefined" && snow) list.push(snow); } catch (_e) {}
     try { if (typeof bunny !== "undefined" && bunny) list.push(bunny); } catch (_e2) {}
@@ -59,90 +56,58 @@ function stamp() {
 function fmtArg(a) {
     if (a == null) return String(a);
     if (typeof a === "string") return a;
-    if (a instanceof Error || (a && a.stack && a.message)) return a.stack || a.name + ": " + a.message;
-    var seen = [];
-    try {
-        var text = JSON.stringify(a, function (_key, value) {
-            if (typeof value === "bigint") return String(value);
-            if (value && typeof value === "object") {
-                if (seen.indexOf(value) >= 0) return "[Circular]";
-                seen.push(value);
-            }
-            return value;
-        }, 2);
-        return text === undefined ? String(a) : text;
-    } catch (_e) { return String(a); }
-}
-
-function notify() {
-    if (updateTimer != null) return;
-    updateTimer = setTimeout(function () {
-        updateTimer = null;
-        listeners.slice().forEach(function (fn) { try { fn(); } catch (_e) {} });
-    }, 100);
-}
-
-function clearConsole() {
-    lines = [];
-    notify();
+    if (a instanceof Error) return a.name + ": " + a.message + (a.stack ? "\n" + a.stack : "");
+    try { return JSON.stringify(a); } catch (_e) { return String(a); }
 }
 
 function pushLine(level, args) {
     var parts = [];
     for (var i = 0; i < args.length; i++) parts.push(fmtArg(args[i]));
-    var message = parts.join(" ");
-    if (message.length > 12000) message = message.slice(0, 12000) + "\n[truncated]";
-    var last = lines[lines.length - 1];
-    if (last && last.level === level && last.message === message) {
-        last.count++;
-        last.time = stamp();
-    } else {
-        lines.push({ id: ++sequence, time: stamp(), level: level, message: message, count: 1 });
-        if (lines.length > MAX) lines.splice(0, lines.length - MAX);
-    }
-    notify();
+    var text = "[" + stamp() + "] " + level + " " + parts.join(" ");
+    lines.push(text);
+    if (lines.length > MAX) lines.splice(0, lines.length - MAX);
 }
 
 function hookConsole() {
-    var c = globalThis.console;
+    var g = typeof globalThis !== "undefined" ? globalThis : {};
+    var c = g.console || console;
     ["log", "info", "warn", "error", "debug"].forEach(function (method) {
-        var orig = c[method];
-        function capture() {
+        var orig = c[method] ? c[method].bind(c) : function () {};
+        c[method] = function () {
             try { pushLine(method.toUpperCase(), arguments); } catch (_e) {}
-            if (typeof orig === "function") return orig.apply(c, arguments);
-        }
-        c[method] = capture;
-        unhooks.push(function () { if (c[method] === capture) c[method] = orig; });
+            try { return orig.apply(c, arguments); } catch (_e2) {}
+        };
+        unhooks.push(function () { c[method] = orig; });
     });
 }
 
 function hookErrors() {
-    var g = globalThis;
+    var g = typeof globalThis !== "undefined" ? globalThis : {};
     if (g.ErrorUtils && typeof g.ErrorUtils.getGlobalHandler === "function") {
         var prev = g.ErrorUtils.getGlobalHandler();
-        function handler(err, fatal) {
-            pushLine(fatal ? "FATAL" : "ERROR", [err]);
-            if (typeof prev === "function") prev(err, fatal);
-        }
-        g.ErrorUtils.setGlobalHandler(handler);
-        unhooks.push(function () { if (g.ErrorUtils.getGlobalHandler() === handler) g.ErrorUtils.setGlobalHandler(prev); });
-    }
-    if (typeof g.addEventListener === "function" && typeof g.removeEventListener === "function") {
-        var onError = function (ev) { pushLine("ERROR", [ev && (ev.error || ev.message || ev)]); };
-        var onReject = function (ev) { pushLine("REJECT", [ev && (ev.reason || ev)]); };
-        g.addEventListener("error", onError);
-        g.addEventListener("unhandledrejection", onReject);
-        unhooks.push(function () {
-            g.removeEventListener("error", onError);
-            g.removeEventListener("unhandledrejection", onReject);
+        g.ErrorUtils.setGlobalHandler(function (err, isFatal) {
+            pushLine("FATAL", [isFatal ? "fatal" : "error", err]);
+            if (typeof prev === "function") prev(err, isFatal);
         });
+        unhooks.push(function () {
+            try { g.ErrorUtils.setGlobalHandler(prev); } catch (_e) {}
+        });
+    }
+    var onErr = function (ev) {
+        pushLine("ONERROR", [ev && (ev.message || ev.error || ev)]);
+    };
+    if (typeof g.addEventListener === "function") {
+        try {
+            g.addEventListener("error", onErr);
+            g.addEventListener("unhandledrejection", function (ev) {
+                pushLine("REJECT", [ev && (ev.reason || ev)]);
+            });
+        } catch (_e) {}
     }
 }
 
 function dumpText() {
-    return lines.length ? lines.map(function (line) {
-        return "[" + line.time + "] " + line.level + (line.count > 1 ? " ×" + line.count : "") + "\n" + line.message;
-    }).join("\n\n") : "No logs yet.";
+    return lines.length ? lines.join("\n") : "(no logs yet — trigger /gifroulette then /console)";
 }
 
 function sendBot(channelId, content) {
@@ -173,84 +138,46 @@ function copyText(text) {
     return false;
 }
 
-function closeWindow() {
-    var modals = metroFindByProps("pushModal", "popModal");
-    if (modals) { try { modals.popModal(CONSOLE_KEY); } catch (_e) {} }
-}
-
 function openWindow() {
-    var modals = metroFindByProps("pushModal", "popModal");
-    if (modals && getReact() && getRN()) {
-        try {
-            modals.pushModal({ key: CONSOLE_KEY, modal: {
-                key: CONSOLE_KEY, modal: ConsoleModal, animation: "slide-up",
-                shouldPersistUnderModals: false, closable: true
-            } });
-            return true;
-        } catch (err) { pushLine("ERROR", ["Could not open console page", err]); }
-    }
-    var RN = getRN() || {};
-    if (RN.Alert && RN.Alert.alert) {
-        RN.Alert.alert("Debug Console", dumpText().slice(-2500), [
-            { text: "Copy logs", onPress: function () { copyText(dumpText()); } },
-            { text: "Clear console", style: "destructive", onPress: clearConsole },
-            { text: "Close", style: "cancel" }
-        ]);
-        return true;
-    }
-    return false;
-}
-
-function ConsoleModal() { return ConsolePanel({ onClose: closeWindow }); }
-
-function ConsolePanel(props) {
+    pushLine("INFO", ["opening console window"]);
     var React = getReact();
-    var RN = getRN() || {};
-    if (!React || !RN.View || !RN.Text) return null;
-    var e = React.createElement;
-    var state = React.useState(0);
-    var filterState = React.useState(false);
-    var queryState = React.useState("");
-    var statusState = React.useState("");
-    React.useEffect(function () {
-        function refresh() { state[1](function (n) { return n + 1; }); }
-        listeners.push(refresh);
-        return function () { var i = listeners.indexOf(refresh); if (i >= 0) listeners.splice(i, 1); };
-    }, []);
-    function action(label, fn) {
-        return e(RN.Pressable || RN.TouchableOpacity, {
-            key: label, onPress: fn, accessibilityRole: "button", accessibilityLabel: label,
-            style: { paddingVertical: 11, paddingHorizontal: 13, borderRadius: 8, backgroundColor: "#313641", marginRight: 8, marginBottom: 8 }
-        }, e(RN.Text, { style: { color: "#f2f3f5", fontSize: 14, fontWeight: "600" } }, label));
+    var RN = getRN();
+    var text = dumpText();
+    var shown = false;
+    var snippet = text.length > 1500 ? text.slice(-1500) : text;
+
+    if (RN && RN.Alert && typeof RN.Alert.alert === "function") {
+        try {
+            RN.Alert.alert("Debug logs", snippet, [
+                { text: "Copy", onPress: function () { copyText(text); } },
+                { text: "OK" }
+            ]);
+            shown = true;
+        } catch (e2) {
+            pushLine("ERROR", ["Alert.alert failed", e2]);
+        }
     }
-    var query = queryState[0].toLowerCase();
-    var visible = lines.filter(function (line) {
-        return (!filterState[0] || /WARN|ERROR|FATAL|REJECT/.test(line.level)) && (!query || (line.level + " " + line.message).toLowerCase().indexOf(query) >= 0);
-    }).slice().reverse();
-    function row(line) {
-        var color = /ERROR|FATAL|REJECT/.test(line.level) ? "#ff929b" : line.level === "WARN" ? "#f5ce75" : "#97b7ff";
-        return e(RN.View, { key: String(line.id), style: { backgroundColor: "#232730", borderLeftWidth: 3, borderLeftColor: color, borderRadius: 6, padding: 12, marginBottom: 9 } },
-            e(RN.Text, { style: { color: color, fontSize: 12, fontWeight: "700", marginBottom: 6 } }, line.level + "   " + line.time + (line.count > 1 ? "   ×" + line.count : "")),
-            e(RN.Text, { selectable: true, style: { color: "#e5e7eb", fontSize: 13, lineHeight: 19, fontFamily: RN.Platform && RN.Platform.OS === "ios" ? "Menlo" : "monospace" } }, line.message));
+
+    var alerts = (getMod().ui && getMod().ui.alerts)
+        || (typeof globalThis !== "undefined" && globalThis.vendetta && globalThis.vendetta.ui && globalThis.vendetta.ui.alerts);
+    if (!shown && alerts && typeof alerts.showCustomAlert === "function" && React && RN && RN.Text) {
+        try {
+            function ConsolePanel() {
+                var ScrollView = RN.ScrollView;
+                var Text = RN.Text;
+                var inner = React.createElement(Text, { selectable: true, style: { color: "#d4d4d4", fontSize: 11 } }, text);
+                if (ScrollView) return React.createElement(ScrollView, { style: { maxHeight: 420 } }, inner);
+                return inner;
+            }
+            alerts.showCustomAlert(ConsolePanel);
+            shown = true;
+        } catch (e) {
+            pushLine("ERROR", ["showCustomAlert failed", e]);
+        }
     }
-    var feed = RN.FlatList ? e(RN.FlatList, {
-        data: visible, keyExtractor: function (line) { return String(line.id); },
-        renderItem: function (item) { return row(item.item); },
-        keyboardShouldPersistTaps: "handled", initialNumToRender: 20,
-        style: { flex: 1 }, contentContainerStyle: { paddingBottom: 24 },
-        ListEmptyComponent: e(RN.Text, { style: { color: "#b5bac1", paddingVertical: 20 } }, query || filterState[0] ? "No matching logs." : "Console is clear. New logs appear here.")
-    }) : e(RN.ScrollView || RN.View, { style: { flex: 1 } }, visible.map(row));
-    return e(RN.SafeAreaView || RN.View, { style: { flex: 1, backgroundColor: "#181b21", padding: 16 } },
-        e(RN.Text, { style: { color: "#fff", fontSize: 23, fontWeight: "700", marginBottom: 5 } }, "Debug Console"),
-        e(RN.Text, { style: { color: "#b5bac1", marginBottom: 14 } }, visible.length + " of " + lines.length + " entries · newest first · live"),
-        e(RN.View, { style: { flexDirection: "row", flexWrap: "wrap" } },
-            action("Clear console", function () { clearConsole(); statusState[1]("Console cleared"); }),
-            action("Copy logs", function () { statusState[1](copyText(dumpText()) ? "Logs copied" : "Clipboard unavailable"); }),
-            action(filterState[0] ? "Show all" : "Warnings & errors", function () { filterState[1](!filterState[0]); }),
-            props && props.onClose ? action("Close", props.onClose) : null),
-        RN.TextInput ? e(RN.TextInput, { value: queryState[0], onChangeText: queryState[1], placeholder: "Search logs or plugin name", placeholderTextColor: "#9ba2af", accessibilityLabel: "Search logs", autoCapitalize: "none", autoCorrect: false, style: { color: "#fff", backgroundColor: "#232730", padding: 12, borderRadius: 8, marginBottom: 12 } }) : null,
-        statusState[0] ? e(RN.Text, { accessibilityLiveRegion: "polite", style: { color: "#9ddab5", marginBottom: 10 } }, statusState[0]) : null,
-        feed);
+
+    copyText(text);
+    return shown;
 }
 
 function prepare(cmd) {
@@ -271,47 +198,73 @@ function prepare(cmd) {
     return out;
 }
 
-
 var unregisters = [];
 
 function start() {
-    if (running) return;
-    running = true;
     hookConsole();
     hookErrors();
     pushLine("INFO", ["Debug Console loaded"]);
     var mod = getMod();
-    var api = (mod.api && mod.api.commands) || mod.commands;
-    if (!api || !api.registerCommand) return;
-    var commands = [prepare({
-        name: "console", description: "Open the live debug console", options: [],
-        execute: function () { if (!openWindow()) pushLine("WARN", ["Open Debug Console from plugin settings on this build."]); }
-    }), prepare({
-        name: "consoleclear", description: "Clear captured debug logs", options: [],
-        execute: function () { clearConsole(); }
-    })];
-    commands.forEach(function (cmd, index) {
-        var unregister = api.registerCommand(cmd);
-        cmd.id = String(-920000 - index);
-        if (typeof unregister === "function") unregisters.push(unregister);
-    });
-    var module = metroFindByProps("getBuiltInCommands");
-    var patcher = (mod.api && mod.api.patcher) || mod.patcher;
-    if (module && patcher && patcher.after) unregisters.push(patcher.after("getBuiltInCommands", module, function (_args, result) {
-        if (!Array.isArray(result)) return result;
-        return result.filter(function (cmd) { return cmd && !commands.some(function (c) { return c.name === (cmd.name || cmd.untranslatedName); }); }).concat(commands);
-    }));
+    var register = mod.api && mod.api.commands && mod.api.commands.registerCommand
+        || (mod.commands && mod.commands.registerCommand);
+    if (register) {
+        unregisters.push(register(prepare({
+            name: "console",
+            description: "Open the debug console overlay and dump recent logs",
+            options: [],
+            execute: function (_opts, ctx) {
+                var opened = openWindow();
+                var id = ctx && ctx.channel && ctx.channel.id;
+                var header = opened ? "Console opened. Last logs:" : "Could not open overlay. Last logs (also copied if clipboard exists):";
+                sendBot(id, { content: header });
+                chunkSend(id, dumpText());
+            }
+        })));
+        unregisters.push(register(prepare({
+            name: "consoleclear",
+            description: "Clear captured debug logs",
+            options: [],
+            execute: function (_opts, ctx) {
+                lines = [];
+                pushLine("INFO", ["cleared"]);
+                sendBot(ctx && ctx.channel && ctx.channel.id, { content: "Debug console cleared." });
+            }
+        })));
+    }
 }
 
 function stop() {
-    if (running) closeWindow();
-    running = false;
-    while (unhooks.length) try { unhooks.pop()(); } catch (_e) {}
-    while (unregisters.length) try { unregisters.pop()(); } catch (_e2) {}
-    if (updateTimer != null) clearTimeout(updateTimer);
-    updateTimer = null;
+    for (var i = 0; i < unhooks.length; i++) try { unhooks[i](); } catch (_e) {}
+    unhooks = [];
+    for (var j = 0; j < unregisters.length; j++) try { unregisters[j](); } catch (_e2) {}
+    unregisters = [];
 }
 
-function SettingsComponent() { return ConsolePanel({}); }
+function SettingsComponent() {
+    var React = getReact();
+    if (!React) return null;
+    var RN = getRN() || {};
+    var Text = RN.Text;
+    var View = RN.View;
+    var ScrollView = RN.ScrollView;
+    if (!Text || !View) return null;
+    var [, bump] = React.useState(0);
+    var logNode = React.createElement(Text, { selectable: true, style: { color: "#c0c0c0", fontSize: 11 } }, dumpText());
+    return React.createElement(View, { style: { padding: 12 } },
+        React.createElement(Text, { style: { color: "#fff", marginBottom: 8 } }, "Debug Console — /console dumps logs. Tap refresh after errors."),
+        React.createElement(Text, {
+            onPress: function () { bump(function (n) { return n + 1; }); },
+            style: { color: "#5865F2", marginBottom: 8 }
+        }, "Refresh"),
+        ScrollView ? React.createElement(ScrollView, { style: { maxHeight: 480 } }, logNode) : logNode
+    );
+}
 
-const plugin = definePlugin({ start: start, stop: stop, onLoad: start, onUnload: stop, SettingsComponent: SettingsComponent, settings: SettingsComponent });
+const plugin = definePlugin({
+    start: start,
+    stop: stop,
+    onLoad: start,
+    onUnload: stop,
+    SettingsComponent: SettingsComponent,
+    settings: SettingsComponent
+});
