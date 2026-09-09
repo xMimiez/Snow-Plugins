@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.1.10
+  build: 1.1.11
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -642,6 +642,11 @@ function notifyOverlay() {
 function closeReplyWindow() {
     overlay = { open: false, user: null, status: null, sending: false };
     notifyOverlay();
+    var alerts = findByProps("openAlert", "dismissAlert") || findByProps("dismissAlert");
+    if (alerts && typeof alerts.dismissAlert === "function") {
+        try { alerts.dismissAlert("mime-rts-reply"); } catch (_e) {}
+        try { alerts.dismissAlert(); } catch (_e2) {}
+    }
 }
 
 function openReplySheet(user, status) {
@@ -656,6 +661,139 @@ function openReplySheet(user, status) {
         Lazy.openLazy(function () { return { default: ReplySheet }; }, "MimeReplyToStatus", props);
         return true;
     } catch (_e2) {}
+    return false;
+}
+
+function getAlertOpeners() {
+    var list = [];
+    var a = findByProps("openAlert", "dismissAlert") || findByProps("openAlert");
+    if (a && typeof a.openAlert === "function") list.push(a.openAlert.bind(a));
+    var mod = getMod();
+    var ui = mod.ui && mod.ui.alerts;
+    if (ui && typeof ui.openAlert === "function") list.push(ui.openAlert.bind(ui));
+    eachClient(function (m) {
+        if (m.ui && m.ui.alerts && typeof m.ui.alerts.openAlert === "function") {
+            list.push(m.ui.alerts.openAlert.bind(m.ui.alerts));
+        }
+        if (m.api && m.api.alerts && typeof m.api.alerts.openAlert === "function") {
+            list.push(m.api.alerts.openAlert.bind(m.api.alerts));
+        }
+    });
+    return list;
+}
+
+function openDiscordAlert(user, status) {
+    var AlertModal = findByName("AlertModal") || findByDisplayName("AlertModal") || findByTypeName("AlertModal");
+    var AlertActionButton = findByName("AlertActionButton") || findByDisplayName("AlertActionButton") || findByTypeName("AlertActionButton");
+    var openers = getAlertOpeners();
+    if (!openers.length) return false;
+    var quote = formatQuote(status);
+    function AlertBody() {
+        return h(ReplySheet, { user: user, status: status });
+    }
+    var i;
+    for (i = 0; i < openers.length; i++) {
+        var openAlert = openers[i];
+        if (AlertModal) {
+            try {
+                openAlert("mime-rts-reply", function () {
+                    return h(AlertModal, {
+                        title: "Reply to Status",
+                        content: quote || "Write a reply to this status."
+                    }, h(ReplySheet, { user: user, status: status }));
+                });
+                return true;
+            } catch (_e) {}
+            try {
+                openAlert("mime-rts-reply", h(AlertModal, {
+                    title: "Reply to Status",
+                    content: quote || ""
+                }, h(ReplySheet, { user: user, status: status })));
+                return true;
+            } catch (_e2) {}
+        }
+        try {
+            openAlert("mime-rts-reply", AlertBody);
+            return true;
+        } catch (_e3) {}
+        try {
+            openAlert("mime-rts-reply", h(ReplySheet, { user: user, status: status }));
+            return true;
+        } catch (_e4) {}
+        try {
+            openAlert({
+                key: "mime-rts-reply",
+                title: "Reply to Status",
+                body: quote,
+                content: quote,
+                confirmText: "Send",
+                cancelText: "Cancel",
+                onConfirm: function () {}
+            });
+            return true;
+        } catch (_e5) {}
+    }
+    return false;
+}
+
+function openNativePrompt(user, status) {
+    var RN = getRN() || {};
+    var Alert = RN.Alert;
+    if (!Alert) return false;
+    var quote = formatQuote(status) || "Reply to this status";
+    if (typeof Alert.prompt === "function") {
+        try {
+            Alert.prompt(
+                "Reply to Status",
+                quote,
+                [
+                    { text: "Cancel", style: "cancel" },
+                    {
+                        text: "Send",
+                        onPress: function (text) {
+                            sendStatusReply(user.id, text, status).then(function () {
+                                showToast("Reply sent");
+                            }).catch(function (err) {
+                                showToast((err && err.message) || "Failed to send");
+                            });
+                        }
+                    }
+                ],
+                "plain-text"
+            );
+            return true;
+        } catch (_e) {}
+    }
+    if (typeof Alert.alert === "function") {
+        try {
+            Alert.alert("Reply to Status", quote, [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "OK",
+                    onPress: function () {
+                        if (typeof Alert.prompt === "function") openNativePrompt(user, status);
+                    }
+                }
+            ]);
+            return true;
+        } catch (_e2) {}
+    }
+    return false;
+}
+
+function openNativeReplyUI(user, status) {
+    if (openDiscordAlert(user, status)) {
+        log("opened discord alert");
+        return true;
+    }
+    if (openNativePrompt(user, status)) {
+        log("opened native prompt");
+        return true;
+    }
+    if (openReplySheet(user, status)) {
+        log("opened action sheet");
+        return true;
+    }
     return false;
 }
 
@@ -675,7 +813,9 @@ function openReplyWindow(userId, statusHint) {
     lastOpenAt = now;
     overlay = { open: true, user: user, status: status, sending: false };
     notifyOverlay();
-    log("open reply", userId, formatQuote(status));
+    var shown = openNativeReplyUI(user, status);
+    log("open reply", userId, formatQuote(status), shown ? "native" : "overlay-only");
+    if (!shown) showToast("Opening reply…");
     return true;
 }
 
