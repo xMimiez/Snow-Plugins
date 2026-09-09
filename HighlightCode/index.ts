@@ -1,7 +1,9 @@
 /*
   HighlightCode — Snow spec-3 port of m4fn3/HighlightCode (Enmity iOS).
   Original: mafu. Snow port: Mime | N0_.q3.
+  Snow SDK: capture bunny during eval.
 */
+var B = (typeof bunny !== "undefined" && bunny) || (typeof snow !== "undefined" && snow) || null;
 var unpatches = [];
 var _storage;
 
@@ -91,6 +93,7 @@ function eachClient(fn) {
 }
 
 function getMod() {
+    if (B && (B.metro || B.patcher || B.ui || B.api || B.plugin)) return B;
     var found = null;
     eachClient(function (m) {
         if (found) return;
