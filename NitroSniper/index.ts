@@ -4,8 +4,10 @@ Snow/Bunny port — original author kept; Mime | N0_.q3 added.
 I am not responsible for any damage caused by this plugin; use at your own risk
 Vencord does not endorse/support this plugin
 https://github.com/neoarz/NitroSniper
+Snow SDK: capture bunny during eval.
 */
 
+var B = (typeof bunny !== "undefined" && bunny) || (typeof snow !== "undefined" && snow) || null;
 var unpatches = [];
 var startTime = 0;
 var claiming = false;
@@ -32,6 +34,7 @@ var SETTINGS_META = {
 };
 
 function getMod() {
+    if (B && (B.metro || B.patcher || B.ui || B.api || B.plugin || B.flux)) return B;
     var list = [];
     try { if (typeof snow !== "undefined" && snow) list.push(snow); } catch (_e) {}
     try { if (typeof bunny !== "undefined" && bunny) list.push(bunny); } catch (_e2) {}
@@ -115,6 +118,9 @@ function getCurrentUser() {
 }
 
 function showToast(message, kind) {
+    if (B && B.ui && typeof B.ui.showToast === "function") {
+        try { B.ui.showToast(message); return; } catch (_e0) {}
+    }
     var t = findByProps("showToast") || (getMod().ui && getMod().ui.toasts);
     if (t && t.showToast) {
         try { t.showToast(message); return; } catch (_e) {}
