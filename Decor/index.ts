@@ -8,8 +8,10 @@
   https://github.com/Equicord/Equicord/tree/main/src/plugins/decor
   https://github.com/decor-discord/vendetta-plugin
   https://codeberg.org/raincord/rain/src/commit/333142c78140586c458002bda0f502e7d4053fdf/src/plugins/decor
-  build: 1.1.7
+  build: 1.2.0
+  Snow SDK: capture bunny during eval.
 */
+var B = (typeof bunny !== "undefined" && bunny) || (typeof snow !== "undefined" && snow) || null;
 var unpatches = [];
 var _storage;
 var usersDecorations = {};
@@ -68,6 +70,7 @@ function eachClient(fn) {
 }
 
 function getMod() {
+    if (B && (B.metro || B.patcher || B.ui || B.api || B.plugin)) return B;
     var found = null;
     eachClient(function (m) {
         if (found) return;
@@ -757,10 +760,13 @@ function subscribeFlux() {
     }
 }
 
-function showToast(message) {
+function showToast(message, icon) {
+    if (B && B.ui && typeof B.ui.showToast === "function") {
+        try { B.ui.showToast(message, icon); return; } catch (_e) {}
+    }
     var t = findByProps("showToast") || (getMod().ui && getMod().ui.toasts);
     if (t && t.showToast) {
-        try { t.showToast(message); return; } catch (_e) {}
+        try { t.showToast(message); return; } catch (_e2) {}
     }
     log("toast", message);
 }
