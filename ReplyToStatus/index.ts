@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.1.11
+  build: 1.1.12
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -642,180 +642,17 @@ function notifyOverlay() {
 function closeReplyWindow() {
     overlay = { open: false, user: null, status: null, sending: false };
     notifyOverlay();
-    var alerts = findByProps("openAlert", "dismissAlert") || findByProps("dismissAlert");
-    if (alerts && typeof alerts.dismissAlert === "function") {
-        try { alerts.dismissAlert("mime-rts-reply"); } catch (_e) {}
-        try { alerts.dismissAlert(); } catch (_e2) {}
-    }
-}
-
-function openReplySheet(user, status) {
-    var Lazy = findByProps("openLazy", "hideActionSheet") || findByProps("openLazy");
-    if (!Lazy || typeof Lazy.openLazy !== "function") return false;
-    var props = { user: user, status: status };
-    try {
-        Lazy.openLazy(Promise.resolve({ default: ReplySheet }), "MimeReplyToStatus", props);
-        return true;
-    } catch (_e) {}
-    try {
-        Lazy.openLazy(function () { return { default: ReplySheet }; }, "MimeReplyToStatus", props);
-        return true;
-    } catch (_e2) {}
-    return false;
-}
-
-function getAlertOpeners() {
-    var list = [];
-    var a = findByProps("openAlert", "dismissAlert") || findByProps("openAlert");
-    if (a && typeof a.openAlert === "function") list.push(a.openAlert.bind(a));
-    var mod = getMod();
-    var ui = mod.ui && mod.ui.alerts;
-    if (ui && typeof ui.openAlert === "function") list.push(ui.openAlert.bind(ui));
-    eachClient(function (m) {
-        if (m.ui && m.ui.alerts && typeof m.ui.alerts.openAlert === "function") {
-            list.push(m.ui.alerts.openAlert.bind(m.ui.alerts));
-        }
-        if (m.api && m.api.alerts && typeof m.api.alerts.openAlert === "function") {
-            list.push(m.api.alerts.openAlert.bind(m.api.alerts));
-        }
-    });
-    return list;
-}
-
-function openDiscordAlert(user, status) {
-    var AlertModal = findByName("AlertModal") || findByDisplayName("AlertModal") || findByTypeName("AlertModal");
-    var AlertActionButton = findByName("AlertActionButton") || findByDisplayName("AlertActionButton") || findByTypeName("AlertActionButton");
-    var openers = getAlertOpeners();
-    if (!openers.length) return false;
-    var quote = formatQuote(status);
-    function AlertBody() {
-        return h(ReplySheet, { user: user, status: status });
-    }
-    var i;
-    for (i = 0; i < openers.length; i++) {
-        var openAlert = openers[i];
-        if (AlertModal) {
-            try {
-                openAlert("mime-rts-reply", function () {
-                    return h(AlertModal, {
-                        title: "Reply to Status",
-                        content: quote || "Write a reply to this status."
-                    }, h(ReplySheet, { user: user, status: status }));
-                });
-                return true;
-            } catch (_e) {}
-            try {
-                openAlert("mime-rts-reply", h(AlertModal, {
-                    title: "Reply to Status",
-                    content: quote || ""
-                }, h(ReplySheet, { user: user, status: status })));
-                return true;
-            } catch (_e2) {}
-        }
-        try {
-            openAlert("mime-rts-reply", AlertBody);
-            return true;
-        } catch (_e3) {}
-        try {
-            openAlert("mime-rts-reply", h(ReplySheet, { user: user, status: status }));
-            return true;
-        } catch (_e4) {}
-        try {
-            openAlert({
-                key: "mime-rts-reply",
-                title: "Reply to Status",
-                body: quote,
-                content: quote,
-                confirmText: "Send",
-                cancelText: "Cancel",
-                onConfirm: function () {}
-            });
-            return true;
-        } catch (_e5) {}
-    }
-    return false;
-}
-
-function openNativePrompt(user, status) {
-    var RN = getRN() || {};
-    var Alert = RN.Alert;
-    if (!Alert) return false;
-    var quote = formatQuote(status) || "Reply to this status";
-    if (typeof Alert.prompt === "function") {
-        try {
-            Alert.prompt(
-                "Reply to Status",
-                quote,
-                [
-                    { text: "Cancel", style: "cancel" },
-                    {
-                        text: "Send",
-                        onPress: function (text) {
-                            sendStatusReply(user.id, text, status).then(function () {
-                                showToast("Reply sent");
-                            }).catch(function (err) {
-                                showToast((err && err.message) || "Failed to send");
-                            });
-                        }
-                    }
-                ],
-                "plain-text"
-            );
-            return true;
-        } catch (_e) {}
-    }
-    if (typeof Alert.alert === "function") {
-        try {
-            Alert.alert("Reply to Status", quote, [
-                { text: "Cancel", style: "cancel" },
-                {
-                    text: "OK",
-                    onPress: function () {
-                        if (typeof Alert.prompt === "function") openNativePrompt(user, status);
-                    }
-                }
-            ]);
-            return true;
-        } catch (_e2) {}
-    }
-    return false;
-}
-
-function openNativeReplyUI(user, status) {
-    if (openDiscordAlert(user, status)) {
-        log("opened discord alert");
-        return true;
-    }
-    if (openNativePrompt(user, status)) {
-        log("opened native prompt");
-        return true;
-    }
-    if (openReplySheet(user, status)) {
-        log("opened action sheet");
-        return true;
-    }
-    return false;
 }
 
 function openReplyWindow(userId, statusHint) {
-    if (shouldSkipUser(userId)) {
-        showToast("Can't reply to your own status");
-        return false;
-    }
+    if (shouldSkipUser(userId)) { showToast("Can't reply to your own status"); return false; }
     var status = statusHint || customStatusForUser(userId);
-    if (!status || (!status.text && !status.emojiName)) {
-        showToast("No custom status");
-        return false;
-    }
-    var user = getUser(userId) || { id: userId };
-    var now = Date.now();
-    if (now - lastOpenAt < 250) return true;
-    lastOpenAt = now;
-    overlay = { open: true, user: user, status: status, sending: false };
+    if (!status || (!status.text && !status.emojiName)) { showToast("No custom status"); return false; }
+    if (!overlayListeners.length) { showToast("Reopen the profile to reply to this status"); return false; }
+    if (overlay.open) return true;
+    overlay = { open: true, user: getUser(userId) || { id: userId }, status: status, sending: false };
     notifyOverlay();
-    var shown = openNativeReplyUI(user, status);
-    log("open reply", userId, formatQuote(status), shown ? "native" : "overlay-only");
-    if (!shown) showToast("Opening reply…");
+    log("open reply", userId);
     return true;
 }
 
@@ -852,7 +689,7 @@ function ReplySheet(props) {
     }
 
     function doSend(content) {
-        if (sending) return;
+        if (overlay.sending) return;
         var body = content != null ? content : (text || draft.current);
         if (!String(body || "").replace(/^\s+|\s+$/g, "")) {
             showToast("Type a reply");
@@ -870,7 +707,7 @@ function ReplySheet(props) {
     }
 
     function doReact(emoji) {
-        if (sending) return;
+        if (overlay.sending) return;
         setSending(true);
         sendStatusReaction(user.id, emoji, status).then(function () {
             showToast("Reaction sent");
@@ -958,7 +795,6 @@ function OverlayHost() {
     var React = getReact();
     var RN = getRN() || {};
     var View = RN.View;
-    var Modal = RN.Modal;
     if (!React || !View) return null;
     var bump = React.useState ? React.useState(0) : [0, function () {}];
     var setBump = bump[1];
@@ -966,7 +802,13 @@ function OverlayHost() {
         React.useEffect(function () {
             function on() { setBump(function (n) { return (n || 0) + 1; }); }
             overlayListeners.push(on);
+            var back = RN.BackHandler && RN.BackHandler.addEventListener("hardwareBackPress", function () {
+                if (!overlay.open) return false;
+                closeReplyWindow();
+                return true;
+            });
             return function () {
+                if (back && back.remove) back.remove();
                 var i = overlayListeners.indexOf(on);
                 if (i >= 0) overlayListeners.splice(i, 1);
             };
@@ -990,17 +832,6 @@ function OverlayHost() {
         }) : null,
         overlay.open ? h(View, { style: { width: "100%", maxWidth: 360 }, pointerEvents: "auto" }, card) : null
     );
-    if (Modal) {
-        return h(Modal, {
-            visible: !!overlay.open,
-            transparent: true,
-            animationType: "fade",
-            presentationStyle: "overFullScreen",
-            statusBarTranslucent: true,
-            hardwareAccelerated: true,
-            onRequestClose: closeReplyWindow
-        }, body);
-    }
     if (!overlay.open) return h(View, { pointerEvents: "none", style: { width: 0, height: 0 } });
     return h(View, {
         pointerEvents: "auto",
@@ -1245,7 +1076,6 @@ function makeReplyButton(userId, status, extraStyle) {
     var icon = replyIconElement(t.text, 16);
     return h(Pressable, {
         onPress: fire,
-        onPressIn: fire,
         hitSlop: 12,
         pointerEvents: "auto",
         accessibilityLabel: "Reply to Status",
@@ -1358,7 +1188,6 @@ function wrapWithReplyArrow(el, userId, status) {
         pointerEvents: "box-none",
         style: { position: "relative", overflow: "visible", alignSelf: "flex-start" }
     }, el, btn);
-    if (wrapped) wrapped.__mimeRtsDecorated = true;
     return wrapped || el;
 }
 
@@ -1395,24 +1224,13 @@ function replaceNode(root, target, replacement) {
     if (root === target) return replacement;
     if (!root || typeof root !== "object") return root;
     if (Array.isArray(root)) {
-        for (var i = 0; i < root.length; i++) root[i] = replaceNode(root[i], target, replacement);
-        return root;
+        return root.map(function (child) { return replaceNode(child, target, replacement); });
     }
     if (!root.props) return root;
     var ch = root.props.children;
-    if (ch === target) {
-        root.props.children = replacement;
-        return root;
-    }
-    if (Array.isArray(ch)) {
-        for (var j = 0; j < ch.length; j++) {
-            if (ch[j] === target) ch[j] = replacement;
-            else ch[j] = replaceNode(ch[j], target, replacement);
-        }
-    } else if (ch && typeof ch === "object") {
-        root.props.children = replaceNode(ch, target, replacement);
-    }
-    return root;
+    var children = replaceNode(ch, target, replacement);
+    if (children === ch) return root;
+    return getReact().cloneElement(root, { children: children });
 }
 
 function treeHasArrow(node, depth) {
@@ -1461,7 +1279,6 @@ function wrapSheetWithFloatingButton(res, userId, status) {
         }
     }, icon);
     var wrapped = h(View, { style: { flex: 1 }, pointerEvents: "box-none" }, res, btn);
-    if (wrapped) wrapped.__mimeRtsDecorated = true;
     return wrapped || res;
 }
 
@@ -1496,39 +1313,35 @@ function countElements(node, depth) {
     return c;
 }
 
+// Each nested profile component gets a gate. Only the outer gate owns controls.
+// Context survives independent child rerenders, unlike a global didPlaceButton flag.
+function ProfileSurface(props) {
+    var React = getReact();
+    var RN = getRN() || {};
+    var Ctx = getProfileFlagContext();
+    var nested = React.useContext(Ctx);
+    var ownsControls = !nested && !!props.userId && !!props.status && !shouldSkipUser(props.userId);
+    React.useEffect(function () {
+        if (!ownsControls) return;
+        return closeReplyWindow;
+    }, [ownsControls, props.userId]);
+    if (!ownsControls) return props.children;
+    var content = props.children;
+    if (props.userId && props.status && !shouldSkipUser(props.userId) && !treeHasArrow(content, 0)) {
+        didPlaceButton = false;
+        content = decorateTree(content, props.userId, props.status);
+        if (!didPlaceButton) content = wrapSheetWithFloatingButton(content, props.userId, props.status);
+    }
+    return h(Ctx.Provider, { value: true },
+        h(RN.View, { style: { flex: 1 }, pointerEvents: "box-none" }, content, h(OverlayHost, { key: "mime-rts-overlay" })));
+}
+
 function afterProfileRender(args, res) {
     var props = args && args[0];
     var userId = userIdFromProps(props) || profileUserId;
-    if (!userId && props && props.user) userId = props.user.id || props.user.userId;
-    if (userId && !shouldSkipUser(userId)) enterProfile([{ userId: userId, user: props && props.user }]);
-    profileDidRender = true;
-    if (!res) return res;
-    var status = statusFromProps(props) || (userId && customStatusForUser(userId));
-    if (userId && status && !shouldSkipUser(userId)) {
-        try { res = decorateProfileTree(res, userId, status); } catch (err) { logError("decorateProfile", err); }
-        if (!didPlaceButton) {
-            try { res = decorateTree(res, userId, status); } catch (err2) { logError("decorate", err2); }
-        }
-        if (!didPlaceButton) {
-            try {
-                var injected = injectOnceInNamedScroll(res, userId, status, 0);
-                if (injected && injected.did && injected.node) res = injected.node;
-            } catch (err3) { logError("injectScroll", err3); }
-        }
-        if (!didPlaceButton) {
-            try { res = forceInjectReply(res, userId, status); } catch (err4) { logError("forceInject", err4); }
-        }
-        if (!didPlaceButton) {
-            try { res = pinButtonOver(res, userId, status) || res; } catch (err5) { logError("pin", err5); }
-        }
-    }
-    var Ctx = getProfileFlagContext();
-    if (Ctx) res = h(Ctx.Provider, { value: true }, res) || res;
-    if (!overlayAnchored && !overlayHostInjected) {
-        overlayHostInjected = true;
-        res = injectOverlay(res);
-    }
-    return res;
+    var React = getReact();
+    if (!res || !React || !React.useContext || !getProfileFlagContext()) return res;
+    return h(ProfileSurface, { userId: userId, status: statusFromProps(props) || (userId && customStatusForUser(userId)) }, res);
 }
 
 function isEsClass(fn) {
@@ -2094,17 +1907,15 @@ function patchOverlayAnchor() {
 }
 
 function start() {
+    stop();
     overlayAnchored = false;
     profileSheetOpen = false;
     profileUserId = null;
     didPlaceButton = false;
     getProfileFlagContext();
-    patchElementFactories();
-    patchStatusComponents();
     patchProfileComponents();
     patchActionSheetOpen();
     patchHideActionSheet();
-    patchOverlayAnchor();
     log("started");
 }
 
