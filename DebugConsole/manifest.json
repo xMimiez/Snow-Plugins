@@ -2,10 +2,10 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.debugconsole",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "display": {
     "name": "Debug Console",
-    "description": "In-app console overlay and /console dump of log/error output",
+    "description": "Live, searchable debug logs with readable severity, copy, and clear controls.",
     "authors": [
       {
         "name": "Mime | N0_.q3",
