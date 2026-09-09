@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "id": "mime.onepingperdm",
+  "name": "OnePingPerDM",
+  "description": "Compatibility probe: message-aware native audio hook still required.",
+  "version": "1.0.0",
+  "authors": [
+    {
+      "name": "ProffDea",
+      "id": "609329952180928513"
+    },
+    {
+      "name": "Mime | N0_.q3",
+      "id": "957164619061932045"
+    }
+  ],
+  "license": "GPL-3.0-or-later",
+  "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/OnePingPerDM",
+  "capabilities": [
+    "ui"
+  ],
+  "dependencies": [],
+  "apiVersion": 1,
+  "reload": "plugin",
+  "entry": "plugin-1.0.0.js"
+}

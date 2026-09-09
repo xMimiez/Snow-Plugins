@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "id": "mime.volumebooster",
+  "name": "VolumeBooster",
+  "description": "Compatibility probe: native gain API still required; no audio boosting yet.",
+  "version": "1.0.0",
+  "authors": [
+    {
+      "name": "Nuckyz",
+      "id": "235834946571337729"
+    },
+    {
+      "name": "sadan",
+      "id": "521819891141967883"
+    },
+    {
+      "name": "Mime | N0_.q3",
+      "id": "957164619061932045"
+    }
+  ],
+  "license": "GPL-3.0-or-later",
+  "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/VolumeBooster",
+  "capabilities": [
+    "ui"
+  ],
+  "dependencies": [],
+  "apiVersion": 1,
+  "reload": "plugin",
+  "bundle": {
+    "url": "./plugin-1.0.0.js",
+    "sha256": "54513af7ad8b0a468db311b93bfb131e5fba7488a6d2406b3814356c1bcfbcbd",
+    "bytes": 19084
+  }
+}

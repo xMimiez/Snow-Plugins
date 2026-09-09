@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "id": "mime.validuser",
+  "name": "ValidUser",
+  "description": "Resolve a user ID and populate available user data.",
+  "version": "1.0.0",
+  "authors": [
+    {
+      "name": "Vendicated",
+      "id": "343383572805058560"
+    },
+    {
+      "name": "Dolfies",
+      "id": "852892297661906993"
+    },
+    {
+      "name": "Mime | N0_.q3",
+      "id": "957164619061932045"
+    }
+  ],
+  "license": "GPL-3.0-or-later",
+  "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ValidUser",
+  "capabilities": [
+    "commands",
+    "ui"
+  ],
+  "dependencies": [],
+  "apiVersion": 1,
+  "reload": "plugin",
+  "bundle": {
+    "url": "./plugin-1.0.0.js",
+    "sha256": "1d3cc5f47a0181e6f8ddd404f5d6e027b9e29c38f08d6d7db3b303de0ea5a538",
+    "bytes": 20730
+  }
+}

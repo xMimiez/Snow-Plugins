@@ -18,9 +18,5 @@
   "dependencies": [],
   "apiVersion": 1,
   "reload": "plugin",
-  "bundle": {
-    "url": "./plugin-2.0.0.js",
-    "sha256": "309e3b72db610298b22c1a2bf90203f13fb59c1ba8de7b0e419eaece763e2464",
-    "bytes": 12640
-  }
+  "entry": "plugin-2.0.0.js"
 }

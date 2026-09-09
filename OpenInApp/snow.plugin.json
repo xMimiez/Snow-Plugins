@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 2,
+  "id": "mime.openinapp",
+  "name": "OpenInApp",
+  "description": "Open supported service links in installed apps, with browser fallback.",
+  "version": "1.0.0",
+  "authors": [
+    {
+      "name": "Vendicated",
+      "id": "343383572805058560"
+    },
+    {
+      "name": "Chloe",
+      "id": "1084592643784331324"
+    },
+    {
+      "name": "Mime | N0_.q3",
+      "id": "957164619061932045"
+    }
+  ],
+  "license": "GPL-3.0-or-later",
+  "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/OpenInApp",
+  "capabilities": [
+    "storage",
+    "ui"
+  ],
+  "dependencies": [],
+  "apiVersion": 1,
+  "reload": "plugin",
+  "entry": "plugin-1.0.0.js"
+}

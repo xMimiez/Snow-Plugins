@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 2,
+  "id": "mime.alwaysanimate",
+  "name": "AlwaysAnimate",
+  "description": "Enable supported animated mobile UI props.",
+  "version": "1.0.0",
+  "authors": [
+    {
+      "name": "Fiery",
+      "id": "890228870559698955"
+    },
+    {
+      "name": "Mime | N0_.q3",
+      "id": "957164619061932045"
+    }
+  ],
+  "license": "GPL-3.0-or-later",
+  "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/AlwaysAnimate",
+  "capabilities": [
+    "storage",
+    "ui"
+  ],
+  "dependencies": [],
+  "apiVersion": 1,
+  "reload": "plugin",
+  "bundle": {
+    "url": "./plugin-1.0.0.js",
+    "sha256": "f0767f9a79588c5a4e4c97a10080643aefa66b37f06a811a8b949f470c5b7ed5",
+    "bytes": 18588
+  }
+}
