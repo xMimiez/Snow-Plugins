@@ -1,7 +1,9 @@
-/* SpotifyPreview — Snow spec-3 port of fres621/enmityplugins SpotifyPreview. */
+/* SpotifyPreview — Snow spec-3. Snow SDK: capture bunny during eval. */
+var B = (typeof bunny !== "undefined" && bunny) || (typeof snow !== "undefined" && snow) || null;
 var unpatches = [];
 
 function getMod() {
+    if (B && (B.metro || B.patcher || B.ui || B.api || B.plugin)) return B;
     var list = [];
     try { if (typeof snow !== "undefined" && snow) list.push(snow); } catch (_e) {}
     try { if (typeof bunny !== "undefined" && bunny) list.push(bunny); } catch (_e2) {}
@@ -22,7 +24,7 @@ function metroRoots() {
     var roots = [];
     var mod = getMod();
     var g = typeof globalThis !== "undefined" ? globalThis : {};
-    [mod.metro, mod.metro && mod.metro.common, g.vendetta && g.vendetta.metro, g.snow && g.snow.metro].forEach(function (r) {
+    [B && B.metro, B && B.metro && B.metro.common, mod.metro, mod.metro && mod.metro.common, g.vendetta && g.vendetta.metro, g.snow && g.snow.metro].forEach(function (r) {
         if (r && roots.indexOf(r) < 0) roots.push(r);
     });
     return roots;
