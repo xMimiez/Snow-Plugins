@@ -3,11 +3,13 @@
   Checks whether extra files besides index.ts can load (require vs sibling fetch).
   /testplugin prints the result.
 */
+var B = (typeof bunny !== "undefined" && bunny) || (typeof snow !== "undefined" && snow) || null;
 var unpatches = [];
 var lastReport = null;
 var FALLBACK_BASE = "https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/TestPlugin/";
 
 function getMod() {
+    if (B && (B.commands || B.metro || B.ui || B.api || B.plugin)) return B;
     var list = [];
     try { if (typeof snow !== "undefined" && snow) list.push(snow); } catch (_e) {}
     try { if (typeof bunny !== "undefined" && bunny) list.push(bunny); } catch (_e2) {}
