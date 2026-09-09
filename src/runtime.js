@@ -1,26 +1,35 @@
-// Native Snow API v1. No compatibility loader or private-package imports.
-export function createRuntime(context, meta, defaults = {}) {
-    const api = context.api;
-    for (const capability of meta.capabilities) if (!api?.[capability]) throw new Error(`${meta.name}: missing Snow ${capability} capability`);
-    const host = globalThis.snow;
-    if (!host?.metro?.common) throw new Error(`${meta.name}: this Snow build does not expose metro.common`);
-    const metro = host.metro;
-    const common = metro.common;
-    const React = common.React;
-    const RN = common.ReactNative;
+// Bunny spec 3 runtime. Capture the loader's lexical `bunny` in register(); never look up globalThis.bunny later.
+export function createRuntime(B, meta, defaults = {}) {
+    const React = B.React;
+    const RN = B.ReactNative;
     if (!React?.createElement || !RN?.View) throw new Error(`${meta.name}: host React/React Native unavailable`);
-    const C = common.components || {};
+    const D = B.metro?.common?.components || {};
+    const C = B.ui?.components || D;
     const cleanups = [];
     const listeners = new Set();
     const requests = new Set();
     const openSheets = new Map();
+    const control = new AbortController();
     let active = true;
-    const store = api.storage ? api.storage.createStorage(defaults) : {};
+    const store = B.plugin?.createStorage ? B.plugin.createStorage(defaults) : { ...defaults };
     for (const [key, value] of Object.entries(defaults)) if (store[key] === undefined) store[key] = value;
     const r = {
-        context, meta, api, host, metro, common, React, RN, C, h: React.createElement, store,
-        get active() { return active && !context.signal?.aborted; },
+        B, meta, React, RN, C, D, h: React.createElement, store,
+        metro: B.metro, common: B.metro?.common || {}, host: B,
+        context: { signal: control.signal },
+        get active() { return active && !control.signal.aborted; },
         status: {},
+        api: {
+            commands: B.commands || B.api?.commands,
+            flux: B.flux || B.api?.flux,
+            patcher: B.patcher || B.api?.patcher,
+            storage: {
+                createStorage: () => store,
+                get value() { return store; },
+                flush: () => B.plugin?.flushStorage?.() || Promise.resolve(),
+            },
+            ui: B.ui,
+        },
         own(fn) { if (typeof fn === 'function') cleanups.push(fn); return fn; },
         changed() { for (const fn of listeners) fn(); },
         useRefresh() {
@@ -28,24 +37,44 @@ export function createRuntime(context, meta, defaults = {}) {
             React.useEffect(() => { const fn = () => bump(n => n + 1); listeners.add(fn); return () => listeners.delete(fn); }, []);
             return () => r.changed();
         },
-        set(key, value) { store[key] = value; r.changed(); api.storage?.flush().catch(e => r.error('Save settings', e)); },
-        find(...props) { try { return metro.findByProps?.(...props); } catch { return undefined; } },
-        byName(name, raw = false) { try { return metro.findByName?.(name, !raw) || metro.findByDisplayName?.(name, !raw); } catch { return undefined; } },
-        byStore(name) { try { return metro.findByStoreName?.(name); } catch { return undefined; } },
-        toast(message) { if (r.active) api.ui?.showToast(String(message)); },
+        set(key, value) {
+            store[key] = value;
+            r.changed();
+            Promise.resolve(B.plugin?.flushStorage?.()).catch(e => r.error('Save settings', e));
+        },
+        find(...props) { try { return B.metro.findByProps?.(...props); } catch { return undefined; } },
+        byName(name, raw = false) { try { return B.metro.findByName?.(name, !raw) || B.metro.findByDisplayName?.(name, !raw); } catch { return undefined; } },
+        byStore(name) { try { return B.metro.findByStoreName?.(name); } catch { return undefined; } },
+        toast(message) { if (r.active) B.ui?.showToast(String(message)); },
         error(label, error) { const text = `${label}: ${error?.message || error}`; console.error(`[${meta.name}]`, text); r.status.lastError = text; r.changed(); r.toast(text); },
         patch(kind, parent, key, callback) {
-            if (typeof parent?.[key] !== 'function') return false;
-            r.own(api.patcher[kind](key, parent, callback)); return true;
+            const patcher = r.api.patcher;
+            if (typeof parent?.[key] !== 'function' || typeof patcher?.[kind] !== 'function') return false;
+            r.own(patcher[kind](key, parent, callback));
+            return true;
         },
-        subscribe(type, callback) { return r.own(api.flux.subscribe(type, payload => { if (r.active) callback(payload); })); },
+        subscribe(type, callback) {
+            const flux = r.api.flux;
+            if (typeof flux?.subscribe !== 'function') throw new Error(`${meta.name}: flux.subscribe unavailable`);
+            return r.own(flux.subscribe(type, payload => { if (r.active) callback(payload); }));
+        },
         command(command) {
+            const register = r.api.commands?.registerCommand;
+            if (typeof register !== 'function') throw new Error(`${meta.name}: commands.registerCommand unavailable`);
             const execute = command.execute;
-            return r.own(api.commands.registerCommand({ ...command, options: command.options || [], async execute(...args) {
-                if (!r.active) return;
-                try { const result = await execute(...args); return r.active ? result : undefined; }
-                catch (error) { if (r.active) r.error(`/${command.name}`, error); }
-            } }));
+            return r.own(register({
+                ...command,
+                options: command.options || [],
+                async execute(...args) {
+                    if (!r.active) return;
+                    try {
+                        const result = await execute(...args);
+                        return r.active ? result : undefined;
+                    } catch (error) {
+                        if (r.active) r.error(`/${command.name}`, error);
+                    }
+                },
+            }));
         },
         async request(url, options = {}, timeout = 15000, maxBytes = Infinity) {
             if (!r.active) throw new Error('Plugin stopped');
@@ -54,12 +83,11 @@ export function createRuntime(context, meta, defaults = {}) {
             const deadline = new Promise((_, reject) => { rejectDeadline = reject; });
             const abort = () => { controller.abort(); rejectDeadline(new Error(r.active ? 'Request timed out' : 'Plugin stopped')); };
             requests.add(abort);
-            context.signal?.addEventListener('abort', abort, { once: true });
+            control.signal.addEventListener('abort', abort, { once: true });
             const timer = setTimeout(abort, timeout);
             try {
                 const response = await Promise.race([fetch(url, { ...options, signal: controller.signal }), deadline]);
                 if (Number(response.headers?.get('content-length')) > maxBytes) { controller.abort(); throw new Error('Response exceeds the preview size limit'); }
-                // Read within the deadline; no unbounded response-body promise after fetch resolves.
                 const text = await Promise.race([response.text(), deadline]);
                 if (text.length > maxBytes) throw new Error('Response exceeds the preview size limit');
                 if (!r.active) throw new Error('Plugin stopped');
@@ -69,7 +97,7 @@ export function createRuntime(context, meta, defaults = {}) {
                     error.status = response.status; error.retryAfter = Number(body.retry_after) || 0; throw error;
                 }
                 return { response, text, json() { return text ? JSON.parse(text) : null; } };
-            } finally { clearTimeout(timer); requests.delete(abort); context.signal?.removeEventListener('abort', abort); }
+            } finally { clearTimeout(timer); requests.delete(abort); control.signal.removeEventListener('abort', abort); }
         },
         async discord(path, options = {}) {
             if (!path.startsWith('/') || path.startsWith('//')) throw new Error('Invalid Discord API path');
@@ -78,7 +106,7 @@ export function createRuntime(context, meta, defaults = {}) {
             return r.request('https://discord.com/api/v9' + path, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers, Authorization: token } });
         },
         hook(names, transform) {
-            const jsx = host.api?.react?.jsx;
+            const jsx = B.api?.react?.jsx;
             if (!jsx?.onJsxCreate || !jsx?.deleteJsxCreate) throw new Error(`${meta.name}: Snow JSX hooks unavailable`);
             for (const name of names) {
                 const callback = (_Component, element) => {
@@ -91,8 +119,9 @@ export function createRuntime(context, meta, defaults = {}) {
             }
         },
         open(key, Component, props = {}) {
-            const sheets = host.api?.ui?.sheets;
-            if (!sheets?.showSheet || !sheets?.hideSheet || !C.ActionSheet) throw new Error('Snow bottom-sheet components unavailable');
+            const sheets = B.ui?.sheets;
+            const ActionSheet = D.ActionSheet || C.ActionSheet;
+            if (!sheets?.showSheet || !sheets?.hideSheet || !ActionSheet) throw new Error('Snow bottom-sheet components unavailable');
             const id = `${meta.id}.${key}`;
             openSheets.get(id)?.();
             let closed = false;
@@ -105,61 +134,78 @@ export function createRuntime(context, meta, defaults = {}) {
             }
             function Page() {
                 React.useEffect(() => () => { if (openSheets.get(id) === close) openSheets.delete(id); closed = true; }, []);
-                return r.h(C.ActionSheet, { scrollable: true }, r.h(Boundary, null, r.h(Component, { ...props, close })));
+                return r.h(ActionSheet, { scrollable: true }, r.h(Boundary, null, r.h(Component, { ...props, close })));
             }
             openSheets.set(id, close);
             try { sheets.showSheet(id, Page); } catch (error) { close(); throw error; }
             return close;
         },
-        copy(text) { const clip = common.clipboard || r.find('setString'); if (!clip?.setString) throw new Error('Clipboard unavailable'); clip.setString(String(text)); r.toast('Copied'); },
+        copy(text) { const clip = r.common.clipboard || r.find('setString'); if (!clip?.setString) throw new Error('Clipboard unavailable'); clip.setString(String(text)); r.toast('Copied'); },
         dispose() {
             active = false;
+            control.abort();
             for (const abort of requests) abort(); requests.clear();
             for (const close of [...openSheets.values()]) { try { close(); } catch {} } openSheets.clear();
             while (cleanups.length) { try { cleanups.pop()(); } catch (e) { console.error(`[${meta.name}] cleanup`, e?.message); } }
             listeners.clear();
-            return api.storage?.flush();
-        }
+            return r.api.storage.flush();
+        },
     };
     return r;
 }
 
 export function ui(r) {
-    const { h, C, RN } = r;
-    function Text({ children, muted = false, heading = false, ...props }) {
-        return C.Text ? h(C.Text, { variant: heading ? 'heading-md/semibold' : 'text-md/normal', color: muted ? 'text-muted' : 'text-normal', ...props }, children)
-            : h(RN.Text, props, children);
+    const { h, C, D, RN, store } = r;
+    function Text({ children, muted = false, heading = false, color, ...props }) {
+        const Comp = D.Text || C.Text;
+        if (Comp) return h(Comp, { variant: heading ? 'heading-md/semibold' : 'text-md/normal', color: color || (muted ? 'text-muted' : 'text-normal'), ...props }, children);
+        return h(RN.Text, props, children);
     }
     function Button({ text, onPress, disabled, variant = 'primary', ...props }) {
-        return C.Button ? h(C.Button, { text, onPress, disabled, variant, size: 'md', ...props })
-            : h(RN.Pressable || RN.TouchableOpacity, { onPress, disabled, accessibilityRole: 'button', style: { padding: 12 } }, h(Text, null, text));
+        const Comp = D.Button || C.Button;
+        if (Comp) return h(Comp, { text, onPress, disabled, variant, size: 'md', ...props });
+        return h(RN.Pressable || RN.TouchableOpacity, { onPress, disabled, accessibilityRole: 'button', style: { padding: 12 } }, h(Text, null, text));
     }
     function Page({ title, children, close }) {
-        return h(RN.View, { style: { padding: 16, gap: 12 } }, h(Text, { heading: true }, title), children, close ? h(Button, { text: 'Close', variant: 'secondary', onPress: close }) : null);
+        const body = [
+            title ? h(Text, { key: 'title', heading: true, accessibilityRole: 'header' }, title) : null,
+            children,
+            close ? h(Button, { key: 'close', text: 'Close', variant: 'secondary', onPress: close }) : null,
+        ];
+        if (C.SettingsPage) return h(C.SettingsPage, null, ...body);
+        return h(RN.View, { style: { padding: 16, gap: 12 } }, ...body);
     }
     function Input({ value, onChange, ...props }) {
-        return C.TextInput ? h(C.TextInput, { value, onChange, ...props }) : h(RN.TextInput, { value, onChangeText: onChange, ...props });
+        if (D.TextInput) return h(D.TextInput, { value, onChange, ...props });
+        if (C.TextInput) return h(C.TextInput, { value, onChange, ...props });
+        return h(RN.TextInput, { value, onChangeText: onChange, ...props });
     }
-    function Toggle({ setting, label, subLabel }) {
-        return C.TableSwitchRow ? h(C.TableSwitchRow, { label, subLabel, value: !!r.store[setting], onValueChange: v => r.set(setting, v) }) : null;
+    function Toggle({ setting, label, subLabel, icon }) {
+        r.useRefresh();
+        const Row = D.TableSwitchRow || C.TableSwitchRow;
+        if (!Row) return null;
+        return h(Row, {
+            label, subLabel,
+            icon: icon || (C.RowIcon ? h(C.RowIcon, { name: 'SettingsIcon' }) : undefined),
+            value: !!store[setting],
+            onValueChange: v => r.set(setting, v),
+        });
     }
     return { Text, Button, Page, Input, Toggle };
 }
 
 export function register(meta, factory) {
+    const B = bunny;
     let runtime;
     let instance;
-    globalThis.__snowRegisterPlugin({
-        id: meta.id, name: meta.name, description: meta.description, version: meta.version,
-        author: meta.authors.map(a => ({ name: a.name, id: BigInt(a.id || '0') })), reload: 'plugin', dependencies: meta.dependencies || [],
-        async start(context) {
+    return definePlugin({
+        async start() {
             if (runtime) { try { await instance?.stop?.(); } finally { await runtime.dispose(); } }
-            runtime = createRuntime(context, meta, factory.defaults || {});
+            runtime = createRuntime(B, meta, factory.defaults || {});
             try { instance = factory(runtime); await instance.start?.(); }
             catch (error) { runtime.error('Start failed', error); await runtime.dispose(); throw error; }
         },
         async stop() { try { await instance?.stop?.(); } finally { await runtime?.dispose(); instance = null; runtime = null; } },
-        settings() { return instance?.Settings ? runtime.h(instance.Settings) : null; },
-        health() { return !!runtime?.active && !!instance; }
+        SettingsComponent() { return instance?.Settings ? runtime.h(instance.Settings) : null; },
     });
 }

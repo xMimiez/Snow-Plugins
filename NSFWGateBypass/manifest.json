@@ -1,31 +1,26 @@
 {
-  "schemaVersion": 2,
+  "spec": 3,
+  "type": "plugin",
   "id": "mime.nsfwgatebypass",
-  "name": "NSFWGateBypass",
-  "description": "Bypass supported local guild interstitials without mutating account settings.",
-  "version": "1.0.0",
-  "authors": [
-    {
-      "name": "eternal",
-      "id": "263689920210534400"
-    },
-    {
-      "name": "Mime | N0_.q3",
-      "id": "957164619061932045"
-    }
-  ],
-  "license": "GPL-3.0-or-later",
-  "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NSFWGateBypass",
-  "capabilities": [
-    "patcher",
-    "ui"
-  ],
-  "dependencies": [],
-  "apiVersion": 1,
-  "reload": "plugin",
-  "bundle": {
-    "url": "./plugin-1.0.0.js",
-    "sha256": "04573e2d577085c67bb99493ae7aa26672c830046445305eeb0ec8238b203ced",
-    "bytes": 19277
+  "version": "1.1.0",
+  "display": {
+    "name": "NSFWGateBypass",
+    "description": "Bypass supported local guild interstitials without mutating account settings.",
+    "authors": [
+      {
+        "name": "eternal",
+        "id": "263689920210534400"
+      },
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.js",
+  "extras": {
+    "license": "GPL-3.0-or-later",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NSFWGateBypass",
+    "bunny": {}
   }
 }

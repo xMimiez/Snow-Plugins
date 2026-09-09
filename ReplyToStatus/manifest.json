@@ -1,26 +1,22 @@
 {
-  "schemaVersion": 2,
+  "spec": 3,
+  "type": "plugin",
   "id": "mime.replytostatus",
-  "name": "ReplyToStatus",
-  "description": "One themed status-reply button per profile with rendered emojis.",
-  "version": "2.0.0",
-  "authors": [
-    {
-      "name": "Mime | N0_.q3",
-      "id": "957164619061932045"
-    }
-  ],
-  "license": "MIT",
-  "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ReplyToStatus",
-  "capabilities": [
-    "ui"
-  ],
-  "dependencies": [],
-  "apiVersion": 1,
-  "reload": "plugin",
-  "bundle": {
-    "url": "./plugin-2.0.0.js",
-    "sha256": "af65db9710fd2897ff85406ad1c1d307f397f3c99b5f60a6d5bca92efea68fc3",
-    "bytes": 19715
+  "version": "2.1.0",
+  "display": {
+    "name": "ReplyToStatus",
+    "description": "One themed status-reply button per profile with rendered emojis.",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.js",
+  "extras": {
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ReplyToStatus",
+    "bunny": {}
   }
 }

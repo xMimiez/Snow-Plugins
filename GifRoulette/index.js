@@ -1,0 +1,419 @@
+var plugin = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // GifRoulette.entry.js
+  var GifRoulette_entry_exports = {};
+  __export(GifRoulette_entry_exports, {
+    default: () => GifRoulette_entry_default
+  });
+
+  // project:src/runtime.js
+  function createRuntime(B, meta, defaults = {}) {
+    const React = B.React;
+    const RN = B.ReactNative;
+    if (!React?.createElement || !RN?.View) throw new Error(`${meta.name}: host React/React Native unavailable`);
+    const D = B.metro?.common?.components || {};
+    const C = B.ui?.components || D;
+    const cleanups = [];
+    const listeners = /* @__PURE__ */ new Set();
+    const requests = /* @__PURE__ */ new Set();
+    const openSheets = /* @__PURE__ */ new Map();
+    const control = new AbortController();
+    let active = true;
+    const store = B.plugin?.createStorage ? B.plugin.createStorage(defaults) : { ...defaults };
+    for (const [key, value] of Object.entries(defaults)) if (store[key] === void 0) store[key] = value;
+    const r = {
+      B,
+      meta,
+      React,
+      RN,
+      C,
+      D,
+      h: React.createElement,
+      store,
+      metro: B.metro,
+      common: B.metro?.common || {},
+      host: B,
+      context: { signal: control.signal },
+      get active() {
+        return active && !control.signal.aborted;
+      },
+      status: {},
+      api: {
+        commands: B.commands || B.api?.commands,
+        flux: B.flux || B.api?.flux,
+        patcher: B.patcher || B.api?.patcher,
+        storage: {
+          createStorage: () => store,
+          get value() {
+            return store;
+          },
+          flush: () => B.plugin?.flushStorage?.() || Promise.resolve()
+        },
+        ui: B.ui
+      },
+      own(fn) {
+        if (typeof fn === "function") cleanups.push(fn);
+        return fn;
+      },
+      changed() {
+        for (const fn of listeners) fn();
+      },
+      useRefresh() {
+        const [, bump] = React.useState(0);
+        React.useEffect(() => {
+          const fn = () => bump((n) => n + 1);
+          listeners.add(fn);
+          return () => listeners.delete(fn);
+        }, []);
+        return () => r.changed();
+      },
+      set(key, value) {
+        store[key] = value;
+        r.changed();
+        Promise.resolve(B.plugin?.flushStorage?.()).catch((e) => r.error("Save settings", e));
+      },
+      find(...props) {
+        try {
+          return B.metro.findByProps?.(...props);
+        } catch {
+          return void 0;
+        }
+      },
+      byName(name, raw = false) {
+        try {
+          return B.metro.findByName?.(name, !raw) || B.metro.findByDisplayName?.(name, !raw);
+        } catch {
+          return void 0;
+        }
+      },
+      byStore(name) {
+        try {
+          return B.metro.findByStoreName?.(name);
+        } catch {
+          return void 0;
+        }
+      },
+      toast(message) {
+        if (r.active) B.ui?.showToast(String(message));
+      },
+      error(label, error) {
+        const text = `${label}: ${error?.message || error}`;
+        console.error(`[${meta.name}]`, text);
+        r.status.lastError = text;
+        r.changed();
+        r.toast(text);
+      },
+      patch(kind, parent, key, callback) {
+        const patcher = r.api.patcher;
+        if (typeof parent?.[key] !== "function" || typeof patcher?.[kind] !== "function") return false;
+        r.own(patcher[kind](key, parent, callback));
+        return true;
+      },
+      subscribe(type, callback) {
+        const flux = r.api.flux;
+        if (typeof flux?.subscribe !== "function") throw new Error(`${meta.name}: flux.subscribe unavailable`);
+        return r.own(flux.subscribe(type, (payload) => {
+          if (r.active) callback(payload);
+        }));
+      },
+      command(command) {
+        const register2 = r.api.commands?.registerCommand;
+        if (typeof register2 !== "function") throw new Error(`${meta.name}: commands.registerCommand unavailable`);
+        const execute = command.execute;
+        return r.own(register2({
+          ...command,
+          options: command.options || [],
+          async execute(...args) {
+            if (!r.active) return;
+            try {
+              const result = await execute(...args);
+              return r.active ? result : void 0;
+            } catch (error) {
+              if (r.active) r.error(`/${command.name}`, error);
+            }
+          }
+        }));
+      },
+      async request(url, options = {}, timeout = 15e3, maxBytes = Infinity) {
+        if (!r.active) throw new Error("Plugin stopped");
+        const controller = new AbortController();
+        let rejectDeadline;
+        const deadline = new Promise((_, reject) => {
+          rejectDeadline = reject;
+        });
+        const abort = () => {
+          controller.abort();
+          rejectDeadline(new Error(r.active ? "Request timed out" : "Plugin stopped"));
+        };
+        requests.add(abort);
+        control.signal.addEventListener("abort", abort, { once: true });
+        const timer = setTimeout(abort, timeout);
+        try {
+          const response = await Promise.race([fetch(url, { ...options, signal: controller.signal }), deadline]);
+          if (Number(response.headers?.get("content-length")) > maxBytes) {
+            controller.abort();
+            throw new Error("Response exceeds the preview size limit");
+          }
+          const text = await Promise.race([response.text(), deadline]);
+          if (text.length > maxBytes) throw new Error("Response exceeds the preview size limit");
+          if (!r.active) throw new Error("Plugin stopped");
+          if (!response.ok) {
+            let body;
+            try {
+              body = JSON.parse(text);
+            } catch {
+              body = {};
+            }
+            const error = new Error(body.message || `HTTP ${response.status}`);
+            error.status = response.status;
+            error.retryAfter = Number(body.retry_after) || 0;
+            throw error;
+          }
+          return { response, text, json() {
+            return text ? JSON.parse(text) : null;
+          } };
+        } finally {
+          clearTimeout(timer);
+          requests.delete(abort);
+          control.signal.removeEventListener("abort", abort);
+        }
+      },
+      async discord(path, options = {}) {
+        if (!path.startsWith("/") || path.startsWith("//")) throw new Error("Invalid Discord API path");
+        const token = r.find("getToken")?.getToken();
+        if (!token) throw new Error("Discord session unavailable");
+        return r.request("https://discord.com/api/v9" + path, { ...options, headers: { "Content-Type": "application/json", ...options.headers, Authorization: token } });
+      },
+      hook(names, transform) {
+        const jsx = B.api?.react?.jsx;
+        if (!jsx?.onJsxCreate || !jsx?.deleteJsxCreate) throw new Error(`${meta.name}: Snow JSX hooks unavailable`);
+        for (const name of names) {
+          const callback = (_Component, element) => {
+            if (!r.active) return;
+            r.status[name] = (r.status[name] || 0) + 1;
+            return transform(element, name);
+          };
+          jsx.onJsxCreate(name, callback);
+          r.own(() => jsx.deleteJsxCreate(name, callback));
+        }
+      },
+      open(key, Component, props = {}) {
+        const sheets = B.ui?.sheets;
+        const ActionSheet = D.ActionSheet || C.ActionSheet;
+        if (!sheets?.showSheet || !sheets?.hideSheet || !ActionSheet) throw new Error("Snow bottom-sheet components unavailable");
+        const id = `${meta.id}.${key}`;
+        openSheets.get(id)?.();
+        let closed = false;
+        const close = () => {
+          if (closed) return;
+          closed = true;
+          if (openSheets.get(id) === close) openSheets.delete(id);
+          sheets.hideSheet(id);
+        };
+        class Boundary extends React.Component {
+          state = { error: null };
+          static getDerivedStateFromError(error) {
+            return { error };
+          }
+          componentDidCatch(error) {
+            r.error("Sheet rendering", error);
+          }
+          render() {
+            if (!this.state.error) return this.props.children;
+            const U = ui(r);
+            return r.h(U.Page, { title: "Could not display this page", close }, r.h(U.Text, null, this.state.error.message));
+          }
+        }
+        function Page() {
+          React.useEffect(() => () => {
+            if (openSheets.get(id) === close) openSheets.delete(id);
+            closed = true;
+          }, []);
+          return r.h(ActionSheet, { scrollable: true }, r.h(Boundary, null, r.h(Component, { ...props, close })));
+        }
+        openSheets.set(id, close);
+        try {
+          sheets.showSheet(id, Page);
+        } catch (error) {
+          close();
+          throw error;
+        }
+        return close;
+      },
+      copy(text) {
+        const clip = r.common.clipboard || r.find("setString");
+        if (!clip?.setString) throw new Error("Clipboard unavailable");
+        clip.setString(String(text));
+        r.toast("Copied");
+      },
+      dispose() {
+        active = false;
+        control.abort();
+        for (const abort of requests) abort();
+        requests.clear();
+        for (const close of [...openSheets.values()]) {
+          try {
+            close();
+          } catch {
+          }
+        }
+        openSheets.clear();
+        while (cleanups.length) {
+          try {
+            cleanups.pop()();
+          } catch (e) {
+            console.error(`[${meta.name}] cleanup`, e?.message);
+          }
+        }
+        listeners.clear();
+        return r.api.storage.flush();
+      }
+    };
+    return r;
+  }
+  function ui(r) {
+    const { h, C, D, RN, store } = r;
+    function Text({ children, muted = false, heading = false, color, ...props }) {
+      const Comp = D.Text || C.Text;
+      if (Comp) return h(Comp, { variant: heading ? "heading-md/semibold" : "text-md/normal", color: color || (muted ? "text-muted" : "text-normal"), ...props }, children);
+      return h(RN.Text, props, children);
+    }
+    function Button({ text, onPress, disabled, variant = "primary", ...props }) {
+      const Comp = D.Button || C.Button;
+      if (Comp) return h(Comp, { text, onPress, disabled, variant, size: "md", ...props });
+      return h(RN.Pressable || RN.TouchableOpacity, { onPress, disabled, accessibilityRole: "button", style: { padding: 12 } }, h(Text, null, text));
+    }
+    function Page({ title, children, close }) {
+      const body = [
+        title ? h(Text, { key: "title", heading: true, accessibilityRole: "header" }, title) : null,
+        children,
+        close ? h(Button, { key: "close", text: "Close", variant: "secondary", onPress: close }) : null
+      ];
+      if (C.SettingsPage) return h(C.SettingsPage, null, ...body);
+      return h(RN.View, { style: { padding: 16, gap: 12 } }, ...body);
+    }
+    function Input({ value, onChange, ...props }) {
+      if (D.TextInput) return h(D.TextInput, { value, onChange, ...props });
+      if (C.TextInput) return h(C.TextInput, { value, onChange, ...props });
+      return h(RN.TextInput, { value, onChangeText: onChange, ...props });
+    }
+    function Toggle({ setting, label, subLabel, icon }) {
+      r.useRefresh();
+      const Row = D.TableSwitchRow || C.TableSwitchRow;
+      if (!Row) return null;
+      return h(Row, {
+        label,
+        subLabel,
+        icon: icon || (C.RowIcon ? h(C.RowIcon, { name: "SettingsIcon" }) : void 0),
+        value: !!store[setting],
+        onValueChange: (v) => r.set(setting, v)
+      });
+    }
+    return { Text, Button, Page, Input, Toggle };
+  }
+  function register(meta, factory) {
+    const B = bunny;
+    let runtime;
+    let instance;
+    return definePlugin({
+      async start() {
+        if (runtime) {
+          try {
+            await instance?.stop?.();
+          } finally {
+            await runtime.dispose();
+          }
+        }
+        runtime = createRuntime(B, meta, factory.defaults || {});
+        try {
+          instance = factory(runtime);
+          await instance.start?.();
+        } catch (error) {
+          runtime.error("Start failed", error);
+          await runtime.dispose();
+          throw error;
+        }
+      },
+      async stop() {
+        try {
+          await instance?.stop?.();
+        } finally {
+          await runtime?.dispose();
+          instance = null;
+          runtime = null;
+        }
+      },
+      SettingsComponent() {
+        return instance?.Settings ? runtime.h(instance.Settings) : null;
+      }
+    });
+  }
+
+  // project:src/plugins/gif-roulette.js
+  function gifUrls(value) {
+    const source = value?.favoriteGifs?.gifs || value?.favorite_gifs?.gifs || value?.gifs || value?.favorites || value;
+    const urls = [];
+    function add(value2) {
+      if (typeof value2 !== "string" || !/^https?:\/\//i.test(value2)) return;
+      const proxy = value2.match(/\/external\/[^/]+\/(https?)\/([^?]+)/);
+      if (proxy) {
+        try {
+          value2 = proxy[1] + "://" + decodeURIComponent(proxy[2]);
+        } catch {
+          return;
+        }
+      }
+      if (!urls.includes(value2)) urls.push(value2);
+    }
+    if (Array.isArray(source)) source.forEach((v) => add(typeof v === "string" ? v : v?.url || v?.src));
+    else if (source && typeof source === "object") Object.entries(source).forEach(([key, v]) => add(/^https?:/.test(key) ? key : typeof v === "string" ? v : v?.url || v?.src));
+    return urls;
+  }
+  function GifRoulette(r) {
+    return { start() {
+      r.command({ name: "gifroulette", description: "Send a random favorite GIF", async execute() {
+        const modules = [
+          r.find("addFavoriteGIF"),
+          r.find("getFavoriteGIFs"),
+          r.find("getFavoriteGifs"),
+          r.find("FrecencyUserSettingsActionCreators")?.FrecencyUserSettingsActionCreators,
+          r.byStore("FavoriteGIFStore"),
+          r.byStore("FrecencyUserSettingsStore"),
+          r.find("loadIfNecessary", "getCurrentValue")
+        ];
+        for (const module of modules.filter(Boolean)) {
+          if (module.loadIfNecessary) await module.loadIfNecessary();
+          for (const getter of ["getCurrentValue", "getState", "getFavoriteGIFs", "getFavoriteGifs", "getFavorites"]) {
+            if (typeof module[getter] !== "function") continue;
+            const urls2 = gifUrls(module[getter]());
+            if (urls2.length) return { content: urls2[Math.floor(Math.random() * urls2.length)] };
+          }
+          const urls = gifUrls(module);
+          if (urls.length) return { content: urls[Math.floor(Math.random() * urls.length)] };
+        }
+        r.toast("No favorite GIFs found. Star a GIF in Discord first.");
+      } });
+    } };
+  }
+
+  // GifRoulette.entry.js
+  var GifRoulette_entry_default = register({ "id": "mime.gifroulette", "name": "GifRoulette", "description": "Send one random favorite GIF with /gifroulette.", "version": "2.1.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/GifRoulette" }, GifRoulette);
+  return __toCommonJS(GifRoulette_entry_exports);
+})();

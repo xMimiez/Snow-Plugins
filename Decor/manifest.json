@@ -1,33 +1,26 @@
 {
-  "schemaVersion": 2,
+  "spec": 3,
+  "type": "plugin",
   "id": "mime.decor",
-  "name": "Decor",
-  "description": "Create and equip Decor avatar decorations. PNG/APNG preserved; JPEG converted locally.",
-  "version": "2.0.0",
-  "authors": [
-    {
-      "name": "Fiery",
-      "id": "890228870559698955"
-    },
-    {
-      "name": "Mime | N0_.q3",
-      "id": "957164619061932045"
-    }
-  ],
-  "license": "GPL-3.0-or-later",
-  "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/Decor",
-  "capabilities": [
-    "patcher",
-    "flux",
-    "storage",
-    "ui"
-  ],
-  "dependencies": [],
-  "apiVersion": 1,
-  "reload": "plugin",
-  "bundle": {
-    "url": "./plugin-2.0.0.js",
-    "sha256": "727aa5e8d9fc1dcc90de59a160ac3919e96160022a95a0abc1675c23055f4242",
-    "bytes": 310307
+  "version": "2.1.0",
+  "display": {
+    "name": "Decor",
+    "description": "Create and equip Decor avatar decorations. PNG/APNG preserved; JPEG converted locally.",
+    "authors": [
+      {
+        "name": "Fiery",
+        "id": "890228870559698955"
+      },
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.js",
+  "extras": {
+    "license": "GPL-3.0-or-later",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/Decor",
+    "bunny": {}
   }
 }

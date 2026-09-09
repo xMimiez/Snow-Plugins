@@ -1,27 +1,22 @@
 {
-  "schemaVersion": 2,
+  "spec": 3,
+  "type": "plugin",
   "id": "mime.spotifypreview",
-  "name": "SpotifyPreview",
-  "description": "Official Spotify embeds in an owned Snow sheet.",
-  "version": "2.0.0",
-  "authors": [
-    {
-      "name": "Mime | N0_.q3",
-      "id": "957164619061932045"
-    }
-  ],
-  "license": "MIT",
-  "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/SpotifyPreview",
-  "capabilities": [
-    "storage",
-    "ui"
-  ],
-  "dependencies": [],
-  "apiVersion": 1,
-  "reload": "plugin",
-  "bundle": {
-    "url": "./plugin-2.0.0.js",
-    "sha256": "13a568fd9378bc326df795fd938832db3fe742fad9ebdfa8ef75eeda436ccb96",
-    "bytes": 17211
+  "version": "2.1.0",
+  "display": {
+    "name": "SpotifyPreview",
+    "description": "Official Spotify embeds in an owned Snow sheet.",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.js",
+  "extras": {
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/SpotifyPreview",
+    "bunny": {}
   }
 }

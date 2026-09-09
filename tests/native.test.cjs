@@ -3,7 +3,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const crypto = require('node:crypto');
 const React = require('react');
 const Renderer = require('react-test-renderer');
 const root = path.resolve(__dirname,'..');
@@ -16,26 +15,45 @@ async function harness(defaults = {}, modules = []) {
     for (const kind of ['before','after','instead']) patcher[kind] = (key, parent, cb) => { const old=parent[key]; const wrap=function(...args) { if(kind==='before') { cb(args); return old.apply(this,args); } if(kind==='instead') return cb(args,(...next)=>old.apply(this,next)); const out=old.apply(this,args); return cb(args,out) ?? out; }; parent[key]=wrap; return ()=>{if(parent[key]===wrap)parent[key]=old;}; };
     const store={...defaults};
     const RN={View:'View',Text:'Text',Image:'Image',ScrollView:'ScrollView',TextInput:'RNInput',Pressable:'Pressable',ActivityIndicator:'Spinner',Platform:{OS:'ios'},NativeModules:{},Linking:{openURL:async u=>calls.push(u),canOpenURL:async()=>false}};
-    const C={Text:'Text',Button:'Button',TextInput:'Input',ActionSheet:'ActionSheet',TableSwitchRow:'Switch',AlertModal:'Alert',AlertActions:'Actions',AlertActionButton:'AlertButton'};
-    const common={React,ReactNative:RN,components:C,clipboard:{setString:s=>calls.push(s)},FluxDispatcher:{dispatch:e=>{for(const fn of events.get(e.type)||[])fn(e);}},url:{openURL:u=>calls.push(u)}};
-    globalThis.snow={metro:{common,findByProps:(...props)=>modules.find(m=>props.every(p=>p in m)),findByStoreName:name=>modules.find(m=>m.storeName===name)},api:{react:{jsx:{onJsxCreate:(name,fn)=>hooks.set(name,fn),deleteJsxCreate:(name,fn)=>{if(hooks.get(name)===fn)hooks.delete(name);}}},ui:{sheets:{showSheet:(key,Component)=>sheets.set(key,Component),hideSheet:key=>sheets.delete(key)}}}};
-    const api={commands:{registerCommand:c=>{assert(!commands.has(c.name));commands.set(c.name,c);return()=>commands.delete(c.name);}},patcher,flux:{subscribe:(name,fn)=>{if(!events.has(name))events.set(name,new Set());events.get(name).add(fn);return()=>events.get(name).delete(fn);}},storage:{createStorage:()=>store,flush:async()=>{}},ui:{showToast:m=>toasts.push(m),openAlert:(key,e)=>sheets.set(key,e),dismissAlert:key=>sheets.delete(key)}};
-    const r=createRuntime({id:'test',api,signal:control.signal},{id:'test',name:'Test',version:'2.0.0',authors:[],capabilities:Object.keys(api)},defaults);
-    return {r,commands,events,sheets,hooks,toasts,calls,control,api,common};
+    const D={Text:'Text',Button:'Button',TextInput:'Input',ActionSheet:'ActionSheet',TableSwitchRow:'Switch',TableRowGroup:'Group',AlertModal:'Alert',AlertActions:'Actions',AlertActionButton:'AlertButton'};
+    const C={...D,SettingsPage:'SettingsPage',RowIcon:'RowIcon'};
+    const common={React,ReactNative:RN,components:D,clipboard:{setString:s=>calls.push(s)},FluxDispatcher:{dispatch:e=>{for(const fn of events.get(e.type)||[])fn(e);}},url:{openURL:u=>calls.push(u)}};
+    const metro={common,findByProps:(...props)=>modules.find(m=>props.every(p=>p in m)),findByName:name=>modules.find(m=>m.name===name),findByDisplayName:name=>modules.find(m=>m.displayName===name),findByStoreName:name=>modules.find(m=>m.storeName===name)};
+    const commandApi={registerCommand:c=>{assert(!commands.has(c.name));commands.set(c.name,c);return()=>commands.delete(c.name);}};
+    const flux={subscribe:(name,fn)=>{if(!events.has(name))events.set(name,new Set());events.get(name).add(fn);return()=>events.get(name).delete(fn);}};
+    const ui={components:C,showToast:m=>toasts.push(m),openAlert:(key,e)=>sheets.set(key,e),dismissAlert:key=>sheets.delete(key),sheets:{showSheet:(key,Component)=>sheets.set(key,Component),hideSheet:key=>sheets.delete(key)}};
+    const B={React,ReactNative:RN,metro,commands:commandApi,patcher,flux,plugin:{id:'test',createStorage:initial=>{for(const [k,v] of Object.entries(initial||{})) if(store[k]===undefined) store[k]=v; return store;},flushStorage:async()=>{},useProxy:()=>store},ui,api:{commands:commandApi,patcher,flux,ui,react:{jsx:{onJsxCreate:(name,fn)=>hooks.set(name,fn),deleteJsxCreate:(name,fn)=>{if(hooks.get(name)===fn)hooks.delete(name);}}}}};
+    const r=createRuntime(B,{id:'test',name:'Test',version:'2.1.0',authors:[]},defaults);
+    return {r,commands,events,sheets,hooks,toasts,calls,control,api:B,common,B};
 }
-test('all native artifacts register once and match exact manifest integrity', async()=>{
+test('all Bunny spec-3 artifacts export definePlugin and match the hosted manifest', async()=>{
     const registry=JSON.parse(fs.readFileSync(path.join(root,'src/registry.json')));
     assert.equal(registry.length,18);
     for(const meta of registry){
         const manifest=JSON.parse(fs.readFileSync(path.join(root,meta.folder,'manifest.json')));
-        const bytes=fs.readFileSync(path.join(root,meta.folder,manifest.bundle.url)); let definition, count=0;
-        vm.runInNewContext(bytes.toString(),{__snowRegisterPlugin:d=>{definition=d;count++;}}, {timeout:2000});
-        assert.equal(count,1,meta.folder); assert.equal(manifest.schemaVersion,2); assert.equal(manifest.apiVersion,1);
-        assert.equal(manifest.bundle.bytes,bytes.length); assert.equal(manifest.bundle.sha256,crypto.createHash('sha256').update(bytes).digest('hex'));
-        assert(bytes.length<=1048576); assert.equal(definition.id,manifest.id); assert.equal(definition.version,manifest.version); assert.equal(definition.reload,'plugin');
-        assert.deepEqual(Array.from(definition.dependencies),manifest.dependencies);
-        assert(manifest.authors.some(a=>a.id==='957164619061932045')); assert(definition.author.every(a=>typeof a.id==='bigint'));
-        assert(!/\bdefinePlugin\s*\(|\bglobalThis\.bunny\b|typeof bunny/.test(bytes.toString()));
+        const bytes=fs.readFileSync(path.join(root,meta.folder,manifest.main));
+        const src=bytes.toString();
+        assert.equal(manifest.spec,3,meta.folder);
+        assert.equal(manifest.type,'plugin');
+        assert.equal(manifest.main,'index.js');
+        assert.equal(manifest.id,meta.id);
+        assert.equal(manifest.version,meta.version);
+        assert.equal(manifest.display.name,meta.name);
+        assert(manifest.display.authors.some(a=>a.id==='957164619061932045'));
+        assert.equal(manifest.extras.license,meta.license);
+        assert.equal(manifest.extras.source,meta.source);
+        assert.deepEqual(manifest.extras.bunny,{});
+        assert.equal(manifest.schemaVersion,undefined);
+        assert.equal(manifest.bundle,undefined);
+        assert(bytes.length<=1048576);
+        assert(!src.includes('__snowRegisterPlugin'),meta.folder);
+        assert(!src.includes('globalThis.bunny'),meta.folder);
+        assert(src.includes('definePlugin'),meta.folder);
+        let plugin;
+        vm.runInNewContext(src,{bunny:{},definePlugin:d=>{plugin=d;return d;},console,URL,AbortController,setTimeout,clearTimeout},{timeout:2000});
+        assert.equal(typeof plugin.start,'function',meta.folder);
+        assert.equal(typeof plugin.stop,'function',meta.folder);
+        assert.equal(typeof plugin.SettingsComponent,'function',meta.folder);
     }
 });
 test('runtime deadlines reject hanging fetch and abort on dispose',async()=>{
@@ -121,14 +139,15 @@ test('invite commands do nothing before confirmation and preserve server feature
     for(const pause of [true,false]){requests=[];let tree;await Renderer.act(async()=>{tree=Renderer.create(React.createElement(p.Confirm,{guildId:'123456789012345678',pause,close:()=>{}}));});await Renderer.act(async()=>{const b=tree.root.findAllByType('Button').find(b=>b.props.text===(pause?'Pause invites':'Resume invites'));b.props.onPress();b.props.onPress();await tick();});assert.equal(requests.length,2);assert.equal(requests[1].method,'PATCH');assert.deepEqual(JSON.parse(requests[1].body).features,pause?['COMMUNITY','NEWS','INVITES_DISABLED']:['COMMUNITY','NEWS']);await Renderer.act(async()=>tree.unmount());}await r.dispose();
 });
 test('sheet render error shows a working Close button instead of trapping the UI',async()=>{const {r,sheets}=await harness();let tree;function Broken(){throw new Error('fixture failure');}const old=console.error;console.error=()=>{};try{r.open('broken',Broken);const Component=[...sheets.values()][0];await Renderer.act(async()=>{tree=Renderer.create(React.createElement(Component));});assert.match(JSON.stringify(tree.toJSON()),/Could not display/);await Renderer.act(async()=>tree.root.findAllByType('Button').find(b=>b.props.text==='Close').props.onPress());assert.equal(sheets.size,0);}finally{console.error=old;await Renderer.act(async()=>tree?.unmount());await r.dispose();}});
-test('all 18 production bundles start, render settings and stop with only declared capabilities',async()=>{
+test('all 18 production bundles start, render settings and stop',async()=>{
     const registry=JSON.parse(fs.readFileSync(path.join(root,'src/registry.json')));
     for(const meta of registry){const fixture=await harness(),manifest=JSON.parse(fs.readFileSync(path.join(root,meta.folder,'manifest.json')));let definition,tree;
         const silent={log(){},info(){},warn(){},error(){},debug(){}};
-        vm.runInNewContext(fs.readFileSync(path.join(root,meta.folder,manifest.bundle.url),'utf8'),{__snowRegisterPlugin:d=>definition=d,snow:global.snow,console:silent,URL,AbortController,setTimeout,clearTimeout,fetch:async()=>({ok:true,status:200,headers:{get:()=>null},text:async()=>JSON.stringify([])})});
-        const api=Object.fromEntries(meta.capabilities.map(cap=>[cap,fixture.api[cap]]));
-        try{await definition.start({id:meta.id,api,signal:fixture.control.signal});await tick();assert.equal(await definition.health(),true,meta.folder);await Renderer.act(async()=>{tree=Renderer.create(definition.settings());});}
+        const sandbox={plugin:undefined,bunny:fixture.B,definePlugin:d=>d,console:silent,URL,AbortController,setTimeout,clearTimeout,fetch:async()=>({ok:true,status:200,headers:{get:()=>null},text:async()=>JSON.stringify([])})};
+        vm.runInNewContext(fs.readFileSync(path.join(root,meta.folder,manifest.main),'utf8'),sandbox);
+        definition=sandbox.plugin&&(sandbox.plugin.default||sandbox.plugin);
+        try{await definition.start();await tick();await Renderer.act(async()=>{tree=Renderer.create(definition.SettingsComponent());});}
         finally{await Renderer.act(async()=>tree?.unmount());await definition.stop();await fixture.r.dispose();}
-        assert.equal(await definition.health(),false,meta.folder);assert.equal(fixture.commands.size,0,meta.folder);assert.equal(fixture.hooks.size,0,meta.folder);assert.equal(fixture.sheets.size,0,meta.folder);
+        assert.equal(fixture.commands.size,0,meta.folder);assert.equal(fixture.hooks.size,0,meta.folder);assert.equal(fixture.sheets.size,0,meta.folder);
     }
 });

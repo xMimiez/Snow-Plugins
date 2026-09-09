@@ -1,43 +1,73 @@
-(() => {
+var plugin = (() => {
   var __defProp = Object.defineProperty;
-  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // PreviewFile.entry.js
+  var PreviewFile_entry_exports = {};
+  __export(PreviewFile_entry_exports, {
+    default: () => PreviewFile_entry_default
+  });
 
   // project:src/runtime.js
-  function createRuntime(context, meta, defaults = {}) {
-    const api = context.api;
-    for (const capability of meta.capabilities) if (!api?.[capability]) throw new Error(`${meta.name}: missing Snow ${capability} capability`);
-    const host = globalThis.snow;
-    if (!host?.metro?.common) throw new Error(`${meta.name}: this Snow build does not expose metro.common`);
-    const metro = host.metro;
-    const common = metro.common;
-    const React = common.React;
-    const RN = common.ReactNative;
+  function createRuntime(B, meta, defaults = {}) {
+    const React = B.React;
+    const RN = B.ReactNative;
     if (!React?.createElement || !RN?.View) throw new Error(`${meta.name}: host React/React Native unavailable`);
-    const C = common.components || {};
+    const D = B.metro?.common?.components || {};
+    const C = B.ui?.components || D;
     const cleanups = [];
     const listeners = /* @__PURE__ */ new Set();
     const requests = /* @__PURE__ */ new Set();
     const openSheets = /* @__PURE__ */ new Map();
+    const control = new AbortController();
     let active = true;
-    const store = api.storage ? api.storage.createStorage(defaults) : {};
+    const store = B.plugin?.createStorage ? B.plugin.createStorage(defaults) : { ...defaults };
     for (const [key, value] of Object.entries(defaults)) if (store[key] === void 0) store[key] = value;
     const r = {
-      context,
+      B,
       meta,
-      api,
-      host,
-      metro,
-      common,
       React,
       RN,
       C,
+      D,
       h: React.createElement,
       store,
+      metro: B.metro,
+      common: B.metro?.common || {},
+      host: B,
+      context: { signal: control.signal },
       get active() {
-        return active && !context.signal?.aborted;
+        return active && !control.signal.aborted;
       },
       status: {},
+      api: {
+        commands: B.commands || B.api?.commands,
+        flux: B.flux || B.api?.flux,
+        patcher: B.patcher || B.api?.patcher,
+        storage: {
+          createStorage: () => store,
+          get value() {
+            return store;
+          },
+          flush: () => B.plugin?.flushStorage?.() || Promise.resolve()
+        },
+        ui: B.ui
+      },
       own(fn) {
         if (typeof fn === "function") cleanups.push(fn);
         return fn;
@@ -57,31 +87,31 @@
       set(key, value) {
         store[key] = value;
         r.changed();
-        api.storage?.flush().catch((e) => r.error("Save settings", e));
+        Promise.resolve(B.plugin?.flushStorage?.()).catch((e) => r.error("Save settings", e));
       },
       find(...props) {
         try {
-          return metro.findByProps?.(...props);
+          return B.metro.findByProps?.(...props);
         } catch {
           return void 0;
         }
       },
       byName(name, raw = false) {
         try {
-          return metro.findByName?.(name, !raw) || metro.findByDisplayName?.(name, !raw);
+          return B.metro.findByName?.(name, !raw) || B.metro.findByDisplayName?.(name, !raw);
         } catch {
           return void 0;
         }
       },
       byStore(name) {
         try {
-          return metro.findByStoreName?.(name);
+          return B.metro.findByStoreName?.(name);
         } catch {
           return void 0;
         }
       },
       toast(message) {
-        if (r.active) api.ui?.showToast(String(message));
+        if (r.active) B.ui?.showToast(String(message));
       },
       error(label, error) {
         const text = `${label}: ${error?.message || error}`;
@@ -91,26 +121,35 @@
         r.toast(text);
       },
       patch(kind, parent, key, callback) {
-        if (typeof parent?.[key] !== "function") return false;
-        r.own(api.patcher[kind](key, parent, callback));
+        const patcher = r.api.patcher;
+        if (typeof parent?.[key] !== "function" || typeof patcher?.[kind] !== "function") return false;
+        r.own(patcher[kind](key, parent, callback));
         return true;
       },
       subscribe(type, callback) {
-        return r.own(api.flux.subscribe(type, (payload) => {
+        const flux = r.api.flux;
+        if (typeof flux?.subscribe !== "function") throw new Error(`${meta.name}: flux.subscribe unavailable`);
+        return r.own(flux.subscribe(type, (payload) => {
           if (r.active) callback(payload);
         }));
       },
       command(command) {
+        const register2 = r.api.commands?.registerCommand;
+        if (typeof register2 !== "function") throw new Error(`${meta.name}: commands.registerCommand unavailable`);
         const execute = command.execute;
-        return r.own(api.commands.registerCommand({ ...command, options: command.options || [], async execute(...args) {
-          if (!r.active) return;
-          try {
-            const result = await execute(...args);
-            return r.active ? result : void 0;
-          } catch (error) {
-            if (r.active) r.error(`/${command.name}`, error);
+        return r.own(register2({
+          ...command,
+          options: command.options || [],
+          async execute(...args) {
+            if (!r.active) return;
+            try {
+              const result = await execute(...args);
+              return r.active ? result : void 0;
+            } catch (error) {
+              if (r.active) r.error(`/${command.name}`, error);
+            }
           }
-        } }));
+        }));
       },
       async request(url, options = {}, timeout = 15e3, maxBytes = Infinity) {
         if (!r.active) throw new Error("Plugin stopped");
@@ -124,7 +163,7 @@
           rejectDeadline(new Error(r.active ? "Request timed out" : "Plugin stopped"));
         };
         requests.add(abort);
-        context.signal?.addEventListener("abort", abort, { once: true });
+        control.signal.addEventListener("abort", abort, { once: true });
         const timer = setTimeout(abort, timeout);
         try {
           const response = await Promise.race([fetch(url, { ...options, signal: controller.signal }), deadline]);
@@ -153,7 +192,7 @@
         } finally {
           clearTimeout(timer);
           requests.delete(abort);
-          context.signal?.removeEventListener("abort", abort);
+          control.signal.removeEventListener("abort", abort);
         }
       },
       async discord(path, options = {}) {
@@ -163,7 +202,7 @@
         return r.request("https://discord.com/api/v9" + path, { ...options, headers: { "Content-Type": "application/json", ...options.headers, Authorization: token } });
       },
       hook(names, transform) {
-        const jsx = host.api?.react?.jsx;
+        const jsx = B.api?.react?.jsx;
         if (!jsx?.onJsxCreate || !jsx?.deleteJsxCreate) throw new Error(`${meta.name}: Snow JSX hooks unavailable`);
         for (const name of names) {
           const callback = (_Component, element) => {
@@ -176,8 +215,9 @@
         }
       },
       open(key, Component, props = {}) {
-        const sheets = host.api?.ui?.sheets;
-        if (!sheets?.showSheet || !sheets?.hideSheet || !C.ActionSheet) throw new Error("Snow bottom-sheet components unavailable");
+        const sheets = B.ui?.sheets;
+        const ActionSheet = D.ActionSheet || C.ActionSheet;
+        if (!sheets?.showSheet || !sheets?.hideSheet || !ActionSheet) throw new Error("Snow bottom-sheet components unavailable");
         const id = `${meta.id}.${key}`;
         openSheets.get(id)?.();
         let closed = false;
@@ -188,10 +228,7 @@
           sheets.hideSheet(id);
         };
         class Boundary extends React.Component {
-          constructor() {
-            super(...arguments);
-            __publicField(this, "state", { error: null });
-          }
+          state = { error: null };
           static getDerivedStateFromError(error) {
             return { error };
           }
@@ -209,7 +246,7 @@
             if (openSheets.get(id) === close) openSheets.delete(id);
             closed = true;
           }, []);
-          return r.h(C.ActionSheet, { scrollable: true }, r.h(Boundary, null, r.h(Component, { ...props, close })));
+          return r.h(ActionSheet, { scrollable: true }, r.h(Boundary, null, r.h(Component, { ...props, close })));
         }
         openSheets.set(id, close);
         try {
@@ -221,13 +258,14 @@
         return close;
       },
       copy(text) {
-        const clip = common.clipboard || r.find("setString");
+        const clip = r.common.clipboard || r.find("setString");
         if (!clip?.setString) throw new Error("Clipboard unavailable");
         clip.setString(String(text));
         r.toast("Copied");
       },
       dispose() {
         active = false;
+        control.abort();
         for (const abort of requests) abort();
         requests.clear();
         for (const close of [...openSheets.values()]) {
@@ -245,42 +283,57 @@
           }
         }
         listeners.clear();
-        return api.storage?.flush();
+        return r.api.storage.flush();
       }
     };
     return r;
   }
   function ui(r) {
-    const { h, C, RN } = r;
-    function Text({ children, muted = false, heading = false, ...props }) {
-      return C.Text ? h(C.Text, { variant: heading ? "heading-md/semibold" : "text-md/normal", color: muted ? "text-muted" : "text-normal", ...props }, children) : h(RN.Text, props, children);
+    const { h, C, D, RN, store } = r;
+    function Text({ children, muted = false, heading = false, color, ...props }) {
+      const Comp = D.Text || C.Text;
+      if (Comp) return h(Comp, { variant: heading ? "heading-md/semibold" : "text-md/normal", color: color || (muted ? "text-muted" : "text-normal"), ...props }, children);
+      return h(RN.Text, props, children);
     }
     function Button({ text, onPress, disabled, variant = "primary", ...props }) {
-      return C.Button ? h(C.Button, { text, onPress, disabled, variant, size: "md", ...props }) : h(RN.Pressable || RN.TouchableOpacity, { onPress, disabled, accessibilityRole: "button", style: { padding: 12 } }, h(Text, null, text));
+      const Comp = D.Button || C.Button;
+      if (Comp) return h(Comp, { text, onPress, disabled, variant, size: "md", ...props });
+      return h(RN.Pressable || RN.TouchableOpacity, { onPress, disabled, accessibilityRole: "button", style: { padding: 12 } }, h(Text, null, text));
     }
     function Page({ title, children, close }) {
-      return h(RN.View, { style: { padding: 16, gap: 12 } }, h(Text, { heading: true }, title), children, close ? h(Button, { text: "Close", variant: "secondary", onPress: close }) : null);
+      const body = [
+        title ? h(Text, { key: "title", heading: true, accessibilityRole: "header" }, title) : null,
+        children,
+        close ? h(Button, { key: "close", text: "Close", variant: "secondary", onPress: close }) : null
+      ];
+      if (C.SettingsPage) return h(C.SettingsPage, null, ...body);
+      return h(RN.View, { style: { padding: 16, gap: 12 } }, ...body);
     }
     function Input({ value, onChange, ...props }) {
-      return C.TextInput ? h(C.TextInput, { value, onChange, ...props }) : h(RN.TextInput, { value, onChangeText: onChange, ...props });
+      if (D.TextInput) return h(D.TextInput, { value, onChange, ...props });
+      if (C.TextInput) return h(C.TextInput, { value, onChange, ...props });
+      return h(RN.TextInput, { value, onChangeText: onChange, ...props });
     }
-    function Toggle({ setting, label, subLabel }) {
-      return C.TableSwitchRow ? h(C.TableSwitchRow, { label, subLabel, value: !!r.store[setting], onValueChange: (v) => r.set(setting, v) }) : null;
+    function Toggle({ setting, label, subLabel, icon }) {
+      r.useRefresh();
+      const Row = D.TableSwitchRow || C.TableSwitchRow;
+      if (!Row) return null;
+      return h(Row, {
+        label,
+        subLabel,
+        icon: icon || (C.RowIcon ? h(C.RowIcon, { name: "SettingsIcon" }) : void 0),
+        value: !!store[setting],
+        onValueChange: (v) => r.set(setting, v)
+      });
     }
     return { Text, Button, Page, Input, Toggle };
   }
   function register(meta, factory) {
+    const B = bunny;
     let runtime;
     let instance;
-    globalThis.__snowRegisterPlugin({
-      id: meta.id,
-      name: meta.name,
-      description: meta.description,
-      version: meta.version,
-      author: meta.authors.map((a) => ({ name: a.name, id: BigInt(a.id || "0") })),
-      reload: "plugin",
-      dependencies: meta.dependencies || [],
-      async start(context) {
+    return definePlugin({
+      async start() {
         if (runtime) {
           try {
             await instance?.stop?.();
@@ -288,7 +341,7 @@
             await runtime.dispose();
           }
         }
-        runtime = createRuntime(context, meta, factory.defaults || {});
+        runtime = createRuntime(B, meta, factory.defaults || {});
         try {
           instance = factory(runtime);
           await instance.start?.();
@@ -307,11 +360,8 @@
           runtime = null;
         }
       },
-      settings() {
+      SettingsComponent() {
         return instance?.Settings ? runtime.h(instance.Settings) : null;
-      },
-      health() {
-        return !!runtime?.active && !!instance;
       }
     });
   }
@@ -391,5 +441,6 @@
   }
 
   // PreviewFile.entry.js
-  register({ "id": "mime.previewfile", "name": "PreviewFile", "description": "Expandable previews for supported text attachments.", "version": "2.0.0", "authors": [{ "name": "mafu", "id": "519760564755365888" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PreviewFile", "capabilities": ["commands", "ui"], "dependencies": [] }, PreviewFile);
+  var PreviewFile_entry_default = register({ "id": "mime.previewfile", "name": "PreviewFile", "description": "Expandable previews for supported text attachments.", "version": "2.1.0", "authors": [{ "name": "mafu", "id": "519760564755365888" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PreviewFile" }, PreviewFile);
+  return __toCommonJS(PreviewFile_entry_exports);
 })();

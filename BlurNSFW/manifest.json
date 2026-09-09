@@ -1,31 +1,26 @@
 {
-  "schemaVersion": 2,
+  "spec": 3,
+  "type": "plugin",
   "id": "mime.blurnsfw",
-  "name": "BlurNSFW",
-  "description": "Tap-to-reveal sensitive media on supported mobile components.",
-  "version": "1.0.0",
-  "authors": [
-    {
-      "name": "Vendicated",
-      "id": "343383572805058560"
-    },
-    {
-      "name": "Mime | N0_.q3",
-      "id": "957164619061932045"
-    }
-  ],
-  "license": "GPL-3.0-or-later",
-  "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/BlurNSFW",
-  "capabilities": [
-    "storage",
-    "ui"
-  ],
-  "dependencies": [],
-  "apiVersion": 1,
-  "reload": "plugin",
-  "bundle": {
-    "url": "./plugin-1.0.0.js",
-    "sha256": "e779ce44bc408d00f53d01094e86e5c459222ec4f5029dbb9006787d7313238e",
-    "bytes": 18587
+  "version": "1.1.0",
+  "display": {
+    "name": "BlurNSFW",
+    "description": "Tap-to-reveal sensitive media on supported mobile components.",
+    "authors": [
+      {
+        "name": "Vendicated",
+        "id": "343383572805058560"
+      },
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.js",
+  "extras": {
+    "license": "GPL-3.0-or-later",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/BlurNSFW",
+    "bunny": {}
   }
 }

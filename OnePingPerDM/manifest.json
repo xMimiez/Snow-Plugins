@@ -1,30 +1,26 @@
 {
-  "schemaVersion": 2,
+  "spec": 3,
+  "type": "plugin",
   "id": "mime.onepingperdm",
-  "name": "OnePingPerDM",
-  "description": "Compatibility probe: message-aware native audio hook still required.",
-  "version": "1.0.0",
-  "authors": [
-    {
-      "name": "ProffDea",
-      "id": "609329952180928513"
-    },
-    {
-      "name": "Mime | N0_.q3",
-      "id": "957164619061932045"
-    }
-  ],
-  "license": "GPL-3.0-or-later",
-  "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/OnePingPerDM",
-  "capabilities": [
-    "ui"
-  ],
-  "dependencies": [],
-  "apiVersion": 1,
-  "reload": "plugin",
-  "bundle": {
-    "url": "./plugin-1.0.0.js",
-    "sha256": "5fbabd9cdc2f14e40c3a2aa5e4e3b46c6e4d0df22ae0165366f9450784c7fc07",
-    "bytes": 19059
+  "version": "1.1.0",
+  "display": {
+    "name": "OnePingPerDM",
+    "description": "Compatibility probe: message-aware native audio hook still required.",
+    "authors": [
+      {
+        "name": "ProffDea",
+        "id": "609329952180928513"
+      },
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.js",
+  "extras": {
+    "license": "GPL-3.0-or-later",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/OnePingPerDM",
+    "bunny": {}
   }
 }
