@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.1.8
+  build: 1.1.9
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -814,12 +814,10 @@ function ReplySheet(props) {
     );
 }
 
-function OverlayHost() {
+function OverlayHost(props) {
     var React = getReact();
     var RN = getRN() || {};
-    var Modal = RN.Modal;
     var View = RN.View;
-    var Safe = RN.SafeAreaView || View;
     if (!React || !View) return null;
     var bump = React.useState ? React.useState(0) : [0, function () {}];
     var setBump = bump[1];
@@ -832,6 +830,10 @@ function OverlayHost() {
                 if (i >= 0) overlayListeners.splice(i, 1);
             };
         }, []);
+    }
+    var isSheet = !!(props && props.sheet);
+    if (!isSheet && overlayHostInjected) {
+        return h(View, { pointerEvents: "none", style: { width: 0, height: 0 } });
     }
     if (!overlay.open) {
         return h(View, { pointerEvents: "none", style: { width: 0, height: 0 } });
@@ -1370,11 +1372,12 @@ function afterProfileRender(args, res) {
         }
     }
     var RN = getRN() || {};
-    if (RN.View) {
+    if (RN.View && !overlayHostInjected) {
+        overlayHostInjected = true;
         res = h(RN.View, {
             pointerEvents: "box-none",
             style: { flex: 1, position: "relative" }
-        }, res, h(OverlayHost, { key: "mime-rts-sheet-overlay" })) || res;
+        }, res, h(OverlayHost, { key: "mime-rts-sheet-overlay", sheet: true })) || res;
     }
     var Ctx = getProfileFlagContext();
     if (Ctx) res = h(Ctx.Provider, { value: true }, res) || res;
@@ -1396,6 +1399,7 @@ var profileUserId = null;
 var didPlaceButton = false;
 var profileDidRender = false;
 var lastProfileOpenAt = 0;
+var overlayHostInjected = false;
 var ProfileFlagContext = null;
 
 function getProfileFlagContext() {
@@ -1440,10 +1444,12 @@ function inProfileSurface() {
 }
 
 function enterProfile(args) {
+    var fresh = !profileSheetOpen;
     profileSheetOpen = true;
     didPlaceButton = false;
     profileDidRender = false;
     lastProfileOpenAt = Date.now();
+    if (fresh) overlayHostInjected = false;
     var id = userIdFromProps(args && args[0]);
     if (!id && args && args[0] && args[0].user) id = args[0].user.id;
     if (id) profileUserId = String(id);
@@ -1454,12 +1460,15 @@ function leaveProfile() {
     profileUserId = null;
     didPlaceButton = false;
     profileDidRender = false;
+    overlayHostInjected = false;
+    closeReplyWindow();
 }
 
 function armProfile(userId) {
     profileSheetOpen = true;
     profileDidRender = true;
     didPlaceButton = false;
+    overlayHostInjected = false;
     lastProfileOpenAt = Date.now();
     if (userId) profileUserId = String(userId);
 }
