@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.1.7
+  build: 1.1.8
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -1126,7 +1126,7 @@ function makeInlineReplyRow(userId, status) {
             zIndex: 20,
             elevation: 8
         }
-    }, makeReplyButton(userId, status), h(OverlayHost, { key: "mime-rts-sheet-overlay" }));
+    }, makeReplyButton(userId, status));
 }
 
 function isScrollName(name) {
@@ -1148,7 +1148,7 @@ function pinButtonOver(children, userId, status) {
     return h(View, {
         pointerEvents: "box-none",
         style: { position: "relative" }
-    }, children, btn, h(OverlayHost, { key: "mime-rts-sheet-overlay" }));
+    }, children, btn);
 }
 
 function injectOnceInNamedScroll(node, userId, status, depth) {
@@ -1313,17 +1313,19 @@ function wrapSheetWithFloatingButton(res, userId, status) {
 }
 
 function forceInjectReply(res, userId, status) {
-    if (topButtonPlaced) return res;
+    var injected = injectInlineInScroll(res, userId, status);
+    if (injected && injected.did && injected.node) return injected.node;
     if (res && res.props && typeof res.props.children !== "undefined") {
-        var ch = res.props.children;
-        var list = Array.isArray(ch) ? ch.slice() : [ch];
-        if (list.length < 2) return res;
         var row = makeInlineReplyRow(userId, status);
         if (!row) return res;
-        list.splice(1, 0, row);
-        topButtonPlaced = true;
+        var ch = res.props.children;
+        var list = Array.isArray(ch) ? ch.slice() : [ch];
+        var insertAt = Math.min(1, list.length);
+        list.splice(insertAt, 0, row);
         return h(res.type, Object.assign({}, res.props, { children: list })) || res;
     }
+    var RN = getRN() || {};
+    if (RN.View) return h(RN.View, { style: { flex: 1 }, pointerEvents: "box-none" }, makeInlineReplyRow(userId, status), res);
     return res;
 }
 
@@ -1349,24 +1351,30 @@ function afterProfileRender(args, res) {
     profileDidRender = true;
     if (!res) return res;
     var status = statusFromProps(props) || (userId && customStatusForUser(userId));
-    if (userId && status && !shouldSkipUser(userId) && !topButtonPlaced) {
-        try { res = forceInjectReply(res, userId, status) || res; } catch (err) { logError("forceInject", err); }
-        if (!topButtonPlaced && !didPlaceButton) {
-            try { res = decorateProfileTree(res, userId, status); } catch (err2) { logError("decorateProfile", err2); }
+    if (userId && status && !shouldSkipUser(userId)) {
+        try { res = decorateProfileTree(res, userId, status); } catch (err) { logError("decorateProfile", err); }
+        if (!didPlaceButton) {
+            try { res = decorateTree(res, userId, status); } catch (err2) { logError("decorate", err2); }
         }
-        if (!topButtonPlaced && !didPlaceButton) {
-            try { res = decorateTree(res, userId, status); } catch (err3) { logError("decorate", err3); }
-        }
-        if (!topButtonPlaced && !didPlaceButton) {
+        if (!didPlaceButton) {
             try {
                 var injected = injectOnceInNamedScroll(res, userId, status, 0);
                 if (injected && injected.did && injected.node) res = injected.node;
-            } catch (err4) { logError("injectScroll", err4); }
+            } catch (err3) { logError("injectScroll", err3); }
         }
-        if (!topButtonPlaced && !didPlaceButton) {
+        if (!didPlaceButton) {
+            try { res = forceInjectReply(res, userId, status); } catch (err4) { logError("forceInject", err4); }
+        }
+        if (!didPlaceButton) {
             try { res = pinButtonOver(res, userId, status) || res; } catch (err5) { logError("pin", err5); }
         }
-        if (didPlaceButton) topButtonPlaced = true;
+    }
+    var RN = getRN() || {};
+    if (RN.View) {
+        res = h(RN.View, {
+            pointerEvents: "box-none",
+            style: { flex: 1, position: "relative" }
+        }, res, h(OverlayHost, { key: "mime-rts-sheet-overlay" })) || res;
     }
     var Ctx = getProfileFlagContext();
     if (Ctx) res = h(Ctx.Provider, { value: true }, res) || res;
@@ -1388,7 +1396,6 @@ var profileUserId = null;
 var didPlaceButton = false;
 var profileDidRender = false;
 var lastProfileOpenAt = 0;
-var topButtonPlaced = false;
 var ProfileFlagContext = null;
 
 function getProfileFlagContext() {
@@ -1433,15 +1440,12 @@ function inProfileSurface() {
 }
 
 function enterProfile(args) {
-    var id = userIdFromProps(args && args[0]);
-    if (!id && args && args[0] && args[0].user) id = args[0].user.id;
-    var switching = !!(id && profileUserId && String(id) !== String(profileUserId));
-    var fresh = !profileSheetOpen;
     profileSheetOpen = true;
-    lastProfileOpenAt = Date.now();
     didPlaceButton = false;
     profileDidRender = false;
-    if (fresh || switching) topButtonPlaced = false;
+    lastProfileOpenAt = Date.now();
+    var id = userIdFromProps(args && args[0]);
+    if (!id && args && args[0] && args[0].user) id = args[0].user.id;
     if (id) profileUserId = String(id);
 }
 
@@ -1450,14 +1454,12 @@ function leaveProfile() {
     profileUserId = null;
     didPlaceButton = false;
     profileDidRender = false;
-    topButtonPlaced = false;
 }
 
 function armProfile(userId) {
     profileSheetOpen = true;
     profileDidRender = true;
     didPlaceButton = false;
-    topButtonPlaced = false;
     lastProfileOpenAt = Date.now();
     if (userId) profileUserId = String(userId);
 }
@@ -1648,7 +1650,7 @@ function shouldAttachToCreated(type, props, el, status) {
 }
 
 function maybeDecorateCreated(type, el) {
-    if (!el || !profileSheetOpen || didPlaceButton || topButtonPlaced) return el;
+    if (!el || !profileSheetOpen || didPlaceButton) return el;
     if (!profileDidRender && !isInsideProfileTree()) return el;
     var props = el.props || {};
     if (isMemberListContext(props, type)) return el;
