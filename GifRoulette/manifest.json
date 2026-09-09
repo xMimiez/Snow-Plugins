@@ -1,11 +1,11 @@
 {
   "spec": 3,
   "type": "plugin",
-  "id": "mime.morecommands",
-  "version": "1.1.4",
+  "id": "mime.gifroulette",
+  "version": "1.2.0",
   "display": {
-    "name": "MoreCommands",
-    "description": "Adds various fun and useful commands",
+    "name": "GifRoulette",
+    "description": "Send a random favorite GIF with /gifroulette.",
     "authors": [
       {
         "name": "Mime | N0_.q3",
