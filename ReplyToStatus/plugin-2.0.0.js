@@ -1,0 +1,490 @@
+(() => {
+  var __defProp = Object.defineProperty;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+
+  // project:src/runtime.js
+  function createRuntime(context, meta, defaults = {}) {
+    const api = context.api;
+    for (const capability of meta.capabilities) if (!api?.[capability]) throw new Error(`${meta.name}: missing Snow ${capability} capability`);
+    const host = globalThis.snow;
+    if (!host?.metro?.common) throw new Error(`${meta.name}: this Snow build does not expose metro.common`);
+    const metro = host.metro;
+    const common = metro.common;
+    const React = common.React;
+    const RN = common.ReactNative;
+    if (!React?.createElement || !RN?.View) throw new Error(`${meta.name}: host React/React Native unavailable`);
+    const C = common.components || {};
+    const cleanups = [];
+    const listeners = /* @__PURE__ */ new Set();
+    const requests = /* @__PURE__ */ new Set();
+    const openSheets = /* @__PURE__ */ new Map();
+    let active = true;
+    const store = api.storage ? api.storage.createStorage(defaults) : {};
+    for (const [key, value] of Object.entries(defaults)) if (store[key] === void 0) store[key] = value;
+    const r = {
+      context,
+      meta,
+      api,
+      host,
+      metro,
+      common,
+      React,
+      RN,
+      C,
+      h: React.createElement,
+      store,
+      get active() {
+        return active && !context.signal?.aborted;
+      },
+      status: {},
+      own(fn) {
+        if (typeof fn === "function") cleanups.push(fn);
+        return fn;
+      },
+      changed() {
+        for (const fn of listeners) fn();
+      },
+      useRefresh() {
+        const [, bump] = React.useState(0);
+        React.useEffect(() => {
+          const fn = () => bump((n) => n + 1);
+          listeners.add(fn);
+          return () => listeners.delete(fn);
+        }, []);
+        return () => r.changed();
+      },
+      set(key, value) {
+        store[key] = value;
+        r.changed();
+        api.storage?.flush().catch((e) => r.error("Save settings", e));
+      },
+      find(...props) {
+        try {
+          return metro.findByProps?.(...props);
+        } catch {
+          return void 0;
+        }
+      },
+      byName(name, raw = false) {
+        try {
+          return metro.findByName?.(name, !raw) || metro.findByDisplayName?.(name, !raw);
+        } catch {
+          return void 0;
+        }
+      },
+      byStore(name) {
+        try {
+          return metro.findByStoreName?.(name);
+        } catch {
+          return void 0;
+        }
+      },
+      toast(message) {
+        if (r.active) api.ui?.showToast(String(message));
+      },
+      error(label, error) {
+        const text = `${label}: ${error?.message || error}`;
+        console.error(`[${meta.name}]`, text);
+        r.status.lastError = text;
+        r.changed();
+        r.toast(text);
+      },
+      patch(kind, parent, key, callback) {
+        if (typeof parent?.[key] !== "function") return false;
+        r.own(api.patcher[kind](key, parent, callback));
+        return true;
+      },
+      subscribe(type, callback) {
+        return r.own(api.flux.subscribe(type, (payload) => {
+          if (r.active) callback(payload);
+        }));
+      },
+      command(command) {
+        const execute = command.execute;
+        return r.own(api.commands.registerCommand({ ...command, options: command.options || [], async execute(...args) {
+          if (!r.active) return;
+          try {
+            const result = await execute(...args);
+            return r.active ? result : void 0;
+          } catch (error) {
+            if (r.active) r.error(`/${command.name}`, error);
+          }
+        } }));
+      },
+      async request(url, options = {}, timeout = 15e3, maxBytes = Infinity) {
+        if (!r.active) throw new Error("Plugin stopped");
+        const controller = new AbortController();
+        let rejectDeadline;
+        const deadline = new Promise((_, reject) => {
+          rejectDeadline = reject;
+        });
+        const abort = () => {
+          controller.abort();
+          rejectDeadline(new Error(r.active ? "Request timed out" : "Plugin stopped"));
+        };
+        requests.add(abort);
+        context.signal?.addEventListener("abort", abort, { once: true });
+        const timer = setTimeout(abort, timeout);
+        try {
+          const response = await Promise.race([fetch(url, { ...options, signal: controller.signal }), deadline]);
+          if (Number(response.headers?.get("content-length")) > maxBytes) {
+            controller.abort();
+            throw new Error("Response exceeds the preview size limit");
+          }
+          const text = await Promise.race([response.text(), deadline]);
+          if (text.length > maxBytes) throw new Error("Response exceeds the preview size limit");
+          if (!r.active) throw new Error("Plugin stopped");
+          if (!response.ok) {
+            let body;
+            try {
+              body = JSON.parse(text);
+            } catch {
+              body = {};
+            }
+            const error = new Error(body.message || `HTTP ${response.status}`);
+            error.status = response.status;
+            error.retryAfter = Number(body.retry_after) || 0;
+            throw error;
+          }
+          return { response, text, json() {
+            return text ? JSON.parse(text) : null;
+          } };
+        } finally {
+          clearTimeout(timer);
+          requests.delete(abort);
+          context.signal?.removeEventListener("abort", abort);
+        }
+      },
+      async discord(path, options = {}) {
+        if (!path.startsWith("/") || path.startsWith("//")) throw new Error("Invalid Discord API path");
+        const token = r.find("getToken")?.getToken();
+        if (!token) throw new Error("Discord session unavailable");
+        return r.request("https://discord.com/api/v9" + path, { ...options, headers: { "Content-Type": "application/json", ...options.headers, Authorization: token } });
+      },
+      hook(names, transform) {
+        const jsx = host.api?.react?.jsx;
+        if (!jsx?.onJsxCreate || !jsx?.deleteJsxCreate) throw new Error(`${meta.name}: Snow JSX hooks unavailable`);
+        for (const name of names) {
+          const callback = (_Component, element) => {
+            if (!r.active) return;
+            r.status[name] = (r.status[name] || 0) + 1;
+            return transform(element, name);
+          };
+          jsx.onJsxCreate(name, callback);
+          r.own(() => jsx.deleteJsxCreate(name, callback));
+        }
+      },
+      open(key, Component, props = {}) {
+        const sheets = host.api?.ui?.sheets;
+        if (!sheets?.showSheet || !sheets?.hideSheet || !C.ActionSheet) throw new Error("Snow bottom-sheet components unavailable");
+        const id = `${meta.id}.${key}`;
+        openSheets.get(id)?.();
+        let closed = false;
+        const close = () => {
+          if (closed) return;
+          closed = true;
+          if (openSheets.get(id) === close) openSheets.delete(id);
+          sheets.hideSheet(id);
+        };
+        class Boundary extends React.Component {
+          constructor() {
+            super(...arguments);
+            __publicField(this, "state", { error: null });
+          }
+          static getDerivedStateFromError(error) {
+            return { error };
+          }
+          componentDidCatch(error) {
+            r.error("Sheet rendering", error);
+          }
+          render() {
+            if (!this.state.error) return this.props.children;
+            const U = ui(r);
+            return r.h(U.Page, { title: "Could not display this page", close }, r.h(U.Text, null, this.state.error.message));
+          }
+        }
+        function Page() {
+          React.useEffect(() => () => {
+            if (openSheets.get(id) === close) openSheets.delete(id);
+            closed = true;
+          }, []);
+          return r.h(C.ActionSheet, { scrollable: true }, r.h(Boundary, null, r.h(Component, { ...props, close })));
+        }
+        openSheets.set(id, close);
+        try {
+          sheets.showSheet(id, Page);
+        } catch (error) {
+          close();
+          throw error;
+        }
+        return close;
+      },
+      copy(text) {
+        const clip = common.clipboard || r.find("setString");
+        if (!clip?.setString) throw new Error("Clipboard unavailable");
+        clip.setString(String(text));
+        r.toast("Copied");
+      },
+      dispose() {
+        active = false;
+        for (const abort of requests) abort();
+        requests.clear();
+        for (const close of [...openSheets.values()]) {
+          try {
+            close();
+          } catch {
+          }
+        }
+        openSheets.clear();
+        while (cleanups.length) {
+          try {
+            cleanups.pop()();
+          } catch (e) {
+            console.error(`[${meta.name}] cleanup`, e?.message);
+          }
+        }
+        listeners.clear();
+        return api.storage?.flush();
+      }
+    };
+    return r;
+  }
+  function ui(r) {
+    const { h, C, RN } = r;
+    function Text({ children, muted = false, heading = false, ...props }) {
+      return C.Text ? h(C.Text, { variant: heading ? "heading-md/semibold" : "text-md/normal", color: muted ? "text-muted" : "text-normal", ...props }, children) : h(RN.Text, props, children);
+    }
+    function Button({ text, onPress, disabled, variant = "primary", ...props }) {
+      return C.Button ? h(C.Button, { text, onPress, disabled, variant, size: "md", ...props }) : h(RN.Pressable || RN.TouchableOpacity, { onPress, disabled, accessibilityRole: "button", style: { padding: 12 } }, h(Text, null, text));
+    }
+    function Page({ title, children, close }) {
+      return h(RN.View, { style: { padding: 16, gap: 12 } }, h(Text, { heading: true }, title), children, close ? h(Button, { text: "Close", variant: "secondary", onPress: close }) : null);
+    }
+    function Input({ value, onChange, ...props }) {
+      return C.TextInput ? h(C.TextInput, { value, onChange, ...props }) : h(RN.TextInput, { value, onChangeText: onChange, ...props });
+    }
+    function Toggle({ setting, label, subLabel }) {
+      return C.TableSwitchRow ? h(C.TableSwitchRow, { label, subLabel, value: !!r.store[setting], onValueChange: (v) => r.set(setting, v) }) : null;
+    }
+    return { Text, Button, Page, Input, Toggle };
+  }
+  function register(meta, factory) {
+    let runtime;
+    let instance;
+    globalThis.__snowRegisterPlugin({
+      id: meta.id,
+      name: meta.name,
+      description: meta.description,
+      version: meta.version,
+      author: meta.authors.map((a) => ({ name: a.name, id: BigInt(a.id || "0") })),
+      reload: "plugin",
+      dependencies: meta.dependencies || [],
+      async start(context) {
+        if (runtime) {
+          try {
+            await instance?.stop?.();
+          } finally {
+            await runtime.dispose();
+          }
+        }
+        runtime = createRuntime(context, meta, factory.defaults || {});
+        try {
+          instance = factory(runtime);
+          await instance.start?.();
+        } catch (error) {
+          runtime.error("Start failed", error);
+          await runtime.dispose();
+          throw error;
+        }
+      },
+      async stop() {
+        try {
+          await instance?.stop?.();
+        } finally {
+          await runtime?.dispose();
+          instance = null;
+          runtime = null;
+        }
+      },
+      settings() {
+        return instance?.Settings ? runtime.h(instance.Settings) : null;
+      },
+      health() {
+        return !!runtime?.active && !!instance;
+      }
+    });
+  }
+
+  // project:src/plugins/reply-to-status.js
+  function normalizeStatus(value) {
+    if (!value) return null;
+    const status = Array.isArray(value) ? value.find((a) => a?.type === 4 || a?.name === "Custom Status") : value;
+    if (!status) return null;
+    const emoji = status.emoji || {};
+    const text = status.state || status.text || "";
+    const id = emoji.id || status.emojiId || status.emoji_id;
+    const name = emoji.name || status.emojiName || status.emoji_name || "";
+    return text || id || name ? { text, emojiId: id, emojiName: name, animated: !!(emoji.animated || status.emojiAnimated) } : null;
+  }
+  function statusParts(status) {
+    const result = [];
+    if (status.emojiId) result.push({ id: status.emojiId, name: status.emojiName || "emoji", animated: status.animated });
+    else if (status.emojiName) result.push({ text: status.emojiName + " " });
+    const pattern = /<(a?):([^:>]+):(\d+)>|<(\d{16,22})>/g;
+    let offset = 0;
+    for (const match of status.text.matchAll(pattern)) {
+      if (match.index > offset) result.push({ text: status.text.slice(offset, match.index) });
+      result.push({ id: match[3] || match[4], name: match[2] || "emoji", animated: match[1] === "a" });
+      offset = match.index + match[0].length;
+    }
+    if (offset < status.text.length) result.push({ text: status.text.slice(offset) });
+    return result;
+  }
+  function ReplyToStatus(r) {
+    const { h, React, RN } = r;
+    const { Text, Button, Page, Input } = ui(r);
+    const GateContext = React.createContext(false);
+    const owners = /* @__PURE__ */ new Map();
+    let dismiss = null;
+    let sending = false;
+    function Emoji({ part }) {
+      const [failed, fail] = React.useState(false);
+      if (failed || !RN.Image) return h(Text, null, ":" + part.name + ":");
+      return h(RN.Image, {
+        source: { uri: `https://cdn.discordapp.com/emojis/${part.id}.${part.animated ? "gif" : "png"}?size=48&quality=lossless` },
+        accessibilityLabel: part.name,
+        style: { width: 22, height: 22 },
+        onError: () => fail(true)
+      });
+    }
+    function Quote({ status }) {
+      return h(
+        RN.View,
+        { style: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 } },
+        statusParts(status).map((part, i) => part.id ? h(Emoji, { key: i, part }) : h(Text, { key: i }, part.text))
+      );
+    }
+    function Composer({ userId, status, close }) {
+      const [draft, setDraft] = React.useState("");
+      const [busy, setBusy] = React.useState(false);
+      const [error, setError] = React.useState("");
+      const mounted = React.useRef(true);
+      React.useEffect(() => {
+        mounted.current = true;
+        return () => {
+          mounted.current = false;
+          dismiss = null;
+        };
+      }, []);
+      const onClose = () => {
+        dismiss = null;
+        close();
+      };
+      async function send(value) {
+        if (sending || !value.trim()) return;
+        sending = true;
+        setBusy(true);
+        setError("");
+        try {
+          const dm = (await r.discord("/users/@me/channels", { method: "POST", body: JSON.stringify({ recipient_id: userId }) })).json();
+          if (!dm?.id) throw new Error("Discord did not return a DM channel");
+          const emoji = status.emojiId ? `<${status.animated ? "a" : ""}:${status.emojiName || "emoji"}:${status.emojiId}>` : status.emojiName;
+          const quote = [emoji, status.text].filter(Boolean).join(" ").replace(/\r?\n/g, "\n> ");
+          const content = `> ${quote}
+${value.trim()}`;
+          if (content.length > 2e3) throw new Error("Reply and status together must be under 2,000 characters");
+          await r.discord(`/channels/${dm.id}/messages`, { method: "POST", body: JSON.stringify({ content, allowed_mentions: { parse: [] } }) });
+          r.toast("Reply sent");
+          if (mounted.current && r.active) onClose();
+        } catch (e) {
+          if (mounted.current && r.active) setError(e.message);
+        } finally {
+          sending = false;
+          if (mounted.current && r.active) setBusy(false);
+        }
+      }
+      return h(
+        Page,
+        { title: "Reply to Status", close: onClose },
+        h(Quote, { status }),
+        h(Input, { label: "Your reply", placeholder: "Write a reply\u2026", value: draft, onChange: setDraft, editable: !busy, multiline: true }),
+        h(RN.View, { style: { flexDirection: "row", flexWrap: "wrap", gap: 8 } }, ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F525}", "\u{1F389}", "\u{1F62E}"].map((emoji) => h(Button, { key: emoji, text: emoji, variant: "secondary", disabled: busy, accessibilityLabel: `Reply ${emoji}`, onPress: () => void send(emoji) }))),
+        error ? h(Text, null, error) : null,
+        h(Button, { text: busy ? "Sending\u2026" : "Send reply", disabled: busy || !draft.trim(), onPress: () => void send(draft) })
+      );
+    }
+    function open(userId, status) {
+      if (dismiss) return;
+      try {
+        dismiss = r.open("composer", Composer, { userId, status });
+      } catch (error) {
+        dismiss = null;
+        r.error("Open reply", error);
+      }
+    }
+    function ProfileGate({ children, userId, status }) {
+      const parentOwns = React.useContext(GateContext);
+      const me = r.byStore("UserStore")?.getCurrentUser?.();
+      r.useRefresh();
+      const token = React.useRef({}).current;
+      const eligible = !parentOwns && !!userId && !!status && userId !== me?.id;
+      React.useEffect(() => {
+        if (!eligible) return;
+        const set = owners.get(userId) || /* @__PURE__ */ new Set();
+        owners.set(userId, set);
+        set.add(token);
+        r.changed();
+        return () => {
+          set.delete(token);
+          if (!set.size) owners.delete(userId);
+          r.changed();
+        };
+      }, [eligible, userId]);
+      const owns = eligible && owners.get(userId)?.values().next().value === token;
+      if (!owns) return children;
+      return h(GateContext.Provider, { value: true }, h(
+        RN.View,
+        { style: { flexShrink: 1 } },
+        children,
+        h(RN.View, { style: { paddingHorizontal: 16, paddingVertical: 8 } }, h(Button, {
+          text: "Reply to Status",
+          variant: "secondary",
+          accessibilityLabel: "Reply to Status",
+          onPress: () => open(userId, status)
+        }))
+      ));
+    }
+    return {
+      start() {
+        r.hook(["UserProfileActionSheet", "UserProfile", "UserProfileModal", "UserProfileHeader", "UserProfileCustomStatus", "ProfileCustomStatus"], (element) => {
+          const p = element.props || {};
+          const userId = p.userId || p.user?.id || p.displayProfile?.userId;
+          const presence = userId && r.byStore("PresenceStore");
+          const status = normalizeStatus(p.customStatus || p.activity || p.activities || presence?.getActivities?.(userId));
+          return h(ProfileGate, { userId, status, key: element.key }, element);
+        });
+      },
+      stop() {
+        dismiss?.();
+        dismiss = null;
+        owners.clear();
+      },
+      Settings() {
+        r.useRefresh();
+        return h(
+          Page,
+          { title: "Reply to Status" },
+          h(Text, null, "One reply button per profile. Replies are sent as a DM quoting the status; mobile does not expose a verified desktop status-reply transport."),
+          h(Text, { muted: true }, "Custom emojis use Discord images, with readable names if an image fails.")
+        );
+      },
+      ProfileGate,
+      Composer,
+      Quote
+    };
+  }
+
+  // ReplyToStatus.entry.js
+  register({ "id": "mime.replytostatus", "name": "ReplyToStatus", "description": "One themed status-reply button per profile with rendered emojis.", "version": "2.0.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ReplyToStatus", "capabilities": ["ui"], "dependencies": [] }, ReplyToStatus);
+})();

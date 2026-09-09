@@ -1,0 +1,2 @@
+import { ui } from '../runtime.js';
+export default function MoreCommands(r) { const { Page, Text } = ui(r); return { start() {}, Settings() { return r.h(Page, { title: 'MoreCommands → GifRoulette' }, r.h(Text, null, 'MoreCommands has moved to GifRoulette. Install and enable GifRoulette for /gifroulette. All other old commands have been removed. This migration entry does not register duplicate commands.')); } }; }
