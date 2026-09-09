@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.1.9
+  build: 1.1.10
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -814,10 +814,11 @@ function ReplySheet(props) {
     );
 }
 
-function OverlayHost(props) {
+function OverlayHost() {
     var React = getReact();
     var RN = getRN() || {};
     var View = RN.View;
+    var Modal = RN.Modal;
     if (!React || !View) return null;
     var bump = React.useState ? React.useState(0) : [0, function () {}];
     var setBump = bump[1];
@@ -831,16 +832,36 @@ function OverlayHost(props) {
             };
         }, []);
     }
-    var isSheet = !!(props && props.sheet);
-    if (!isSheet && overlayHostInjected) {
-        return h(View, { pointerEvents: "none", style: { width: 0, height: 0 } });
-    }
-    if (!overlay.open) {
-        return h(View, { pointerEvents: "none", style: { width: 0, height: 0 } });
-    }
-    var t = themeColors();
-    var card = h(ReplySheet, { user: overlay.user, status: overlay.status });
     var Pressable = RN.Pressable || RN.TouchableOpacity || View;
+    var card = overlay.open ? h(ReplySheet, { user: overlay.user, status: overlay.status }) : null;
+    var body = h(View, {
+        pointerEvents: overlay.open ? "auto" : "none",
+        style: {
+            flex: 1,
+            backgroundColor: overlay.open ? "rgba(0,0,0,0.55)" : "transparent",
+            justifyContent: "center",
+            alignItems: "center",
+            paddingHorizontal: 28
+        }
+    },
+        overlay.open ? h(Pressable, {
+            onPress: closeReplyWindow,
+            style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }
+        }) : null,
+        overlay.open ? h(View, { style: { width: "100%", maxWidth: 360 }, pointerEvents: "auto" }, card) : null
+    );
+    if (Modal) {
+        return h(Modal, {
+            visible: !!overlay.open,
+            transparent: true,
+            animationType: "fade",
+            presentationStyle: "overFullScreen",
+            statusBarTranslucent: true,
+            hardwareAccelerated: true,
+            onRequestClose: closeReplyWindow
+        }, body);
+    }
+    if (!overlay.open) return h(View, { pointerEvents: "none", style: { width: 0, height: 0 } });
     return h(View, {
         pointerEvents: "auto",
         style: {
@@ -850,19 +871,9 @@ function OverlayHost(props) {
             right: 0,
             bottom: 0,
             zIndex: 99999,
-            elevation: 50,
-            backgroundColor: "rgba(0,0,0,0.55)",
-            justifyContent: "center",
-            alignItems: "center",
-            paddingHorizontal: 28
+            elevation: 50
         }
-    },
-        h(Pressable, {
-            onPress: closeReplyWindow,
-            style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }
-        }),
-        h(View, { style: { width: "100%", maxWidth: 360 }, pointerEvents: "auto" }, card)
-    );
+    }, body);
 }
 
 function injectOverlay(el) {
@@ -1371,17 +1382,12 @@ function afterProfileRender(args, res) {
             try { res = pinButtonOver(res, userId, status) || res; } catch (err5) { logError("pin", err5); }
         }
     }
-    var RN = getRN() || {};
-    if (RN.View && !overlayHostInjected) {
-        overlayHostInjected = true;
-        res = h(RN.View, {
-            pointerEvents: "box-none",
-            style: { flex: 1, position: "relative" }
-        }, res, h(OverlayHost, { key: "mime-rts-sheet-overlay", sheet: true })) || res;
-    }
     var Ctx = getProfileFlagContext();
     if (Ctx) res = h(Ctx.Provider, { value: true }, res) || res;
-    if (!overlayAnchored) res = injectOverlay(res);
+    if (!overlayAnchored && !overlayHostInjected) {
+        overlayHostInjected = true;
+        res = injectOverlay(res);
+    }
     return res;
 }
 
