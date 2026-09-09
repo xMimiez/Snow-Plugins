@@ -6,7 +6,9 @@
   Enmity mutated message.content + MESSAGE_UPDATE. That no longer
   redraws iOS chat. This port fetches into a cache and injects a
   code block in DCDChatManager.updateRows (same path as HighlightCode).
+  Snow SDK: capture bunny during eval.
 */
+var B = (typeof bunny !== "undefined" && bunny) || (typeof snow !== "undefined" && snow) || null;
 var unpatches = [];
 var _storage;
 var previewCache = {};
@@ -33,6 +35,7 @@ function eachClient(fn) {
 }
 
 function getMod() {
+    if (B && (B.metro || B.patcher || B.ui || B.api || B.plugin)) return B;
     var found = null;
     eachClient(function (m) {
         if (found) return;
@@ -565,7 +568,10 @@ function stop() {
     unpatches = [];
 }
 
-function showToast(message) {
+function showToast(message, icon) {
+    if (B && B.ui && typeof B.ui.showToast === "function") {
+        try { B.ui.showToast(message, icon); return; } catch (_e0) {}
+    }
     var t = findByProps("showToast") || findByProps("open") || (getMod().ui && getMod().ui.toasts);
     if (t && t.showToast) {
         try { t.showToast(message); return; } catch (_e) {}
