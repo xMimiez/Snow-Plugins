@@ -3,7 +3,7 @@
   Long-press a custom status to open a Reply to Status composer.
   Sends through Discord's user-client DM path (same as desktop).
   Author: Mime | N0_.q3.
-  build: 1.1.6
+  build: 1.1.7
 */
 var unpatches = [];
 var overlay = { open: false, user: null, status: null, sending: false };
@@ -1313,17 +1313,18 @@ function wrapSheetWithFloatingButton(res, userId, status) {
 }
 
 function forceInjectReply(res, userId, status) {
-    if (didPlaceButton) return res;
+    if (topButtonPlaced) return res;
     if (res && res.props && typeof res.props.children !== "undefined") {
         var ch = res.props.children;
         var list = Array.isArray(ch) ? ch.slice() : [ch];
-        var insertAt = Math.min(1, list.length);
-        list.splice(insertAt, 0, makeInlineReplyRow(userId, status));
+        if (list.length < 2) return res;
+        var row = makeInlineReplyRow(userId, status);
+        if (!row) return res;
+        list.splice(1, 0, row);
+        topButtonPlaced = true;
         return h(res.type, Object.assign({}, res.props, { children: list })) || res;
     }
-    var RN = getRN() || {};
-    if (RN.View) return h(RN.View, { pointerEvents: "box-none" }, makeInlineReplyRow(userId, status), res);
-    return makeInlineReplyRow(userId, status) || res;
+    return res;
 }
 
 function countElements(node, depth) {
@@ -1348,8 +1349,24 @@ function afterProfileRender(args, res) {
     profileDidRender = true;
     if (!res) return res;
     var status = statusFromProps(props) || (userId && customStatusForUser(userId));
-    if (userId && status && !shouldSkipUser(userId) && !didPlaceButton) {
+    if (userId && status && !shouldSkipUser(userId) && !topButtonPlaced) {
         try { res = forceInjectReply(res, userId, status) || res; } catch (err) { logError("forceInject", err); }
+        if (!topButtonPlaced && !didPlaceButton) {
+            try { res = decorateProfileTree(res, userId, status); } catch (err2) { logError("decorateProfile", err2); }
+        }
+        if (!topButtonPlaced && !didPlaceButton) {
+            try { res = decorateTree(res, userId, status); } catch (err3) { logError("decorate", err3); }
+        }
+        if (!topButtonPlaced && !didPlaceButton) {
+            try {
+                var injected = injectOnceInNamedScroll(res, userId, status, 0);
+                if (injected && injected.did && injected.node) res = injected.node;
+            } catch (err4) { logError("injectScroll", err4); }
+        }
+        if (!topButtonPlaced && !didPlaceButton) {
+            try { res = pinButtonOver(res, userId, status) || res; } catch (err5) { logError("pin", err5); }
+        }
+        if (didPlaceButton) topButtonPlaced = true;
     }
     var Ctx = getProfileFlagContext();
     if (Ctx) res = h(Ctx.Provider, { value: true }, res) || res;
@@ -1371,6 +1388,7 @@ var profileUserId = null;
 var didPlaceButton = false;
 var profileDidRender = false;
 var lastProfileOpenAt = 0;
+var topButtonPlaced = false;
 var ProfileFlagContext = null;
 
 function getProfileFlagContext() {
@@ -1421,10 +1439,9 @@ function enterProfile(args) {
     var fresh = !profileSheetOpen;
     profileSheetOpen = true;
     lastProfileOpenAt = Date.now();
-    if (fresh || switching) {
-        didPlaceButton = false;
-        profileDidRender = false;
-    }
+    didPlaceButton = false;
+    profileDidRender = false;
+    if (fresh || switching) topButtonPlaced = false;
     if (id) profileUserId = String(id);
 }
 
@@ -1433,12 +1450,14 @@ function leaveProfile() {
     profileUserId = null;
     didPlaceButton = false;
     profileDidRender = false;
+    topButtonPlaced = false;
 }
 
 function armProfile(userId) {
     profileSheetOpen = true;
     profileDidRender = true;
     didPlaceButton = false;
+    topButtonPlaced = false;
     lastProfileOpenAt = Date.now();
     if (userId) profileUserId = String(userId);
 }
@@ -1629,7 +1648,7 @@ function shouldAttachToCreated(type, props, el, status) {
 }
 
 function maybeDecorateCreated(type, el) {
-    if (!el || !profileSheetOpen || didPlaceButton) return el;
+    if (!el || !profileSheetOpen || didPlaceButton || topButtonPlaced) return el;
     if (!profileDidRender && !isInsideProfileTree()) return el;
     var props = el.props || {};
     if (isMemberListContext(props, type)) return el;
