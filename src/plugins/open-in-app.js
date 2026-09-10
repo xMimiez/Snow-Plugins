@@ -60,13 +60,23 @@ export function appLink(value) {
     return null;
 }
 
-async function openSteam(r, href, fallback) {
-    const ios = r.RN.Platform?.OS === 'ios';
-    const targets = ios ? [href, ...steamTargets(href)] : [...steamTargets(href), href];
-    for (const url of targets) {
-        try { await r.RN.Linking.openURL(url); return; } catch {}
+async function openSteam(r, href) {
+    const app = String(href).match(/\/app\/(\d+)/);
+    const id = app && app[1];
+    const targets = [];
+    if (id) {
+        targets.push('steam://store/' + id);
+        targets.push('steam://run/' + id);
+        targets.push('steam://url/StoreAppPage/' + id);
+        targets.push('steam://advertise/' + id);
+        targets.push('steam://url/StoreAppPage/' + id + '/' + encodeURIComponent('Counter-Strike 2'));
     }
-    if (r.active) fallback();
+    for (const extra of steamTargets(href)) if (extra.indexOf('steam://') === 0) targets.push(extra);
+    let opened = false;
+    for (const url of targets) {
+        try { await r.RN.Linking.openURL(url); opened = true; break; } catch {}
+    }
+    if (!opened) r.toast('Steam app did not open. Install Steam or allow steam:// links.');
 }
 
 export default function OpenInApp(r) {
@@ -77,7 +87,7 @@ export default function OpenInApp(r) {
                 if (!r.store.enabled) return false;
                 const steam = steamTargets(url);
                 if (steam.length) {
-                    openSteam(r, url, fallback);
+                    openSteam(r, url);
                     return true;
                 }
                 const app = appLink(url);

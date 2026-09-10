@@ -8687,15 +8687,6 @@ var plugin = (() => {
           if (!forceOpenSheet("Presets", PresetsPage)) openCustomPage("Presets", PresetsPage);
         }
       }));
-      tiles.push(h(CardButton, {
-        key: "new",
-        source: assetSource(["ic_add_24px", "PlusSmallIcon", "ic_plus_24px", "PlusIcon"]),
-        label: "New",
-        disabled: false,
-        onPress: function() {
-          openCreateDecoration();
-        }
-      }));
       var list = HorizontalTiles(tiles);
       var headerIcon = null;
       if (!authorized && ActivityIndicator) headerIcon = null;
@@ -8825,7 +8816,7 @@ var plugin = (() => {
       inner.push(Text ? h(Text, {
         key: "sub",
         style: { color: t.muted, fontSize: 13, paddingHorizontal: 16, paddingBottom: 12 }
-      }, mine.length ? "Tap one to equip it." : "Nothing here yet. Use New to submit a PNG or APNG.") : null);
+      }, mine.length ? "Tap one to equip it." : "Nothing here yet.") : null);
       if (cards.length) inner.push(h(View, { key: "grid", style: { paddingBottom: 16 } }, HorizontalTiles(cards)));
       if (ScrollView) {
         return h(ScrollView, {
@@ -9307,6 +9298,6 @@ var plugin = (() => {
   Decor.defaults = { tokens: {} };
 
   // Decor.entry.js
-  var Decor_entry_default = register({ "id": "mime.decor", "name": "Decor", "description": "Create and equip Decor avatar decorations. PNG/APNG preserved; JPEG converted locally.", "version": "2.2.2", "authors": [{ "name": "Fiery", "id": "890228870559698955" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/Decor" }, Decor);
+  var Decor_entry_default = register({ "id": "mime.decor", "name": "Decor", "description": "Browse and equip Decor avatar decorations.", "version": "2.2.4", "authors": [{ "name": "Fiery", "id": "890228870559698955" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/Decor" }, Decor);
   return __toCommonJS(Decor_entry_exports);
 })();

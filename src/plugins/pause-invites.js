@@ -2,35 +2,47 @@ import { ui } from '../runtime.js';
 
 export default function PauseInvitesForever(r) {
     const { h, React } = r, { Page, Text, Button } = ui(r);
-    function hasFlag(features, pause) {
-        const list = Array.from(features || []);
-        return pause ? list.includes('INVITES_DISABLED') : !list.includes('INVITES_DISABLED');
+    function rest() {
+        return r.find('patch', 'post', 'get', 'put') || r.find('patch', 'get') || r.find('put', 'patch');
     }
     async function setInvites(guildId, pause) {
-        const guild = r.byStore('GuildStore')?.getGuild?.(guildId) || {};
-        const features = Array.from(guild.features || []).filter(f => f !== 'INVITES_DISABLED');
-        if (pause) features.push('INVITES_DISABLED');
-        const rest = r.find('patch', 'post', 'get') || r.find('put', 'patch', 'get');
-        let lastError;
-        if (typeof rest?.patch === 'function') {
-            try { await rest.patch({ url: `/guilds/${guildId}`, body: { features } }); }
-            catch (error) { lastError = error; }
+        const api = rest();
+        let features = [];
+        try {
+            const guild = (typeof api?.get === 'function'
+                ? (await api.get({ url: `/guilds/${guildId}` }))?.body
+                : (await r.discord(`/guilds/${guildId}`)).json());
+            features = Array.from(guild?.features || r.byStore('GuildStore')?.getGuild?.(guildId)?.features || []);
+        } catch {
+            features = Array.from(r.byStore('GuildStore')?.getGuild?.(guildId)?.features || []);
         }
-        if (lastError || !rest?.patch) {
+        features = features.filter(f => f !== 'INVITES_DISABLED');
+        if (pause) features.push('INVITES_DISABLED');
+        const until = pause ? new Date(Date.now() + 23 * 60 * 60 * 1000).toISOString() : null;
+        let lastError;
+        if (typeof api?.put === 'function') {
             try {
-                await r.discord(`/guilds/${guildId}`, { method: 'PATCH', body: JSON.stringify({ features }) });
+                await api.put({ url: `/guilds/${guildId}/incident-actions`, body: { invites_disabled_until: until, dms_disabled_until: null } });
+            } catch (error) { lastError = error; }
+        }
+        try {
+            await r.discord(`/guilds/${guildId}/incident-actions`, {
+                method: 'PUT',
+                body: JSON.stringify({ invites_disabled_until: until, dms_disabled_until: null }),
+            });
+            lastError = null;
+        } catch (error) { lastError = lastError || error; }
+        if (typeof api?.patch === 'function') {
+            try {
+                await api.patch({ url: `/guilds/${guildId}`, body: { features } });
                 lastError = null;
             } catch (error) { lastError = error; }
         }
-        r.common.FluxDispatcher?.dispatch?.({ type: 'GUILD_UPDATE', guild: { id: guildId, features } });
-        let confirmed = hasFlag(r.byStore('GuildStore')?.getGuild?.(guildId)?.features, pause);
-        if (!confirmed) {
-            try {
-                const fresh = (await r.discord(`/guilds/${guildId}`)).json();
-                confirmed = hasFlag(fresh?.features, pause);
-            } catch {}
-        }
-        if (!confirmed) throw new Error(lastError?.message || 'Discord did not change invite pause. Need Pause Invites / Manage Server, and a community server.');
+        try {
+            await r.discord(`/guilds/${guildId}`, { method: 'PATCH', body: JSON.stringify({ features }) });
+            lastError = null;
+        } catch (error) { lastError = lastError || error; }
+        if (lastError) throw new Error(lastError.message || String(lastError));
     }
     function Confirm({ guildId, pause, close }) {
         const [busy, setBusy] = React.useState(false), inFlight = React.useRef(false), mounted = React.useRef(true);
@@ -63,7 +75,7 @@ export default function PauseInvitesForever(r) {
             r.command({ name: 'pauseinvites', description: 'Pause server invites without a timer', execute: run(true) });
             r.command({ name: 'resumeinvites', description: 'Resume server invites', execute: run(false) });
         },
-        Settings() { return h(Page, { title: 'PauseInvitesForever' }, h(Text, null, 'Sets the INVITES_DISABLED guild feature and checks Discord actually applied it.')); },
+        Settings() { return h(Page, { title: 'PauseInvitesForever' }, h(Text, null, 'Uses Discord incident-actions and guild features. No client Flux dispatch.')); },
         Confirm,
     };
 }

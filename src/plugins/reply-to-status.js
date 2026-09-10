@@ -112,13 +112,57 @@ export default function ReplyToStatus(r) {
                     || { text: p.bio || p.pronouns || 'No custom status' };
                 return h(ProfileGate, { userId, status, key: element.key }, r.React.cloneElement(element, { __mimeReplyWrapped: true }));
             }
+            let currentUserId = null;
+            function remember(id) { if (id) currentUserId = String(id); }
+            function idFrom(args) {
+                const a = args && args[0];
+                if (!a) return null;
+                if (typeof a === 'string' && /^\d+$/.test(a)) return a;
+                return a.userId || a.user?.id || a.userID || a.id;
+            }
+            for (const key of ['openUserProfileActionSheet', 'openUserProfile', 'showUserProfile', 'openUserProfileModal']) {
+                const mod = r.find(key);
+                if (mod && typeof mod[key] === 'function') {
+                    r.patch('after', mod, key, args => {
+                        remember(idFrom(args));
+                        const userId = currentUserId;
+                        if (!userId) return;
+                        setTimeout(() => {
+                            if (!r.active || currentUserId !== userId) return;
+                            const presence = r.byStore('PresenceStore');
+                            const status = normalizeStatus(presence?.getActivities?.(userId)) || { text: 'No custom status' };
+                            const AlertModal = r.D.AlertModal || r.C.AlertModal;
+                            const AlertActions = r.D.AlertActions || r.C.AlertActions;
+                            const AlertActionButton = r.D.AlertActionButton || r.C.AlertActionButton;
+                            if (!AlertModal) return;
+                            r.api.ui.openAlert('reply-to-status', h(AlertModal, {
+                                title: 'Reply to status',
+                                content: status.text || 'Reply to this user?',
+                                actions: h(AlertActions, null,
+                                    h(AlertActionButton, { text: 'Reply', onPress: () => { r.api.ui.dismissAlert('reply-to-status'); open(userId, status); } }),
+                                    h(AlertActionButton, { text: 'Not now', variant: 'secondary', onPress: () => r.api.ui.dismissAlert('reply-to-status') })),
+                            }));
+                        }, 400);
+                    });
+                }
+            }
             r.hook(['UserProfileCustomStatus', 'ProfileCustomStatus', 'CustomStatus', 'UserCustomStatus', 'CustomStatusText'], wrap);
             r.patch('after', r.React, 'createElement', (args, result) => {
-                if (!r.active || !result?.props) return;
+                if (!r.active || !result?.props || result.props.__mimeReplyWrapped) return;
                 const p = args[1] || result.props;
                 const type = args[0];
                 const name = typeof type === 'string' ? type : (type?.displayName || type?.name || '');
                 if (/customstatus/i.test(name) || (p.customStatus && (p.userId || p.user))) return wrap(result) ?? result;
+            });
+            r.command({
+                name: 'replytostatus',
+                description: 'Reply to a user custom status',
+                options: [{ name: 'user', description: 'User ID', type: 6, required: true }],
+                execute(args) {
+                    const userId = String(args.find(a => a.name === 'user')?.value || '');
+                    const status = normalizeStatus(r.byStore('PresenceStore')?.getActivities?.(userId)) || { text: 'No custom status' };
+                    open(userId, status);
+                },
             });
         },
         stop() { dismiss?.(); dismiss = null; owners.clear(); },

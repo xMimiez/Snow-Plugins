@@ -20,8 +20,8 @@
     "module": "decor",
     "id": "mime.decor",
     "name": "Decor",
-    "description": "Create and equip Decor avatar decorations. PNG/APNG preserved; JPEG converted locally.",
-    "version": "2.2.2",
+    "description": "Browse and equip Decor avatar decorations.",
+    "version": "2.2.4",
     "authors": [
       {
         "name": "Fiery",
@@ -112,8 +112,8 @@
     "module": "preview-file",
     "id": "mime.previewfile",
     "name": "PreviewFile",
-    "description": "Expandable previews for supported text attachments.",
-    "version": "2.2.2",
+    "description": "View file from the message long-press sheet, above Copy text.",
+    "version": "2.2.4",
     "authors": [
       {
         "name": "mafu",
@@ -133,7 +133,7 @@
     "id": "mime.replytostatus",
     "name": "ReplyToStatus",
     "description": "One themed status-reply button per profile with rendered emojis.",
-    "version": "2.2.2",
+    "version": "2.2.4",
     "authors": [
       {
         "name": "Mime | N0_.q3",
@@ -149,7 +149,7 @@
     "id": "mime.spotifypreview",
     "name": "SpotifyPreview",
     "description": "Official Spotify embeds in an owned Snow sheet.",
-    "version": "2.2.2",
+    "version": "2.2.3",
     "authors": [
       {
         "name": "Mime | N0_.q3",
@@ -181,7 +181,7 @@
     "id": "mime.alwaysanimate",
     "name": "AlwaysAnimate",
     "description": "Animate server icons, server banners, user avatars, and user banners.",
-    "version": "1.2.2",
+    "version": "1.2.3",
     "authors": [
       {
         "name": "Fiery",
@@ -292,7 +292,7 @@
     "id": "mime.openinapp",
     "name": "OpenInApp",
     "description": "Open Steam, Telegram, Instagram, TikTok and other service links in their apps.",
-    "version": "1.2.2",
+    "version": "1.2.3",
     "authors": [
       {
         "name": "Vendicated",
@@ -316,7 +316,7 @@
     "id": "mime.pauseinvitesforever",
     "name": "PauseInvitesForever",
     "description": "Pause and resume server invites with explicit confirmation.",
-    "version": "1.2.2",
+    "version": "1.2.3",
     "authors": [
       {
         "name": "Dolfies",

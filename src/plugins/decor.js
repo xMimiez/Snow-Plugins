@@ -1595,14 +1595,6 @@ function DecorationPicker(props) {
             if (!forceOpenSheet("Presets", PresetsPage)) openCustomPage("Presets", PresetsPage);
         }
     }));
-    tiles.push(h(CardButton, {
-        key: "new",
-        source: assetSource(["ic_add_24px", "PlusSmallIcon", "ic_plus_24px", "PlusIcon"]),
-        label: "New",
-        disabled: false,
-        onPress: function () { openCreateDecoration(); }
-    }));
-
     var list = HorizontalTiles(tiles);
 
     var headerIcon = null;
@@ -1722,7 +1714,7 @@ function CustomPage() {
     inner.push(Text ? h(Text, {
         key: "sub",
         style: { color: t.muted, fontSize: 13, paddingHorizontal: 16, paddingBottom: 12 }
-    }, mine.length ? "Tap one to equip it." : "Nothing here yet. Use New to submit a PNG or APNG.") : null);
+    }, mine.length ? "Tap one to equip it." : "Nothing here yet.") : null);
     if (cards.length) inner.push(h(View, { key: "grid", style: { paddingBottom: 16 } }, HorizontalTiles(cards)));
     if (ScrollView) {
         return h(ScrollView, {

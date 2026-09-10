@@ -19,11 +19,11 @@ export function attachmentUrl(value) {
     }
     return u.href;
 }
+
 export default function PreviewFile(r) {
-    const { h, React, RN } = r, { Page, Text, Button } = ui(r), cache = new Map(), Gate = React.createContext(false);
-    function attachmentFrom(props) {
-        if (!props) return null;
-        return props.attachment || props.file || props.upload || props.item || (Array.isArray(props.attachments) ? props.attachments[0] : null);
+    const { h, React, RN, D, C } = r, { Page, Text, Button } = ui(r), cache = new Map();
+    function filesOn(message) {
+        return (message?.attachments || []).filter(previewable);
     }
     async function load(a) {
         if (!previewable(a)) throw new Error('Unsupported file or file exceeds 256 KB');
@@ -35,85 +35,71 @@ export default function PreviewFile(r) {
         if (cache.size > 16) cache.delete(cache.keys().next().value);
         return result.text;
     }
-    function Full({ a, text, close }) {
-        return h(Page, { title: a.filename || a.name, close },
-            h(Text, { muted: true }, `${text.split('\n').length} lines · ${a.size || text.length} bytes`),
-            h(RN.ScrollView, { horizontal: true, style: { maxHeight: 500 } },
-                h(Text, { selectable: true, style: { fontFamily: RN.Platform?.OS === 'ios' ? 'Menlo' : 'monospace' } }, text)),
-            h(Button, { text: 'Copy text', onPress: () => r.copy(text) }));
+    function Viewer({ a, text, close }) {
+        const shown = String(text).split('\n').slice(0, 100).join('\n');
+        const lines = String(text).split('\n').length;
+        return h(Page, { title: a.filename || a.name || 'File', close },
+            h(Text, { muted: true }, `Showing ${Math.min(100, lines)} of ${lines} lines`),
+            h(RN.ScrollView, { style: { maxHeight: 520 } },
+                h(Text, { selectable: true, style: { fontFamily: RN.Platform?.OS === 'ios' ? 'Menlo' : 'monospace' } }, shown)),
+            h(Button, { text: 'Copy text', onPress: () => r.copy(shown) }));
     }
-    function Card({ original, a }) {
-        const nested = React.useContext(Gate), [text, setText] = React.useState(null), [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false), mounted = React.useRef(true);
-        React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-        React.useEffect(() => {
-            if (nested || text != null || busy) return;
-            setBusy(true);
-            load(a).then(t => mounted.current && setText(t)).catch(e => mounted.current && setError(e.message)).finally(() => mounted.current && setBusy(false));
-        }, []);
-        if (nested) return original;
-        const preview = text == null
-            ? h(Text, { muted: true }, busy ? 'Loading preview…' : (error || 'No preview'))
-            : h(RN.View, { style: { padding: 12, gap: 8, borderWidth: 1, borderColor: '#80808060', borderRadius: 8, marginBottom: 8 } },
-                h(Text, { selectable: true, numberOfLines: 12, style: { fontFamily: RN.Platform?.OS === 'ios' ? 'Menlo' : 'monospace' } }, text.split('\n').slice(0, 12).join('\n').slice(0, 4000)),
-                h(Button, { text: 'Expand file', variant: 'secondary', onPress: () => { try { r.open('file', Full, { a, text }); } catch (e) { r.error('Preview file', e); } } }));
-        return h(Gate.Provider, { value: true }, h(RN.View, { style: { gap: 8, paddingVertical: 6 } }, preview, original, error && text == null ? h(Button, { text: 'Retry preview', variant: 'secondary', onPress: () => { setError(''); setBusy(true); load(a).then(t => setText(t)).catch(e => setError(e.message)).finally(() => setBusy(false)); } }) : null));
-    }
-    function wrap(element) {
+    async function openFile(a) {
         try {
-            const a = attachmentFrom(element?.props);
-            if (previewable(a) && !element.props?.__mimePreview) return h(Card, { original: r.React.cloneElement(element, { __mimePreview: true }), a });
-        } catch { return; }
+            r.find('hideActionSheet')?.hideActionSheet?.();
+            const text = await load(a);
+            r.open('file', Viewer, { a, text });
+        } catch (error) { r.error('View file', error); }
+    }
+    function isCopyText(node) {
+        if (!node || typeof node !== 'object') return false;
+        const p = node.props || {};
+        const bits = [p.label, p.text, p.title, p.accessibilityLabel];
+        if (typeof p.children === 'string') bits.push(p.children);
+        return bits.some(value => /copy\s*text/i.test(String(value || '')));
+    }
+    function viewRow(file) {
+        const Row = D.TableRow || C.TableRow;
+        const icon = C.RowIcon ? h(C.RowIcon, { name: 'FileIcon' }) : undefined;
+        if (Row) return h(Row, { label: 'View file', icon, onPress: () => openFile(file) });
+        return h(RN.Pressable || RN.TouchableOpacity, { onPress: () => openFile(file), style: { padding: 16 } }, h(Text, null, 'View file'));
+    }
+    function inject(node, file) {
+        if (!node || typeof node !== 'object' || !file) return node;
+        const kids = node.props?.children;
+        const arr = React.Children.toArray(kids);
+        if (!arr.length) return node;
+        const copyAt = arr.findIndex(isCopyText);
+        if (copyAt >= 0) {
+            if (arr.some(child => child?.props?.label === 'View file')) return node;
+            const next = [...arr.slice(0, copyAt), viewRow(file), ...arr.slice(copyAt)];
+            return React.cloneElement(node, { ...node.props, children: next });
+        }
+        let changed = false;
+        const mapped = arr.map(child => {
+            const out = inject(child, file);
+            if (out !== child) changed = true;
+            return out;
+        });
+        return changed ? React.cloneElement(node, { ...node.props, children: mapped }) : node;
+    }
+    function wrapSheet(element) {
+        const Inner = element.type;
+        const message = element.props?.message;
+        const file = filesOn(message)[0];
+        if (!file || element.props?.__mimePreviewSheet) return;
+        function Sheet(props) {
+            const tree = typeof Inner === 'function' && !(Inner.prototype && Inner.prototype.render)
+                ? Inner(props)
+                : h(Inner, props);
+            return inject(tree, filesOn(props.message)[0] || file) || tree;
+        }
+        Sheet.displayName = 'MessageLongPressActionSheet';
+        return h(Sheet, { ...element.props, __mimePreviewSheet: true });
     }
     return {
         start() {
-            const fetching = new Set();
-            function snippet(text) { return String(text).split('\n').slice(0, 10).join('\n').slice(0, 2000); }
-            function consider(message) {
-                if (!message) return;
-                for (const a of message.attachments || []) {
-                    const url = a.url || a.proxy_url || a.proxyUrl;
-                    if (!previewable(a) || !url || cache.has(url) || fetching.has(url)) continue;
-                    fetching.add(url);
-                    load(a).then(text => {
-                        cache.set(url, text);
-                        r.common.FluxDispatcher?.dispatch?.({ type: 'MESSAGE_UPDATE', message });
-                    }).catch(() => {}).finally(() => fetching.delete(url));
-                }
-            }
-            function inject(node) {
-                if (!node || typeof node !== 'object') return;
-                const attachments = node.attachments || node.message?.attachments;
-                if (Array.isArray(attachments)) {
-                    const blocks = [];
-                    for (const a of attachments) {
-                        const url = a.url || a.proxy_url || a.proxyUrl;
-                        const text = url && cache.get(url);
-                        if (text) blocks.push({ type: 'codeBlock', content: snippet(text), lang: 'txt' });
-                    }
-                    if (blocks.length) {
-                        if (Array.isArray(node.content)) node.content = blocks.concat(node.content);
-                        else if (typeof node.content === 'string') node.content = snippet(cache.get(attachments[0].url || attachments[0].proxy_url) || '') + '\n' + node.content;
-                        else if (node.message && typeof node.message.content === 'string') {
-                            node.message.content = '```\n' + snippet(cache.get(attachments[0].url || attachments[0].proxy_url) || '') + '\n```\n' + node.message.content;
-                        }
-                    }
-                }
-                if (Array.isArray(node)) for (const item of node) inject(item);
-                else for (const value of Object.values(node)) if (value && typeof value === 'object') inject(value);
-            }
-            r.subscribe('MESSAGE_CREATE', event => consider(event?.message || event));
-            r.subscribe('LOAD_MESSAGES_SUCCESS', event => { for (const message of event?.messages || []) consider(message); });
-            r.patchRows(rows => {
-                const next = typeof rows === 'string' ? JSON.parse(rows) : JSON.parse(JSON.stringify(rows));
-                inject(next);
-                return typeof rows === 'string' ? JSON.stringify(next) : next;
-            });
-            r.hook(['MessageAttachment', 'Attachment', 'FileAttachment', 'MessageFileAttachment', 'MediaAttachment', 'AttachmentCard', 'MessageAccessories', 'File', 'DefaultAttachment', 'AttachmentContent'], wrap);
-            r.patch('after', r.React, 'createElement', (args, result) => {
-                if (!r.active || !result?.props || result.props.__mimePreview) return;
-                const a = attachmentFrom(args[1]) || attachmentFrom(result.props);
-                if (previewable(a)) return wrap(result) ?? result;
-            });
+            r.hook(['MessageLongPressActionSheet', 'MessageActionSheet'], wrapSheet);
             r.command({
                 name: 'previewfile',
                 description: 'Preview a small Discord text attachment locally',
@@ -121,14 +107,12 @@ export default function PreviewFile(r) {
                 async execute(options) {
                     const url = attachmentUrl(String(options.find(o => o.name === 'url')?.value || ''));
                     const a = { url, filename: decodeURIComponent(new URL(url).pathname.split('/').pop()), size: 0 };
-                    const text = await load(a);
-                    a.size = text.length;
-                    r.open('file', Full, { a, text });
+                    await openFile(a);
                 },
             });
         },
         stop() { cache.clear(); },
-        Settings() { return h(Page, { title: 'PreviewFile' }, h(Text, null, 'Text attachments show a preview above the download card. Limit 256 KB.')); },
+        Settings() { return h(Page, { title: 'PreviewFile' }, h(Text, null, 'Hold a message with a text file and choose View file (above Copy text). Shows up to 100 lines.')); },
         load,
     };
 }

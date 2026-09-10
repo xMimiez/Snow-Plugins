@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.openinapp",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "display": {
     "name": "OpenInApp",
     "description": "Open Steam, Telegram, Instagram, TikTok and other service links in their apps.",

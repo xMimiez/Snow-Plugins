@@ -2,10 +2,10 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.previewfile",
-  "version": "2.2.2",
+  "version": "2.2.4",
   "display": {
     "name": "PreviewFile",
-    "description": "Expandable previews for supported text attachments.",
+    "description": "View file from the message long-press sheet, above Copy text.",
     "authors": [
       {
         "name": "mafu",

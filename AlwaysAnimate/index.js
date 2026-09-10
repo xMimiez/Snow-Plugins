@@ -558,92 +558,53 @@ var plugin = (() => {
   }
 
   // project:src/plugins/always-animate.js
-  function walk(value, visit) {
-    if (!value || typeof value !== "object") return;
-    visit(value);
-    if (Array.isArray(value)) for (const item of value) walk(item, visit);
-    else for (const item of Object.values(value)) walk(item, visit);
-  }
   function AlwaysAnimate(r) {
-    const { h, React, RN } = r, { Page, Text, Toggle } = ui(r);
-    function animateUrl(url) {
+    const { h, React } = r, { Page, Text } = ui(r);
+    function gifUrl(url) {
       if (typeof url !== "string") return url;
-      return url.replace(/\/(avatars|banners|guilds\/[^/]+\/banners|icons|splashes|role-icons)\/([^/?]+)\/(a_[^/?]+)\.(?:png|webp|jpg|jpeg)(\?[^#]*)?/gi, "/$1/$2/$3.gif$4").replace(/\/avatars\/(\d+)\/(a_[^/?]+)\.(?:png|webp)(\?[^#]*)?/gi, "/avatars/$1/$2.gif$3").replace(/\/banners\/(\d+)\/(a_[^/?]+)\.(?:png|webp)(\?[^#]*)?/gi, "/banners/$1/$2.gif$3").replace(/\/icons\/(\d+)\/(a_[^/?]+)\.(?:png|webp)(\?[^#]*)?/gi, "/icons/$1/$2.gif$3");
+      return url.replace(
+        /\/(avatars|banners|icons|splashes)\/(\d+)\/(a_[A-Za-z0-9]+)\.(?:webp|png|jpg|jpeg)/gi,
+        "/$1/$2/$3.gif"
+      );
     }
-    function animateValue(value) {
-      if (typeof value === "string") return animateUrl(value);
-      if (Array.isArray(value)) return value.map(animateValue);
-      if (value && typeof value === "object") {
-        const next = { ...value };
-        if (typeof next.uri === "string") next.uri = animateUrl(next.uri);
-        if (typeof next.url === "string") next.url = animateUrl(next.url);
-        if (typeof next.src === "string") next.src = animateUrl(next.src);
-        return next;
-      }
-      return value;
+    function withGif(source) {
+      if (typeof source === "string") return gifUrl(source);
+      if (source && typeof source === "object" && typeof source.uri === "string") return { ...source, uri: gifUrl(source.uri) };
+      return source;
     }
-    function forceElement(element) {
+    function rewrite(element) {
       if (!element?.props || element.props.__mimeAnimated) return;
-      const props = { __mimeAnimated: true, animate: true, animated: true, canAnimate: true, shouldAnimate: true, loop: true };
-      const src = animateValue(element.props.source || element.props.src);
-      if (src && src !== element.props.source) props.source = src;
-      if (element.props.src) props.src = animateValue(element.props.src);
-      return React.cloneElement(element, props);
-    }
-    function patchUrlFn(parent, key) {
-      r.patch("before", parent, key, (args) => {
-        if (!args) return;
-        if (args[0] && typeof args[0] === "object") Object.assign(args[0], { canAnimate: true, animated: true, animate: true });
-        for (let i = 0; i < args.length; i++) if (typeof args[i] === "boolean") args[i] = true;
+      const source = withGif(element.props.source || element.props.src);
+      return React.cloneElement(element, {
+        __mimeAnimated: true,
+        source,
+        src: withGif(element.props.src),
+        animate: true,
+        animated: true,
+        canAnimate: true
       });
-      r.patch("after", parent, key, (_args, result) => animateValue(result));
     }
     return {
       start() {
-        for (const name of ["canUseAnimatedEmojis", "canUseAnimatedAvatar", "canUseNameplate", "canUseAnimatedBanner", "shouldAnimateEmoji", "isAnimatedAvatarPremiumDisabled", "shouldAnimate"]) {
-          r.patch("after", r.find(name), name, () => true);
+        for (const key of ["canUseAnimatedAvatar", "canUseAnimatedBanner", "canUseAnimatedEmojis", "shouldAnimate"]) {
+          r.patch("after", r.find(key), key, () => true);
         }
-        const userStore = r.byStore("UserStore") || r.find("getCurrentUser", "getUser");
-        r.patch("after", userStore, "getCurrentUser", (_args, user) => {
-          if (user && (user.premiumType == null || user.premiumType < 2)) try {
-            user.premiumType = 2;
-          } catch {
-          }
-        });
-        for (const key of ["getUserAvatarURL", "getUserBannerURL", "getGuildIconURL", "getGuildBannerURL", "getGuildSplashURL", "getAvatarAnimation", "getGuildIconSource", "getGuildBannerSource", "getAvatarURL", "getBannerURL"]) {
+        for (const key of ["getUserAvatarURL", "getUserBannerURL", "getGuildIconURL", "getGuildBannerURL", "getAvatarURL", "getBannerURL"]) {
           const mod = r.find(key);
-          if (mod) patchUrlFn(mod, key);
-        }
-        r.hook(["Emoji", "Avatar", "UserAvatar", "AnimatedAvatar", "GuildIcon", "AnimatedGuildIcon", "GuildBanner", "UserBanner", "ProfileBanner", "Banner", "Image", "FastImage", "ExpoImage"], forceElement);
-        r.patch("after", React, "createElement", (args, result) => {
-          if (!r.active || !result?.props || result.props.__mimeAnimated) return;
-          const type = args[0];
-          const p = args[1] || {};
-          const src = p.source?.uri || p.source || p.src || p.uri;
-          const url = typeof src === "string" ? src : src?.uri;
-          const isImage = type === RN.Image || type === "RCTImageView" || /image|avatar|banner|icon|fastimage/i.test(String(type?.displayName || type?.name || type || ""));
-          if (typeof url === "string" && /discord(?:app)?\.com\/(avatars|banners|icons|guilds)\//i.test(url)) return forceElement(result) ?? result;
-          if (isImage && url) return forceElement(result) ?? result;
-        });
-        r.patchRows((rows) => {
-          const next = JSON.parse(JSON.stringify(rows));
-          walk(next, (node) => {
-            node.animate = true;
-            node.animated = true;
-            node.canAnimate = true;
-            for (const key of Object.keys(node)) {
-              if (typeof node[key] === "string" && node[key].includes("discord")) node[key] = animateUrl(node[key]);
-            }
+          r.patch("before", mod, key, (args) => {
+            if (!args) return;
+            if (args[0] && typeof args[0] === "object") Object.assign(args[0], { canAnimate: true, animated: true });
+            for (let i = 0; i < args.length; i++) if (typeof args[i] === "boolean") args[i] = true;
           });
-          return next;
-        });
+          r.patch("after", mod, key, (_args, result) => typeof result === "string" ? gifUrl(result) : withGif(result));
+        }
+        r.hook(["Image", "Avatar", "UserAvatar", "AnimatedAvatar", "GuildIcon", "UserBanner", "ProfileBanner", "Banner", "FastImage"], rewrite);
       },
       Settings() {
-        r.useRefresh();
         return h(
           Page,
           { title: "AlwaysAnimate" },
-          h(Text, null, "Rewrites animated avatar, banner, and server icon URLs to .gif and forces canAnimate on Discord helpers.")
+          h(Text, null, "Uses Snow/Bunny Metro finders, patcher, and JSX hooks so animated avatar and banner URLs request .gif instead of static webp.")
         );
       }
     };
@@ -651,6 +612,6 @@ var plugin = (() => {
   AlwaysAnimate.defaults = {};
 
   // AlwaysAnimate.entry.js
-  var AlwaysAnimate_entry_default = register({ "id": "mime.alwaysanimate", "name": "AlwaysAnimate", "description": "Animate server icons, server banners, user avatars, and user banners.", "version": "1.2.2", "authors": [{ "name": "Fiery", "id": "890228870559698955" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/AlwaysAnimate" }, AlwaysAnimate);
+  var AlwaysAnimate_entry_default = register({ "id": "mime.alwaysanimate", "name": "AlwaysAnimate", "description": "Animate server icons, server banners, user avatars, and user banners.", "version": "1.2.3", "authors": [{ "name": "Fiery", "id": "890228870559698955" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/AlwaysAnimate" }, AlwaysAnimate);
   return __toCommonJS(AlwaysAnimate_entry_exports);
 })();
