@@ -4,7 +4,8 @@ import { addUrlHandler } from '../url-hub.js';
 const SCHEME_RE = /snow:\/\/[^\s<>\]]+/gi;
 
 export function snowInstallLink(pluginUrl) {
-    return 'snow://snow?id=-1&command=install-plugin&params=' + encodeURIComponent(pluginUrl);
+    const url = sanitizePluginUrl(pluginUrl) || pluginUrl;
+    return 'snow://snow?id=-1&command=install-plugin&params=' + String(url).replace(/&/g, '%26').replace(/#/g, '%23');
 }
 
 export function parseInstallLink(value) {
@@ -16,7 +17,9 @@ export function parseInstallLink(value) {
     const host = (parsed.hostname || parsed.host || '').toLowerCase();
     const path = (parsed.pathname || '').replace(/^\//, '');
     const command = (parsed.searchParams.get('command') || path || '').toLowerCase();
-    const param = parsed.searchParams.get('params') || parsed.searchParams.get('url') || parsed.searchParams.get('plugin') || '';
+    const rawQuery = trimmed.split('?')[1] || '';
+    const paramsMatch = rawQuery.match(/(?:^|&)params=([^&]*)/);
+    const param = (paramsMatch ? paramsMatch[1] : '') || parsed.searchParams.get('params') || parsed.searchParams.get('url') || parsed.searchParams.get('plugin') || '';
     if (command === 'install-plugin' || command === 'installplugin' || path === 'install-plugin' || path === 'plugin' || path === 'install' || host === 'install-plugin' || host === 'plugin') {
         const url = sanitizePluginUrl(param);
         return url ? { kind: 'plugin', source: 'snow', url, raw: trimmed } : null;

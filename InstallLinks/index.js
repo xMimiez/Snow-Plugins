@@ -594,7 +594,8 @@ var plugin = (() => {
   // project:src/plugins/install-links.js
   var SCHEME_RE = /snow:\/\/[^\s<>\]]+/gi;
   function snowInstallLink(pluginUrl) {
-    return "snow://snow?id=-1&command=install-plugin&params=" + encodeURIComponent(pluginUrl);
+    const url = sanitizePluginUrl(pluginUrl) || pluginUrl;
+    return "snow://snow?id=-1&command=install-plugin&params=" + String(url).replace(/&/g, "%26").replace(/#/g, "%23");
   }
   function parseInstallLink(value) {
     if (!value || typeof value !== "string") return null;
@@ -609,7 +610,9 @@ var plugin = (() => {
     const host = (parsed.hostname || parsed.host || "").toLowerCase();
     const path = (parsed.pathname || "").replace(/^\//, "");
     const command = (parsed.searchParams.get("command") || path || "").toLowerCase();
-    const param = parsed.searchParams.get("params") || parsed.searchParams.get("url") || parsed.searchParams.get("plugin") || "";
+    const rawQuery = trimmed.split("?")[1] || "";
+    const paramsMatch = rawQuery.match(/(?:^|&)params=([^&]*)/);
+    const param = (paramsMatch ? paramsMatch[1] : "") || parsed.searchParams.get("params") || parsed.searchParams.get("url") || parsed.searchParams.get("plugin") || "";
     if (command === "install-plugin" || command === "installplugin" || path === "install-plugin" || path === "plugin" || path === "install" || host === "install-plugin" || host === "plugin") {
       const url = sanitizePluginUrl(param);
       return url ? { kind: "plugin", source: "snow", url, raw: trimmed } : null;
@@ -921,6 +924,6 @@ var plugin = (() => {
   InstallLinks.defaults = {};
 
   // InstallLinks.entry.js
-  var InstallLinks_entry_default = register({ "id": "mime.installlinks", "name": "InstallLinks", "description": "Send and open snow:// install-plugin links.", "version": "1.0.3", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/InstallLinks" }, InstallLinks);
+  var InstallLinks_entry_default = register({ "id": "mime.installlinks", "name": "InstallLinks", "description": "Send and open snow:// install-plugin links.", "version": "1.0.4", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/InstallLinks" }, InstallLinks);
   return __toCommonJS(InstallLinks_entry_exports);
 })();

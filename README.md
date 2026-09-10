@@ -25,14 +25,14 @@ These releases use **Bunny spec 3**. Install from the `manifest.json` URL, then 
 | [ValidUser](ValidUser/) | 1.2.0 | Auto-resolve unknown mentions and replace @Unknown User. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/ValidUser/manifest.json) |
 | [OpenInApp](OpenInApp/) | 1.2.0 | Open Spotify, Steam, Telegram, Instagram, TikTok and other apps. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/OpenInApp/manifest.json) |
 | [PauseInvitesForever](PauseInvitesForever/) | 1.2.0 | `/pauseinvites` and `/resumeinvites` with separate confirmations. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/PauseInvitesForever/manifest.json) |
-| [InstallLinks](InstallLinks/) | 1.0.3 | `snow://` install-plugin links. Preview, install, and enable via Snow’s external plugin API. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/InstallLinks/manifest.json) |
+| [InstallLinks](InstallLinks/) | 1.0.4 | `snow://` install-plugin links. Preview, install, and enable via Snow’s external plugin API. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/InstallLinks/manifest.json) |
 
 ## Snow install links
 
 InstallLinks sends a `snow://` install-plugin URL, not a GitHub hyperlink:
 
 ```text
-snow://snow?id=-1&command=install-plugin&params=https%3A%2F%2Fraw.githubusercontent.com%2FxMimiez%2FSnow-Plugins%2Fmain%2FDecor%2Fmanifest.json
+snow://snow?id=-1&command=install-plugin&params=https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/Decor/manifest.json
 ```
 
 `/snowlink url:` posts that string. Taps on `snow://` open preview → `installExternalPluginCandidate` → `enableExternalPlugin`.
