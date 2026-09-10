@@ -642,36 +642,18 @@ var plugin = (() => {
     }
     return {
       start() {
-        const metro = B.metro;
-        patchSheetModule(metro.findByName?.("MessageLongPressActionSheet", false));
-        patchSheetModule(metro.findByTypeName?.("MessageLongPressActionSheet", false));
-        patchSheetModule(metro.findByDisplayName?.("MessageLongPressActionSheet", false));
-        r.hook(["MessageLongPressActionSheet"], (element) => {
-          const Component = element.type;
-          function Sheet(props) {
-            let tree;
-            try {
-              tree = typeof Component === "function" && !Component.prototype?.render ? Component(props) : h(Component, props);
-            } catch {
-              tree = h(Component, props);
-            }
-            const file = (props.message?.attachments || []).find(previewable);
-            return file ? inject(tree, file) : tree;
-          }
-          return h(Sheet, element.props);
-        });
       },
       stop() {
         cache.clear();
       },
       Settings() {
-        return h(Page, { title: "PreviewFile" }, h(Text, null, "Hold a message with a text file. View file is inserted under View Raw on MessageLongPressActionSheet using Snow jsx.onJsxCreate, findByName, and patcher.after. Opens a Codeblock window with up to 100 lines."));
+        return h(Page, { title: "PreviewFile" }, h(Text, null, "Unavailable until Snow is open source."));
       },
       load
     };
   }
 
   // PreviewFile.entry.js
-  var PreviewFile_entry_default = register({ "id": "mime.previewfile", "name": "PreviewFile", "description": "View file under View Raw on the message long-press sheet.", "version": "2.2.7", "authors": [{ "name": "mafu", "id": "519760564755365888" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PreviewFile" }, PreviewFile);
+  var PreviewFile_entry_default = register({ "id": "mime.previewfile", "name": "PreviewFile", "description": "Unavailable until Snow is open source.", "version": "2.2.8", "authors": [{ "name": "mafu", "id": "519760564755365888" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PreviewFile" }, PreviewFile);
   return __toCommonJS(PreviewFile_entry_exports);
 })();

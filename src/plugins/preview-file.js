@@ -79,25 +79,9 @@ export default function PreviewFile(r) {
         });
     }
     return {
-        start() {
-            const metro = B.metro;
-            patchSheetModule(metro.findByName?.('MessageLongPressActionSheet', false));
-            patchSheetModule(metro.findByTypeName?.('MessageLongPressActionSheet', false));
-            patchSheetModule(metro.findByDisplayName?.('MessageLongPressActionSheet', false));
-            r.hook(['MessageLongPressActionSheet'], (element) => {
-                const Component = element.type;
-                function Sheet(props) {
-                    let tree;
-                    try { tree = typeof Component === 'function' && !Component.prototype?.render ? Component(props) : h(Component, props); }
-                    catch { tree = h(Component, props); }
-                    const file = (props.message?.attachments || []).find(previewable);
-                    return file ? inject(tree, file) : tree;
-                }
-                return h(Sheet, element.props);
-            });
-        },
+        start() {},
         stop() { cache.clear(); },
-        Settings() { return h(Page, { title: 'PreviewFile' }, h(Text, null, 'Hold a message with a text file. View file is inserted under View Raw on MessageLongPressActionSheet using Snow jsx.onJsxCreate, findByName, and patcher.after. Opens a Codeblock window with up to 100 lines.')); },
+        Settings() { return h(Page, { title: 'PreviewFile' }, h(Text, null, 'Unavailable until Snow is open source.')); },
         load,
     };
 }

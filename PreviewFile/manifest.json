@@ -2,10 +2,10 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.previewfile",
-  "version": "2.2.7",
+  "version": "2.2.8",
   "display": {
     "name": "PreviewFile",
-    "description": "View file under View Raw on the message long-press sheet.",
+    "description": "Unavailable until Snow is open source.",
     "authors": [
       {
         "name": "mafu",

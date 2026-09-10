@@ -112,8 +112,8 @@
     "module": "preview-file",
     "id": "mime.previewfile",
     "name": "PreviewFile",
-    "description": "View file under View Raw on the message long-press sheet.",
-    "version": "2.2.7",
+    "description": "Unavailable until Snow is open source.",
+    "version": "2.2.8",
     "authors": [
       {
         "name": "mafu",
@@ -126,22 +126,6 @@
     ],
     "license": "GPL-3.0-or-later",
     "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PreviewFile"
-  },
-  {
-    "folder": "ReplyToStatus",
-    "module": "reply-to-status",
-    "id": "mime.replytostatus",
-    "name": "ReplyToStatus",
-    "description": "Reply button on the top-right of the profile card.",
-    "version": "2.2.7",
-    "authors": [
-      {
-        "name": "Mime | N0_.q3",
-        "id": "957164619061932045"
-      }
-    ],
-    "license": "MIT",
-    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ReplyToStatus"
   },
   {
     "folder": "TestPlugin",

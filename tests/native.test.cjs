@@ -28,7 +28,7 @@ async function harness(defaults = {}, modules = []) {
 }
 test('all Bunny spec-3 artifacts export definePlugin and match the hosted manifest', async()=>{
     const registry=JSON.parse(fs.readFileSync(path.join(root,'src/registry.json')));
-    assert.equal(registry.length,17);
+    assert.equal(registry.length,16);
     for(const meta of registry){
         const manifest=JSON.parse(fs.readFileSync(path.join(root,meta.folder,'manifest.json')));
         const bytes=fs.readFileSync(path.join(root,meta.folder,manifest.main));
@@ -67,24 +67,6 @@ test('GifRoulette registers once, sends once by return, and handles empty favori
     assert.equal(commands.size,1); assert.equal(typeof commands.get('gifroulette').id,'string');
     assert.deepEqual(await commands.get('gifroulette').execute([]),{content:'https://media/a.gif'});await r.dispose();assert.equal(commands.size,0);
     const empty=await harness(); factory(empty.r).start(); assert.equal(await empty.commands.get('gifroulette').execute([]),undefined);assert.equal(empty.toasts.length,1);await empty.r.dispose();
-});
-test('ReplyToStatus has one button across nested and sibling profile hooks; unmount releases ownership',async()=>{
-    const {default:factory,normalizeStatus,statusParts}=await import('../src/plugins/reply-to-status.js');
-    const {r,sheets}=await harness({},[{storeName:'UserStore',getCurrentUser:()=>({id:'self'})}]);const p=factory(r),status={text:'Hello <:wave:123456789012345678> <123456789012345679>'};
-    assert.equal(normalizeStatus([{type:4,state:'hey',emoji:{name:'🔥'}}]).emojiName,'🔥');assert.equal(statusParts(status).filter(p=>p.id).length,2);
-    let tree;
-    await Renderer.act(async()=>{tree=Renderer.create(React.createElement('View',null,
-        React.createElement(p.ProfileGate,{userId:'other',status},React.createElement(p.ProfileGate,{userId:'other',status},React.createElement('Profile'))),
-        React.createElement(p.ProfileGate,{userId:'other',status},React.createElement('Header'))));});
-    const buttons=()=>tree.root.findAllByType('Button').filter(b=>b.props.text==='Reply to Status');assert.equal(buttons().length,1);
-    await Renderer.act(async()=>buttons()[0].props.onPress()); assert.equal(sheets.size,1);
-    await Renderer.act(async()=>tree.unmount()); p.stop(); await r.dispose(); assert.equal(sheets.size,0);
-});
-test('ReplyToStatus sheet cleanup permits reopening and sends one quoted DM with no mentions',async()=>{
-    const {default:factory}=await import('../src/plugins/reply-to-status.js'); const {r}=await harness();const p=factory(r),requests=[];r.discord=async(url,opts)=>{requests.push([url,JSON.parse(opts.body)]);return{json:()=>({id:'dm'})};};let tree,closed=0;
-    await Renderer.act(async()=>{tree=Renderer.create(React.createElement(p.Composer,{userId:'other',status:{text:'hey',emojiName:'🔥'},close:()=>closed++}));});
-    const button=tree.root.findAllByType('Button').find(b=>b.props.text==='👍'); await Renderer.act(async()=>{button.props.onPress();button.props.onPress();await tick();});
-    assert.equal(requests.length,2);assert.equal(closed,1);assert.deepEqual(requests[1][1].allowed_mentions,{parse:[]});assert.match(requests[1][1].content,/🔥 hey/);await Renderer.act(async()=>tree.unmount());await r.dispose();
 });
 test('DebugConsole formats circular data, groups repeats, redacts credentials, caps and clears',async()=>{
     const {default:factory,redact}=await import('../src/plugins/debug-console.js'); const {r}=await harness();const p=factory(r),obj={};obj.self=obj;p.capture('warn',[obj]);assert.match(p.dump(),/Circular/);p.capture('warn',[obj]);assert.equal(p.getEntries()[0].count,2);
