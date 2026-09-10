@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.replytostatus",
-  "version": "2.2.6",
+  "version": "2.2.7",
   "display": {
     "name": "ReplyToStatus",
     "description": "Reply button on the top-right of the profile card.",

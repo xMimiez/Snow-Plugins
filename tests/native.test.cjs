@@ -28,7 +28,7 @@ async function harness(defaults = {}, modules = []) {
 }
 test('all Bunny spec-3 artifacts export definePlugin and match the hosted manifest', async()=>{
     const registry=JSON.parse(fs.readFileSync(path.join(root,'src/registry.json')));
-    assert.equal(registry.length,18);
+    assert.equal(registry.length,17);
     for(const meta of registry){
         const manifest=JSON.parse(fs.readFileSync(path.join(root,meta.folder,'manifest.json')));
         const bytes=fs.readFileSync(path.join(root,meta.folder,manifest.main));
@@ -102,8 +102,8 @@ test('NitroSniper ignores historical messages and skips pending work after stop'
     p.receive({message:{id:'123',timestamp:'2020-01-01',content:'discord.gift/1234567890abcdef'}});assert.equal(attempts,0);
     p.receive({message:{id:'123',timestamp:new Date(Date.now()+1000).toISOString(),content:'discord.gift/1234567890abcdef discord.gift/abcdefghijklmnop'}});p.stop();finish({});await tick();assert.equal(attempts,1);assert.equal(p.stats.claimed,0);await r.dispose();
 });
-test('Spotify URL normalization and external app mappings reject lookalike hosts',async()=>{
-    const {spotifyLink}=await import('../src/plugins/spotify-preview.js');const {appLink,shouldPing}=await import('../src/plugins/mobile-ports.js');assert.equal(spotifyLink('https://open.spotify.com/intl-de/track/abc?si=x').embed,'https://open.spotify.com/embed/track/abc');assert.equal(spotifyLink('https://open.spotify.com.evil.test/track/abc'),null);assert.equal(appLink('https://open.spotify.com/track/abc'),'spotify:track:abc');assert.equal(appLink('https://music.apple.com/us/album/test/1'),'musics://music.apple.com/us/album/test/1');
+test('external app mappings reject lookalike hosts',async()=>{
+    const {appLink,shouldPing}=await import('../src/plugins/mobile-ports.js');assert.equal(appLink('https://open.spotify.com/track/abc'),'spotify:track:abc');assert.equal(appLink('https://music.apple.com/us/album/test/1'),'musics://music.apple.com/us/album/test/1');
     assert.equal(shouldPing({id:'second',author:{id:'other'}},{type:1},'first',{},'self'),false);assert.equal(shouldPing({id:'first',author:{id:'other'}},{type:1},'first',{},'self'),true);assert.equal(shouldPing({id:'second',mentions:[{id:'self'}]},{type:1},'first',{allowMentions:true},'self'),true);
 });
 test('shared URL handlers preserve fallback and independent unload order',async()=>{

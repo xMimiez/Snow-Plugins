@@ -589,6 +589,7 @@ var plugin = (() => {
     function Viewer({ a, text, close }) {
       const shown = String(text).split("\n").slice(0, 100).join("\n");
       const total = String(text).split("\n").length;
+      const Codeblock = C.Codeblock;
       return h(
         Page,
         { title: a.filename || "View file", close },
@@ -597,52 +598,54 @@ var plugin = (() => {
           { style: { flex: 1 } },
           h(Button, { text: "Copy file text", variant: "secondary", onPress: () => r.copy(shown) }),
           h(Text, { muted: true }, `Showing ${Math.min(100, total)} of ${total} lines`),
-          h(
-            RN.View,
-            { style: { margin: 8, padding: 12, borderRadius: 8, backgroundColor: "#00000040" } },
-            h(Text, { selectable: true, style: { fontFamily: RN.Platform?.OS === "ios" ? "Menlo" : "monospace" } }, shown)
-          )
+          Codeblock ? h(Codeblock, { selectable: true, style: { margin: 8 } }, shown) : h(Text, { selectable: true, style: { fontFamily: RN.Platform?.OS === "ios" ? "Menlo" : "monospace", margin: 8 } }, shown)
         )
       );
     }
     async function openViewer(file) {
       try {
-        B.ui.sheets.hideSheet?.();
+        r.find("hideActionSheet")?.hideActionSheet?.();
       } catch {
       }
       const text = await load(file);
       r.open("file", Viewer, { a: file, text });
     }
     function viewRow(file) {
-      const Row = D.ActionSheetRow || D.TableRow || C.TableRow;
-      const icon = D.TableRow?.Icon && C.RowIcon ? h(C.RowIcon, { name: "FileIcon" }) : void 0;
+      const Row = D.ActionSheetRow || D.TableRow;
       if (!Row) return null;
+      const icon = C.RowIcon ? h(C.RowIcon, { name: "FileIcon" }) : void 0;
       return h(Row, { label: "View file", icon, onPress: () => {
         openViewer(file).catch((e) => r.error("View file", e));
       } });
     }
-    function insertRow(tree, file) {
-      if (!tree || typeof tree !== "object" || !file) return tree;
-      const kids = React.Children.toArray(tree.props?.children);
-      if (!kids.length) return tree;
-      if (kids.some((child) => child?.props?.label === "View file")) return tree;
-      const rawAt = kids.findIndex((child) => /view\s*raw/i.test(String(child?.props?.label || "")));
-      const hasRows = rawAt >= 0 || kids.some((child) => child?.props?.label);
-      if (hasRows) {
-        const row = viewRow(file);
-        const next = rawAt >= 0 ? [...kids.slice(0, rawAt + 1), row, ...kids.slice(rawAt + 1)] : [...kids, row];
-        return React.cloneElement(tree, { children: next });
-      }
-      let changed = false;
-      const mapped = kids.map((child) => {
-        const out = insertRow(child, file);
-        if (out !== child) changed = true;
-        return out;
+    function inject(tree, file) {
+      if (!tree || !file) return tree;
+      const find = B.utils?.findInReactTree;
+      const buttons = find ? find(tree, (node) => Array.isArray(node) && node.some((child) => child?.props?.label)) : null;
+      if (!buttons || buttons.some((row2) => row2?.props?.label === "View file")) return tree;
+      const row = viewRow(file);
+      if (!row) return tree;
+      const rawAt = buttons.findIndex((child) => /view\s*raw/i.test(String(child?.props?.label || "")));
+      if (rawAt >= 0) buttons.splice(rawAt + 1, 0, row);
+      else buttons.push(row);
+      return tree;
+    }
+    function patchSheetModule(mod) {
+      if (!mod) return;
+      const key = typeof mod.default === "function" ? "default" : typeof mod.type === "function" ? "type" : null;
+      if (!key) return;
+      r.patch("after", mod, key, (args, tree) => {
+        const message = args?.[0]?.message;
+        const file = (message?.attachments || []).find(previewable);
+        return file ? inject(tree, file) : tree;
       });
-      return changed ? React.cloneElement(tree, { children: mapped }) : tree;
     }
     return {
       start() {
+        const metro = B.metro;
+        patchSheetModule(metro.findByName?.("MessageLongPressActionSheet", false));
+        patchSheetModule(metro.findByTypeName?.("MessageLongPressActionSheet", false));
+        patchSheetModule(metro.findByDisplayName?.("MessageLongPressActionSheet", false));
         r.hook(["MessageLongPressActionSheet"], (element) => {
           const Component = element.type;
           function Sheet(props) {
@@ -653,7 +656,7 @@ var plugin = (() => {
               tree = h(Component, props);
             }
             const file = (props.message?.attachments || []).find(previewable);
-            return file ? insertRow(tree, file) || tree : tree;
+            return file ? inject(tree, file) : tree;
           }
           return h(Sheet, element.props);
         });
@@ -662,13 +665,13 @@ var plugin = (() => {
         cache.clear();
       },
       Settings() {
-        return h(Page, { title: "PreviewFile" }, h(Text, null, "Hold a message with a text file. View file is added under View Raw on Snow\u2019s MessageLongPressActionSheet via jsx.onJsxCreate. Opens a window with up to 100 lines."));
+        return h(Page, { title: "PreviewFile" }, h(Text, null, "Hold a message with a text file. View file is inserted under View Raw on MessageLongPressActionSheet using Snow jsx.onJsxCreate, findByName, and patcher.after. Opens a Codeblock window with up to 100 lines."));
       },
       load
     };
   }
 
   // PreviewFile.entry.js
-  var PreviewFile_entry_default = register({ "id": "mime.previewfile", "name": "PreviewFile", "description": "View file under View Raw on the message long-press sheet.", "version": "2.2.6", "authors": [{ "name": "mafu", "id": "519760564755365888" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PreviewFile" }, PreviewFile);
+  var PreviewFile_entry_default = register({ "id": "mime.previewfile", "name": "PreviewFile", "description": "View file under View Raw on the message long-press sheet.", "version": "2.2.7", "authors": [{ "name": "mafu", "id": "519760564755365888" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PreviewFile" }, PreviewFile);
   return __toCommonJS(PreviewFile_entry_exports);
 })();
