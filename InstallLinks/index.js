@@ -700,50 +700,158 @@ var plugin = (() => {
       if (value && typeof value === "object" && value !== node.content) rewriteNode(value);
     }
   }
-  function findSnowInstallApi(r) {
-    const names = ["previewExternalPlugin", "installExternalPluginCandidate", "enableExternalPlugin"];
-    const bags = [];
-    const B = r.B || {};
-    const snow = typeof globalThis !== "undefined" && globalThis.snow || r.host || {};
-    bags.push(
-      B,
-      B.plugins,
-      B.plugin,
-      B.managers?.plugins,
-      B.pluginManager,
-      B.api,
-      B.api?.plugins,
-      B.api?.native,
-      snow,
-      snow.plugins,
-      snow.api,
-      snow.api?.plugins,
-      snow.api?.native,
-      snow.runtime,
-      snow.runtime?.plugins,
-      r.find("previewExternalPlugin", "installExternalPluginCandidate", "enableExternalPlugin"),
-      r.find("previewExternalPlugin", "installExternalPluginCandidate"),
-      r.find("previewExternalPlugin"),
-      r.find("installExternalPluginCandidate"),
-      r.find("enableExternalPlugin")
-    );
+  function isStubFn(fn) {
+    if (typeof fn !== "function") return true;
     try {
-      if (typeof r.metro?.find === "function") bags.push(r.metro.find((mod) => mod && names.every((name) => typeof mod[name] === "function")));
+      const src = Function.prototype.toString.call(fn);
+      if (/Compatibility API|unavailable in Snow|native\.previewExternalPlugin/i.test(src)) return true;
     } catch {
     }
-    const api = {};
-    for (const bag of bags) {
-      if (!bag) continue;
+    return false;
+  }
+  function isUnavailableError(error) {
+    return /Compatibility API|unavailable in Snow/i.test(error?.message || String(error));
+  }
+  function liveFn(bag, name) {
+    return bag && typeof bag[name] === "function" && !isStubFn(bag[name]) ? bag[name].bind(bag) : null;
+  }
+  function candidateModules(r) {
+    const B = r.B || {};
+    const snow = typeof globalThis !== "undefined" && globalThis.snow || r.host || {};
+    const skip = new Set([B.native, B.api?.native, snow.native, snow.api?.native].filter(Boolean));
+    const out = [];
+    const add = (value) => {
+      if (!value || typeof value !== "object" || skip.has(value) || out.includes(value)) return;
+      out.push(value);
+    };
+    add(B.plugins);
+    add(B.managers?.plugins);
+    add(B.pluginManager);
+    add(B.api?.plugins);
+    add(snow.plugins);
+    add(snow.api?.plugins);
+    add(snow.runtime);
+    add(snow.runtime?.plugins);
+    if (liveFn(snow.api, "previewExternalPlugin")) add(snow.api);
+    if (liveFn(B.api, "previewExternalPlugin")) add(B.api);
+    const metro = r.metro || {};
+    for (const finder of ["findByPropsAll", "findAll"]) {
+      if (typeof metro[finder] !== "function") continue;
+      try {
+        const matches = finder === "findAll" ? metro.findAll((mod) => liveFn(mod, "previewExternalPlugin") && liveFn(mod, "installExternalPluginCandidate")) : metro.findByPropsAll("previewExternalPlugin", "installExternalPluginCandidate", "enableExternalPlugin") || metro.findByPropsAll("previewExternalPlugin", "installExternalPluginCandidate") || metro.findByPropsAll("previewExternalPlugin");
+        if (Array.isArray(matches)) matches.forEach(add);
+      } catch {
+      }
+    }
+    add(r.find("previewExternalPlugin", "installExternalPluginCandidate", "enableExternalPlugin"));
+    add(r.find("previewExternalPlugin", "installExternalPluginCandidate"));
+    add(r.find("promptExternalPluginInstall"));
+    add(r.find("openExternalPluginInstall"));
+    add(r.find("showExternalPluginInstall"));
+    add(r.find("openInstallFromURL"));
+    add(r.find("installFromURL", "previewExternalPlugin"));
+    return out.filter((mod) => !isStubFn(mod.previewExternalPlugin || (() => {
+    })) || liveFn(mod, "promptExternalPluginInstall") || liveFn(mod, "openExternalPluginInstall") || liveFn(mod, "showExternalPluginInstall"));
+  }
+  function findSnowInstallApi(r) {
+    const names = ["previewExternalPlugin", "installExternalPluginCandidate", "enableExternalPlugin"];
+    for (const bag of candidateModules(r)) {
+      if (names.every((name) => liveFn(bag, name))) {
+        const api2 = { module: bag };
+        for (const name of names) api2[name] = liveFn(bag, name);
+        return api2;
+      }
+    }
+    const api = { module: null };
+    for (const bag of candidateModules(r)) {
       for (const name of names) {
-        if (!api[name] && typeof bag[name] === "function") api[name] = bag[name].bind(bag);
+        if (!api[name] && liveFn(bag, name)) {
+          api[name] = liveFn(bag, name);
+          api.module = api.module || bag;
+        }
       }
     }
     if (names.some((name) => typeof api[name] !== "function")) return null;
     return api;
   }
+  function installerUiFns(module) {
+    if (!module) return [];
+    const preferred = [
+      "promptExternalPluginInstall",
+      "promptInstallExternalPlugin",
+      "openExternalPluginInstall",
+      "openExternalPluginInstaller",
+      "showExternalPluginInstall",
+      "showInstallExternalPlugin",
+      "presentExternalPluginInstall",
+      "beginExternalPluginInstall",
+      "startExternalPluginInstall",
+      "reviewExternalPlugin",
+      "confirmExternalPluginInstall",
+      "installExternalPluginFromUrl",
+      "installExternalPluginFromURL",
+      "openInstallFromUrl",
+      "openInstallFromURL",
+      "installFromUrl",
+      "installFromURL"
+    ];
+    const found = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const key of preferred) {
+      const fn = liveFn(module, key);
+      if (fn) {
+        found.push({ key, fn });
+        seen.add(key);
+      }
+    }
+    for (const key of Object.keys(module)) {
+      if (seen.has(key) || !liveFn(module, key)) continue;
+      if (/^(prompt|open|show|present|confirm|begin|start|review)/i.test(key) && /install|externalPlugin|pluginInstall/i.test(key)) {
+        found.push({ key, fn: liveFn(module, key) });
+      }
+    }
+    return found;
+  }
+  async function openOfficialInstall(r, manifest) {
+    const url = manifestUrl(manifest);
+    const api = findSnowInstallApi(r);
+    const modules = [api?.module, ...candidateModules(r)].filter(Boolean);
+    const callers = [];
+    for (const module of modules) {
+      for (const item of installerUiFns(module)) {
+        if (!callers.some((existing) => existing.fn === item.fn)) callers.push(item);
+      }
+    }
+    for (const { key, fn } of callers) {
+      try {
+        await fn(url);
+        return { via: key };
+      } catch (error) {
+        if (isUnavailableError(error)) continue;
+        throw error;
+      }
+    }
+    const Comp = r.byName("ExternalPluginInstallModal") || r.byName("InstallExternalPluginModal") || r.byName("PluginInstallConfirmation") || r.byName("InstallPluginAlert") || r.byName("ExternalPluginPreview");
+    if (Comp && r.api.ui?.openAlert) {
+      r.api.ui.openAlert("install-external-plugin", r.h(Comp, { url, manifestUrl: url, sourceUrl: url }));
+      return { via: "openAlert" };
+    }
+    if (!api) throw new Error("Snow installer was not found. Compatibility native.previewExternalPlugin is a stub and cannot install plugins.");
+    const candidate = await api.previewExternalPlugin(url);
+    for (const { key, fn } of installerUiFns(api.module)) {
+      try {
+        await fn(candidate);
+        return { via: key, candidate };
+      } catch (error) {
+        if (isUnavailableError(error)) continue;
+        throw error;
+      }
+    }
+    return { via: "previewExternalPlugin", candidate, needsConfirm: true };
+  }
   async function installExternalPlugin(r, manifest, candidate) {
     const api = findSnowInstallApi(r);
-    if (!api) throw new Error("Snow install API not found (previewExternalPlugin / installExternalPluginCandidate / enableExternalPlugin)");
+    if (!api) throw new Error("Snow installer was not found. Compatibility native.previewExternalPlugin is a stub and cannot install plugins.");
     const url = manifestUrl(manifest);
     const preview = candidate || await api.previewExternalPlugin(url);
     const installed = await api.installExternalPluginCandidate(preview);
@@ -822,21 +930,15 @@ var plugin = (() => {
     async function openPrompt(link) {
       const url = manifestUrl(link.url);
       const resolved = { ...link, url };
-      let info = "";
-      let candidate;
-      const api = findSnowInstallApi(r);
-      if (api) {
-        try {
-          candidate = await api.previewExternalPlugin(url);
-          info = candidateLabel(candidate) || "Snow previewed this plugin.";
-        } catch (error) {
-          info = "previewExternalPlugin failed: " + (error?.message || error);
-        }
-      } else {
-        info = "Could not find previewExternalPlugin / installExternalPluginCandidate / enableExternalPlugin on this Snow build.";
+      try {
+        const result = await openOfficialInstall(r, url);
+        if (!result.needsConfirm) return;
+        close?.();
+        close = r.open("install", Prompt, { link: resolved, info: candidateLabel(result.candidate), candidate: result.candidate });
+      } catch (error) {
+        r.copy(url);
+        r.toast(error?.message || String(error));
       }
-      close?.();
-      close = r.open("install", Prompt, { link: resolved, info, candidate });
     }
     function handle(url) {
       const link = parseInstallLink(url);
@@ -933,6 +1035,6 @@ var plugin = (() => {
   InstallLinks.defaults = {};
 
   // InstallLinks.entry.js
-  var InstallLinks_entry_default = register({ "id": "mime.installlinks", "name": "InstallLinks", "description": "Send and open snow:// install-plugin links.", "version": "1.0.5", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/InstallLinks" }, InstallLinks);
+  var InstallLinks_entry_default = register({ "id": "mime.installlinks", "name": "InstallLinks", "description": "Send and open snow:// install-plugin links.", "version": "1.0.6", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/InstallLinks" }, InstallLinks);
   return __toCommonJS(InstallLinks_entry_exports);
 })();
