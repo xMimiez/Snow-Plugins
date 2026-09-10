@@ -25,17 +25,17 @@ These releases use **Bunny spec 3**. Install from the `manifest.json` URL, then 
 | [ValidUser](ValidUser/) | 1.2.0 | Auto-resolve unknown mentions and replace @Unknown User. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/ValidUser/manifest.json) |
 | [OpenInApp](OpenInApp/) | 1.2.0 | Open Spotify, Steam, Telegram, Instagram, TikTok and other apps. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/OpenInApp/manifest.json) |
 | [PauseInvitesForever](PauseInvitesForever/) | 1.2.0 | `/pauseinvites` and `/resumeinvites` with separate confirmations. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/PauseInvitesForever/manifest.json) |
-| [InstallLinks](InstallLinks/) | 1.0.0 | `snow://` install-plugin links (Enmity-style). `/snowlink` and `/installplugin`. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/InstallLinks/manifest.json) |
+| [InstallLinks](InstallLinks/) | 1.0.1 | Clickable https install links. Intercepts `snow://` and `manifest.json` taps. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/InstallLinks/manifest.json) |
 
 ## Snow install links
 
-After **InstallLinks** is enabled, these are equivalent to Enmity’s `enmity://…command=install-plugin` URLs:
+Discord’s native chat **does not autolink `snow://`**. Send a normal https plugin URL instead (or use `/snowlink`, which posts a markdown link):
 
 ```text
-snow://snow?id=-1&command=install-plugin&params=https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/GifRoulette/manifest.json
+[Install Snow plugin](https://github.com/xMimiez/Snow-Plugins/raw/refs/heads/main/Decor/manifest.json)
 ```
 
-`/snowlink url:` builds that string. `/installplugin url:` opens the same review sheet. Taps inside Discord are intercepted. Opening `snow://` from Safari only works if the Snow app registered that scheme (a plugin cannot add an iOS URL type). Snow installs **manifest.json** URLs, not Enmity `.js` bundles. Documented `bunny.plugin.install` throws; the plugin tries any runtime installer it can find, then copies the HTTPS URL for Plugins → Install from URL.
+Tapping that https `manifest.json` URL opens the install sheet. Already-sent `snow://…params=https%3A%2F%2F…` messages are rewritten in native rows to the decoded https URL so they can be tapped. `/installplugin url:` still accepts either form.
 
 ## Development
 
