@@ -344,7 +344,7 @@
     "id": "mime.installlinks",
     "name": "InstallLinks",
     "description": "Clickable https install links for Snow plugins; intercepts snow:// and manifest.json taps.",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "authors": [
       {
         "name": "Mime | N0_.q3",

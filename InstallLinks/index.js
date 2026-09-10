@@ -674,38 +674,71 @@ var plugin = (() => {
     if (url.endsWith("manifest.json") || url.endsWith("/")) return "possible-manifest";
     return "unknown";
   }
-  function collectInstallers(r, url) {
-    const found = [];
-    const seen = /* @__PURE__ */ new Set();
-    const add = (label, fn) => {
-      if (typeof fn !== "function" || seen.has(fn)) return;
-      seen.add(fn);
-      found.push({ label, run: () => fn(url) });
-    };
+  function manifestUrl(url) {
+    const href = sanitizePluginUrl(url) || url;
+    if (!href) return href;
+    if (/\/$/.test(href)) return href + "manifest.json";
+    return href;
+  }
+  function findSnowInstallApi(r) {
+    const names = ["previewExternalPlugin", "installExternalPluginCandidate", "enableExternalPlugin"];
+    const bags = [];
     const B = r.B || {};
     const snow = typeof globalThis !== "undefined" && globalThis.snow || r.host || {};
-    const objects = [
-      ["plugins", B.plugins],
-      ["managers.plugins", B.managers?.plugins],
-      ["pluginManager", B.pluginManager],
-      ["plugin", B.plugin],
-      ["snow.plugins", snow.plugins],
-      ["snow.api.plugins", snow.api?.plugins],
-      ["snow.runtime.plugins", snow.runtime?.plugins],
-      ["metro.installPlugin", r.find("installPlugin", "uninstallPlugin")],
-      ["metro.installFromURL", r.find("installFromURL")],
-      ["metro.installPluginFromURL", r.find("installPluginFromURL")],
-      ["metro.installExternalPlugin", r.find("installExternalPlugin")],
-      ["metro.installBunnyPlugin", r.find("installBunnyPlugin")],
-      ["metro.enablePlugin", r.find("installPlugin", "enablePlugin")]
-    ];
-    for (const [label, object] of objects) {
-      if (!object) continue;
-      for (const key of ["installPluginFromURL", "installFromURL", "installExternalPlugin", "installBunnyPlugin", "installPlugin", "install", "fetchPlugin"]) {
-        if (typeof object[key] === "function") add(label + "." + key, object[key].bind(object));
+    bags.push(
+      B,
+      B.plugins,
+      B.plugin,
+      B.managers?.plugins,
+      B.pluginManager,
+      B.api,
+      B.api?.plugins,
+      B.api?.native,
+      snow,
+      snow.plugins,
+      snow.api,
+      snow.api?.plugins,
+      snow.api?.native,
+      snow.runtime,
+      snow.runtime?.plugins,
+      r.find("previewExternalPlugin", "installExternalPluginCandidate", "enableExternalPlugin"),
+      r.find("previewExternalPlugin", "installExternalPluginCandidate"),
+      r.find("previewExternalPlugin"),
+      r.find("installExternalPluginCandidate"),
+      r.find("enableExternalPlugin")
+    );
+    try {
+      if (typeof r.metro?.find === "function") bags.push(r.metro.find((mod) => mod && names.every((name) => typeof mod[name] === "function")));
+    } catch {
+    }
+    const api = {};
+    for (const bag of bags) {
+      if (!bag) continue;
+      for (const name of names) {
+        if (!api[name] && typeof bag[name] === "function") api[name] = bag[name].bind(bag);
       }
     }
-    return found;
+    if (names.some((name) => typeof api[name] !== "function")) return null;
+    return api;
+  }
+  async function installExternalPlugin(r, manifest, candidate) {
+    const api = findSnowInstallApi(r);
+    if (!api) throw new Error("Snow install API not found (previewExternalPlugin / installExternalPluginCandidate / enableExternalPlugin)");
+    const url = manifestUrl(manifest);
+    const preview = candidate || await api.previewExternalPlugin(url);
+    const installed = await api.installExternalPluginCandidate(preview);
+    const runtimeId = installed?.runtimeId ?? installed?.id ?? preview?.runtimeId;
+    if (runtimeId == null) throw new Error("Install succeeded but no runtimeId was returned");
+    await api.enableExternalPlugin(runtimeId);
+    return { preview, installed, runtimeId };
+  }
+  function candidateLabel(candidate) {
+    if (!candidate || typeof candidate !== "object") return "";
+    const display = candidate.display || candidate.manifest?.display || candidate.manifest || candidate;
+    const name = display.name || candidate.name || candidate.id || "";
+    const version = display.version || candidate.version || candidate.manifest?.version || "";
+    const description = display.description || candidate.description || "";
+    return [name && version ? `${name} ${version}` : name, description].filter(Boolean).join("\n");
   }
   function expandUrlRegex(value) {
     if (!(value instanceof RegExp) || !/https\?:/.test(value.source) || /snow\|enmity|snow\?:/.test(value.source)) return value;
@@ -749,32 +782,19 @@ var plugin = (() => {
   function InstallLinks(r) {
     const { h, React } = r, { Page, Text, Button, Input, Toggle } = ui(r);
     let close;
-    function Prompt({ link, info, close: dismiss }) {
+    function Prompt({ link, info, candidate, close: dismiss }) {
       const [busy, setBusy] = React.useState(false);
       const [status, setStatus] = React.useState(info || "");
       async function install2() {
         if (busy) return;
         setBusy(true);
         try {
-          const installers = collectInstallers(r, link.url);
-          if (!installers.length) {
-            r.copy(link.url);
-            setStatus("Snow\u2019s plugin API does not expose install-from-URL to plugins. The HTTPS URL was copied \u2014 open Snow \u2192 Plugins \u2192 Install from URL and paste it.");
-            return;
-          }
-          const errors = [];
-          for (const installer of installers) {
-            try {
-              await installer.run();
-              r.toast("Install started via " + installer.label);
-              setStatus("Install started with " + installer.label + ". Enable the plugin on the Plugins page if it stays disabled.");
-              return;
-            } catch (error) {
-              errors.push(installer.label + ": " + (error?.message || error));
-            }
-          }
+          const result = await installExternalPlugin(r, link.url, candidate);
+          r.toast("Installed and enabled " + (result.runtimeId || "plugin"));
+          setStatus("Installed and enabled as " + result.runtimeId + ".");
+        } catch (error) {
           r.copy(link.url);
-          setStatus("No working installer method. Copied URL.\n" + errors.slice(0, 6).join("\n"));
+          setStatus((error?.message || String(error)) + "\nHTTPS URL copied. You can still paste it in Snow \u2192 Plugins \u2192 Install from URL.");
         } finally {
           setBusy(false);
         }
@@ -797,19 +817,31 @@ var plugin = (() => {
       );
     }
     async function openPrompt(link) {
+      const url = manifestUrl(link.url);
+      const resolved = { ...link, url };
       let info = "";
-      try {
-        const target = /manifest\.json$/i.test(link.url) || /\/$/.test(link.url) ? /\/$/.test(link.url) ? link.url + "manifest.json" : link.url : link.url;
-        const data = await r.request(target, {}, 8e3, 2e5);
-        const kind = classifyArtifact(data.text, target);
-        if (kind === "enmity-plugin" || kind === "unknown-js") info = "This file looks like a standalone JS plugin (often Enmity), not a Snow manifest. Snow installs from a manifest.json URL.";
-        else if (kind === "snow-manifest" || kind === "snow-native-manifest") info = "This looks like a Snow plugin manifest.";
-        else if (kind === "snow-bundle") info = "This looks like a Snow plugin bundle. Prefer the folder or manifest.json URL.";
-      } catch (error) {
-        info = "Could not prefetch the file: " + (error.message || error);
+      let candidate;
+      const api = findSnowInstallApi(r);
+      if (api) {
+        try {
+          candidate = await api.previewExternalPlugin(url);
+          info = candidateLabel(candidate) || "Snow previewed this plugin.";
+        } catch (error) {
+          info = "previewExternalPlugin failed: " + (error?.message || error);
+        }
+      } else {
+        try {
+          const data = await r.request(url, {}, 8e3, 2e5);
+          const kind = classifyArtifact(data.text, url);
+          if (kind === "enmity-plugin" || kind === "unknown-js") info = "This file looks like a standalone JS plugin (often Enmity), not a Snow manifest.";
+          else if (kind === "snow-manifest" || kind === "snow-native-manifest") info = "This looks like a Snow plugin manifest, but previewExternalPlugin was not found on this build.";
+          else info = "Could not find previewExternalPlugin / installExternalPluginCandidate / enableExternalPlugin on this Snow build.";
+        } catch (error) {
+          info = "Could not prefetch the file: " + (error.message || error);
+        }
       }
       close?.();
-      close = r.open("install", Prompt, { link, info });
+      close = r.open("install", Prompt, { link: resolved, info, candidate });
     }
     function handle(url) {
       const link = parseInstallLink(url);
@@ -913,6 +945,6 @@ var plugin = (() => {
   InstallLinks.defaults = { handleEnmity: true, interceptManifests: true };
 
   // InstallLinks.entry.js
-  var InstallLinks_entry_default = register({ "id": "mime.installlinks", "name": "InstallLinks", "description": "Clickable https install links for Snow plugins; intercepts snow:// and manifest.json taps.", "version": "1.0.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/InstallLinks" }, InstallLinks);
+  var InstallLinks_entry_default = register({ "id": "mime.installlinks", "name": "InstallLinks", "description": "Clickable https install links for Snow plugins; intercepts snow:// and manifest.json taps.", "version": "1.0.2", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/InstallLinks" }, InstallLinks);
   return __toCommonJS(InstallLinks_entry_exports);
 })();
