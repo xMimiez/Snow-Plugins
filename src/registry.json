@@ -344,7 +344,7 @@
     "id": "mime.installlinks",
     "name": "InstallLinks",
     "description": "Send and open snow:// install-plugin links.",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "authors": [
       {
         "name": "Mime | N0_.q3",

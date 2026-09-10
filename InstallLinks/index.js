@@ -593,13 +593,21 @@ var plugin = (() => {
 
   // project:src/plugins/install-links.js
   var SCHEME_RE = /snow:\/\/[^\s<>\]]+/gi;
+  var ZWSP = "\u200B";
+  function stripFormatChars(value) {
+    return String(value || "").replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, "");
+  }
+  function hideInnerHttps(value) {
+    return String(value).replace(/https:\/\//gi, "https:" + ZWSP + "//");
+  }
   function snowInstallLink(pluginUrl) {
     const url = sanitizePluginUrl(pluginUrl) || pluginUrl;
-    return "snow://snow?id=-1&command=install-plugin&params=" + String(url).replace(/&/g, "%26").replace(/#/g, "%23");
+    const params = String(url).replace(/&/g, "%26").replace(/#/g, "%23");
+    return hideInnerHttps("snow://snow?id=-1&command=install-plugin&params=" + params);
   }
   function parseInstallLink(value) {
     if (!value || typeof value !== "string") return null;
-    const trimmed = value.trim();
+    const trimmed = stripFormatChars(value.trim());
     let parsed;
     try {
       parsed = new URL(trimmed);
@@ -621,7 +629,7 @@ var plugin = (() => {
   }
   function sanitizePluginUrl(value) {
     if (!value) return null;
-    let text = String(value).trim();
+    let text = stripFormatChars(String(value).trim());
     try {
       text = decodeURIComponent(text);
     } catch {
@@ -653,11 +661,12 @@ var plugin = (() => {
     for (const match of text.matchAll(SCHEME_RE)) {
       if (!parseInstallLink(match[0])) continue;
       if (match.index > last) parts.push({ type: "text", content: text.slice(last, match.index) });
+      const raw = stripFormatChars(match[0]);
       parts.push({
         type: "link",
-        target: match[0],
-        url: match[0],
-        content: [{ type: "text", content: match[0] }]
+        target: raw,
+        url: raw,
+        content: [{ type: "text", content: hideInnerHttps(raw) }]
       });
       last = match.index + match[0].length;
     }
@@ -861,7 +870,7 @@ var plugin = (() => {
       start() {
         addUrlHandler(r, 200, (url) => {
           if (!parseInstallLink(url)) return false;
-          handle(url);
+          handle(stripFormatChars(url));
           return true;
         });
         patchAutolink(r);
@@ -873,7 +882,7 @@ var plugin = (() => {
         const linking = r.RN.Linking;
         if (linking?.canOpenURL) {
           r.patch("instead", linking, "canOpenURL", (args, next) => {
-            if (/^snow:/i.test(String(args[0] || ""))) return Promise.resolve(true);
+            if (/^snow:/i.test(stripFormatChars(String(args[0] || "")))) return Promise.resolve(true);
             return next(...args);
           });
         }
@@ -924,6 +933,6 @@ var plugin = (() => {
   InstallLinks.defaults = {};
 
   // InstallLinks.entry.js
-  var InstallLinks_entry_default = register({ "id": "mime.installlinks", "name": "InstallLinks", "description": "Send and open snow:// install-plugin links.", "version": "1.0.4", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/InstallLinks" }, InstallLinks);
+  var InstallLinks_entry_default = register({ "id": "mime.installlinks", "name": "InstallLinks", "description": "Send and open snow:// install-plugin links.", "version": "1.0.5", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/InstallLinks" }, InstallLinks);
   return __toCommonJS(InstallLinks_entry_exports);
 })();
