@@ -1797,8 +1797,10 @@ function pickImage(cb) {
     return false;
     }
     hideSheet();
-    r.hideSheets?.();
-    setTimeout(launch, 400);
+    try { r.hideSheets?.(); } catch {}
+    var run = function () { try { launch(); } catch (e) { showToast(String(e && e.message || e)); } };
+    if (r.RN.InteractionManager?.runAfterInteractions) r.RN.InteractionManager.runAfterInteractions(function () { setTimeout(run, 250); });
+    else setTimeout(run, 600);
     return true;
 }
 

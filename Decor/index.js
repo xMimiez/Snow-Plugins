@@ -8913,8 +8913,21 @@ var plugin = (() => {
         return false;
       }
       hideSheet();
-      r.hideSheets?.();
-      setTimeout(launch, 400);
+      try {
+        r.hideSheets?.();
+      } catch {
+      }
+      var run = function() {
+        try {
+          launch();
+        } catch (e) {
+          showToast(String(e && e.message || e));
+        }
+      };
+      if (r.RN.InteractionManager?.runAfterInteractions) r.RN.InteractionManager.runAfterInteractions(function() {
+        setTimeout(run, 250);
+      });
+      else setTimeout(run, 600);
       return true;
     }
     function altText(v) {
@@ -9305,6 +9318,6 @@ var plugin = (() => {
   Decor.defaults = { tokens: {} };
 
   // Decor.entry.js
-  var Decor_entry_default = register({ "id": "mime.decor", "name": "Decor", "description": "Create and equip Decor avatar decorations. PNG/APNG preserved; JPEG converted locally.", "version": "2.2.0", "authors": [{ "name": "Fiery", "id": "890228870559698955" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/Decor" }, Decor);
+  var Decor_entry_default = register({ "id": "mime.decor", "name": "Decor", "description": "Create and equip Decor avatar decorations. PNG/APNG preserved; JPEG converted locally.", "version": "2.2.1", "authors": [{ "name": "Fiery", "id": "890228870559698955" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/Decor" }, Decor);
   return __toCommonJS(Decor_entry_exports);
 })();

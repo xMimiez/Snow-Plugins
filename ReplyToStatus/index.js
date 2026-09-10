@@ -701,11 +701,10 @@ ${value.trim()}`;
         function wrap(element) {
           const p = element?.props || {};
           if (p.__mimeReplyWrapped) return;
-          const userId = p.userId || p.user?.id || p.displayProfile?.userId || p.displayProfile?.user?.id;
+          const userId = p.userId || p.user?.id || p.displayProfile?.userId || p.displayProfile?.user?.id || p.userProfile?.userId;
           if (!userId) return;
           const presence = r.byStore("PresenceStore");
-          const status = normalizeStatus(p.customStatus || p.activity || p.activities || p.status || presence?.getActivities?.(userId) || presence?.getStatus?.(userId));
-          if (!status) return;
+          const status = normalizeStatus(p.customStatus || p.activity || p.activities || p.status || presence?.getActivities?.(userId)) || { text: p.bio || p.pronouns || "No custom status" };
           return h(ProfileGate, { userId, status, key: element.key }, r.React.cloneElement(element, { __mimeReplyWrapped: true }));
         }
         r.hook([
@@ -721,13 +720,18 @@ ${value.trim()}`;
           "PrimaryUserProfile",
           "DisplayProfile",
           "OverlayProfile",
-          "UserProfileCard"
+          "UserProfileCard",
+          "UserProfileInfo",
+          "Profile",
+          "ShowMoreButton"
         ], wrap);
         r.patch("after", r.React, "createElement", (args, result) => {
           if (!r.active || !result?.props) return;
+          const p = args[1] || result.props;
           const type = args[0];
           const name = typeof type === "string" ? type : type?.displayName || type?.name || "";
-          if (!/profile/i.test(name)) return;
+          const looksLikeProfile = /profile|userinfo|actionsheet/i.test(name) || (p.userId || p.user?.id || p.displayProfile) && (p.customStatus || p.displayProfile || p.pronouns || p.bio || p.guildId != null);
+          if (!looksLikeProfile) return;
           return wrap(result) ?? result;
         });
       },
@@ -752,6 +756,6 @@ ${value.trim()}`;
   }
 
   // ReplyToStatus.entry.js
-  var ReplyToStatus_entry_default = register({ "id": "mime.replytostatus", "name": "ReplyToStatus", "description": "One themed status-reply button per profile with rendered emojis.", "version": "2.2.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ReplyToStatus" }, ReplyToStatus);
+  var ReplyToStatus_entry_default = register({ "id": "mime.replytostatus", "name": "ReplyToStatus", "description": "One themed status-reply button per profile with rendered emojis.", "version": "2.2.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ReplyToStatus" }, ReplyToStatus);
   return __toCommonJS(ReplyToStatus_entry_exports);
 })();
