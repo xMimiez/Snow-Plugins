@@ -133,23 +133,107 @@ var plugin = (() => {
           if (r.active) callback(payload);
         }));
       },
+      channelId(ctx) {
+        if (typeof ctx === "string" && /^\d{5,}$/.test(ctx)) return ctx;
+        if (ctx && !Array.isArray(ctx)) {
+          const id = ctx.channel?.id || ctx.channel?.channelId || ctx.channelId || ctx.channel_id;
+          if (id) return id;
+        }
+        const selected = r.byStore("SelectedChannelStore");
+        return selected?.getChannelId?.() || selected?.getCurrentlySelectedChannelId?.() || selected?.getLastSelectedChannelId?.() || null;
+      },
+      async send(channelId, content) {
+        if (!channelId || content == null || content === "") return false;
+        const text = String(content);
+        try {
+          await r.discord(`/channels/${channelId}/messages`, { method: "POST", body: JSON.stringify({ content: text }) });
+          return true;
+        } catch (error) {
+          r.status.lastSendError = error?.message || String(error);
+        }
+        const util = r.find("sendMessage", "receiveMessage") || r.find("sendMessage", "sendBotMessage") || r.find("sendMessage");
+        const snowflake = r.find("fromTimestamp");
+        const nonce = typeof snowflake?.fromTimestamp === "function" ? String(snowflake.fromTimestamp(Date.now())) : String(Date.now());
+        const body = { content: text, tts: false, nonce, invalidEmojis: [], validNonShortcutEmojis: [] };
+        if (typeof util?.sendMessage === "function") {
+          try {
+            util.sendMessage(channelId, body);
+            return true;
+          } catch {
+          }
+          try {
+            util.sendMessage(channelId, body, true);
+            return true;
+          } catch {
+          }
+          try {
+            util.sendMessage(channelId, text);
+            return true;
+          } catch {
+          }
+        }
+        return false;
+      },
+      local(channelId, content) {
+        const util = r.find("sendBotMessage");
+        if (typeof util?.sendBotMessage === "function") {
+          try {
+            util.sendBotMessage(channelId, content);
+            return true;
+          } catch {
+          }
+        }
+        r.toast(String(content));
+        return false;
+      },
       command(command) {
         const register2 = r.api.commands?.registerCommand;
         if (typeof register2 !== "function") throw new Error(`${meta.name}: commands.registerCommand unavailable`);
+        if (!r._commands) r._commands = [];
+        if (r._nextCommandId == null) r._nextCommandId = -91e4 - Math.abs(hashId(meta.id)) % 9e3;
+        const name = command.name;
         const execute = command.execute;
-        return r.own(register2({
+        const prepared = {
           ...command,
-          options: command.options || [],
-          async execute(...args) {
+          name,
+          displayName: command.displayName || name,
+          displayDescription: command.displayDescription || command.description,
+          untranslatedName: command.untranslatedName || name,
+          untranslatedDescription: command.untranslatedDescription || command.description,
+          applicationId: "-1",
+          type: command.type ?? 1,
+          inputType: 0,
+          options: (command.options || []).map((opt) => ({
+            ...opt,
+            displayName: opt.displayName || opt.name,
+            displayDescription: opt.displayDescription || opt.description || opt.name
+          })),
+          async execute(args, ctx) {
             if (!r.active) return;
             try {
-              const result = await execute(...args);
-              return r.active ? result : void 0;
+              const result = await execute(args, ctx);
+              if (!r.active) return;
+              if (result && typeof result === "object" && typeof result.content === "string") {
+                const cid = r.channelId(ctx) || r.channelId(args);
+                if (cid && await r.send(cid, result.content)) return;
+              }
+              return result;
             } catch (error) {
-              if (r.active) r.error(`/${command.name}`, error);
+              if (r.active) r.error(`/${name}`, error);
             }
           }
-        }));
+        };
+        const remove = register2(prepared);
+        prepared.id = String(r._nextCommandId--);
+        r._commands.push(prepared);
+        patchCommandList(r);
+        return r.own(() => {
+          try {
+            remove?.();
+          } catch {
+          }
+          r._commands = r._commands.filter((item) => item !== prepared);
+        });
       },
       async request(url, options = {}, timeout = 15e3, maxBytes = Infinity) {
         if (!r.active) throw new Error("Plugin stopped");
@@ -202,17 +286,70 @@ var plugin = (() => {
         return r.request("https://discord.com/api/v9" + path, { ...options, headers: { "Content-Type": "application/json", ...options.headers, Authorization: token } });
       },
       hook(names, transform) {
+        const set = new Set(names);
         const jsx = B.api?.react?.jsx;
-        if (!jsx?.onJsxCreate || !jsx?.deleteJsxCreate) throw new Error(`${meta.name}: Snow JSX hooks unavailable`);
-        for (const name of names) {
-          const callback = (_Component, element) => {
-            if (!r.active) return;
-            r.status[name] = (r.status[name] || 0) + 1;
-            return transform(element, name);
-          };
-          jsx.onJsxCreate(name, callback);
-          r.own(() => jsx.deleteJsxCreate(name, callback));
+        if (jsx?.onJsxCreate && jsx?.deleteJsxCreate) {
+          for (const name of names) {
+            const callback = (_Component, element) => {
+              if (!r.active) return;
+              r.status[name] = (r.status[name] || 0) + 1;
+              try {
+                return transform(element, name);
+              } catch (error) {
+                r.error(`JSX ${name}`, error);
+              }
+            };
+            jsx.onJsxCreate(name, callback);
+            r.own(() => jsx.deleteJsxCreate(name, callback));
+          }
         }
+        r.patch("after", React, "createElement", (args, result) => {
+          if (!r.active || !result) return;
+          const type = args[0];
+          const name = typeof type === "string" ? type : type?.displayName || type?.name || type?.type?.name;
+          if (!name || !set.has(name)) return;
+          r.status[name] = (r.status[name] || 0) + 1;
+          try {
+            return transform(result, name) ?? result;
+          } catch (error) {
+            r.error(`createElement ${name}`, error);
+          }
+        });
+      },
+      patchRows(transform) {
+        const apply = (value) => {
+          try {
+            const wasString = typeof value === "string";
+            const rows = wasString ? JSON.parse(value) : value;
+            const next = transform(rows);
+            if (next == null) return value;
+            return wasString ? typeof next === "string" ? next : JSON.stringify(next) : next;
+          } catch {
+            return value;
+          }
+        };
+        const modules = r.RN.NativeModules || {};
+        for (const key of Object.keys(modules)) {
+          if (typeof modules[key]?.updateRows === "function") {
+            r.patch("before", modules[key], "updateRows", (args) => {
+              if (args && args[1] != null) args[1] = apply(args[1]);
+            });
+          }
+        }
+        const manager = r.byName("RowManager");
+        const proto = manager?.prototype || manager;
+        if (typeof proto?.generate === "function") {
+          r.patch("after", proto, "generate", (_args, row) => apply(row));
+        }
+      },
+      hideSheets() {
+        for (const close of [...openSheets.values()]) {
+          try {
+            close();
+          } catch {
+          }
+        }
+        openSheets.clear();
       },
       open(key, Component, props = {}) {
         const sheets = B.ui?.sheets;
@@ -288,6 +425,39 @@ var plugin = (() => {
     };
     return r;
   }
+  function hashId(value) {
+    let hash = 0;
+    for (const char of String(value || "")) hash = hash * 31 + char.charCodeAt(0) | 0;
+    return hash;
+  }
+  function patchCommandList(r) {
+    if (r._commandListPatched) return;
+    const module = r.find("getBuiltInCommands");
+    if (typeof module?.getBuiltInCommands !== "function") return;
+    r._commandListPatched = true;
+    r.patch("after", module, "getBuiltInCommands", (_args, result) => {
+      const list = Array.isArray(result) ? result : [];
+      const byName = Object.fromEntries((r._commands || []).map((command) => [command.name, command]));
+      if (!Object.keys(byName).length) return;
+      const seen = {};
+      const out = [];
+      for (const command of list) {
+        const name = command?.name || command?.untranslatedName;
+        if (name && byName[name]) {
+          if (seen[name]) continue;
+          seen[name] = true;
+          out.push(byName[name]);
+        } else out.push(command);
+      }
+      for (const command of r._commands || []) {
+        if (!seen[command.name]) {
+          out.push(command);
+          seen[command.name] = true;
+        }
+      }
+      return out;
+    });
+  }
   function ui(r) {
     const { h, C, D, RN, store } = r;
     function Text({ children, muted = false, heading = false, color, ...props }) {
@@ -326,7 +496,12 @@ var plugin = (() => {
         onValueChange: (v) => r.set(setting, v)
       });
     }
-    return { Text, Button, Page, Input, Toggle };
+    function Slider({ value, onValueChange, minimumValue = 0, maximumValue = 1, step, ...props }) {
+      const Comp = D.Slider || C.Slider;
+      if (Comp) return h(Comp, { value, onValueChange, minimumValue, maximumValue, step, ...props });
+      return h(Input, { value: String(value), onChange: (text) => onValueChange(Number(text) || 0), keyboardType: "numeric" });
+    }
+    return { Text, Button, Page, Input, Toggle, Slider };
   }
   function register(meta, factory) {
     const B = bunny;
@@ -368,33 +543,49 @@ var plugin = (() => {
 
   // project:src/url-hub.js
   var KEY = /* @__PURE__ */ Symbol.for("mime.snow.urlHandlers.v1");
+  function install(target, method, hub) {
+    if (!target || typeof target[method] !== "function" || target[method] === hub.wrapper) return;
+    const original = target[method];
+    const wrapper = function(...args) {
+      const url = typeof args[0] === "string" ? args[0] : args[0]?.url || args[0]?.uri;
+      if (url) for (const entry of [...hub.handlers]) {
+        try {
+          if (entry.handler(url, () => original.apply(this, args))) return;
+        } catch (error) {
+          entry.r.error("Open link", error);
+        }
+      }
+      return original.apply(this, args);
+    };
+    hub.restores.push(() => {
+      if (target[method] === wrapper) target[method] = original;
+    });
+    target[method] = wrapper;
+  }
   function addUrlHandler(r, priority, handler) {
     let hub = globalThis[KEY];
     if (!hub) {
-      const target = r.common.url?.openURL ? r.common.url : r.find("openURL", "openDeeplink");
-      if (!target?.openURL) throw new Error("This Discord build has no supported openURL module");
-      hub = { handlers: [], original: target.openURL, target };
-      hub.wrapper = function(...args) {
-        const url = typeof args[0] === "string" ? args[0] : args[0]?.url;
-        if (url) for (const entry2 of [...hub.handlers]) {
-          try {
-            if (entry2.handler(url, () => hub.original.apply(this, args))) return;
-          } catch (error) {
-            entry2.r.error("Open link", error);
-          }
-        }
-        return hub.original.apply(this, args);
-      };
-      target.openURL = hub.wrapper;
+      hub = { handlers: [], restores: [] };
+      const urlMod = r.common.url?.openURL ? r.common.url : r.find("openURL", "openDeeplink") || r.find("openURL", "handleURL");
+      install(urlMod, "openURL", hub);
+      install(urlMod, "openDeeplink", hub);
+      install(urlMod, "handleURL", hub);
+      install(r.RN.Linking, "openURL", hub);
+      const linkingMod = r.find("openURL", "canOpenURL");
+      if (linkingMod !== urlMod && linkingMod !== r.RN.Linking) install(linkingMod, "openURL", hub);
+      if (!hub.restores.length) throw new Error("This Discord build has no supported openURL module");
       globalThis[KEY] = hub;
     }
     const entry = { r, priority, handler };
     hub.handlers.push(entry);
     hub.handlers.sort((a, b) => b.priority - a.priority);
     r.own(() => {
-      hub.handlers = hub.handlers.filter((x) => x !== entry);
+      hub.handlers = hub.handlers.filter((item) => item !== entry);
       if (!hub.handlers.length) {
-        if (hub.target.openURL === hub.wrapper) hub.target.openURL = hub.original;
+        for (const restore of hub.restores) try {
+          restore();
+        } catch {
+        }
         delete globalThis[KEY];
       }
     });
@@ -404,87 +595,348 @@ var plugin = (() => {
   }
 
   // project:src/plugins/mobile-ports.js
+  function walk(value, visit) {
+    if (!value || typeof value !== "object") return;
+    visit(value);
+    if (Array.isArray(value)) for (const item of value) walk(item, visit);
+    else for (const item of Object.values(value)) walk(item, visit);
+  }
+  function cloneRows(rows) {
+    return JSON.parse(JSON.stringify(rows));
+  }
   function AlwaysAnimate(r) {
-    const { h, React, RN } = r, { Page, Text, Toggle } = ui(r);
+    const { h, React } = r, { Page, Text, Toggle } = ui(r);
     let reduced = false;
-    return { async start() {
-      reduced = await RN.AccessibilityInfo?.isReduceMotionEnabled?.() || false;
-      const listener = RN.AccessibilityInfo?.addEventListener?.("reduceMotionChanged", (value) => {
-        reduced = value;
-      });
-      r.own(() => listener?.remove());
-      r.hook(["Emoji", "CustomEmoji", "Avatar", "GuildIcon", "GuildBanner", "Nameplate", "RoleIcon"], (element) => {
-        if (!element || reduced && r.store.respectReducedMotion) return;
-        const props = {};
-        for (const key of ["canAnimate", "animate", "animateEmoji", "animateGradient", "loop"]) if (typeof element.props?.[key] === "boolean") props[key] = true;
-        return Object.keys(props).length ? React.cloneElement(element, props) : void 0;
-      });
-    }, Settings() {
-      r.useRefresh();
-      return h(Page, { title: "AlwaysAnimate" }, h(Toggle, { setting: "respectReducedMotion", label: "Respect Reduce Motion" }), h(Text, null, "Enables existing animation props on supported emoji, avatar and profile components. Native-rendered chat is unaffected."));
-    } };
+    function allowed() {
+      return !(reduced && r.store.respectReducedMotion);
+    }
+    function force(element) {
+      if (!element || !allowed()) return;
+      const props = {};
+      for (const key of ["canAnimate", "animate", "animateEmoji", "animateGradient", "loop", "shouldAnimate", "animated"]) {
+        if (typeof element.props?.[key] === "boolean") props[key] = true;
+      }
+      return Object.keys(props).length ? React.cloneElement(element, props) : void 0;
+    }
+    return {
+      async start() {
+        reduced = !!await r.RN.AccessibilityInfo?.isReduceMotionEnabled?.();
+        const listener = r.RN.AccessibilityInfo?.addEventListener?.("reduceMotionChanged", (value) => {
+          reduced = !!value;
+        });
+        r.own(() => listener?.remove?.());
+        for (const name of ["canUseAnimatedEmojis", "canUseAnimatedAvatar", "canUseNameplate", "canUseAnimatedBanner", "shouldAnimateEmoji"]) {
+          r.patch("after", r.find(name), name, () => allowed() ? true : void 0);
+        }
+        r.patch("after", r.find("getCurrentUser"), "getCurrentUser", (_args, user) => {
+          if (!allowed() || !user) return;
+          try {
+            if (user.premiumType === 0 || user.premiumType == null) user.premiumType = user.premiumType;
+          } catch {
+          }
+        });
+        r.hook(["Emoji", "CustomEmoji", "AnimatedEmoji", "Avatar", "GuildIcon", "GuildBanner", "Nameplate", "RoleIcon", "Image", "FastImage"], force);
+        r.patchRows((rows) => {
+          if (!allowed()) return rows;
+          const next = cloneRows(rows);
+          walk(next, (node) => {
+            for (const key of ["animate", "animated", "canAnimate", "animateEmoji", "shouldAnimate", "loop"]) {
+              if (typeof node[key] === "boolean") node[key] = true;
+            }
+          });
+          return next;
+        });
+      },
+      Settings() {
+        r.useRefresh();
+        return h(
+          Page,
+          { title: "AlwaysAnimate" },
+          h(Toggle, { setting: "respectReducedMotion", label: "Respect Reduce Motion" }),
+          h(Text, null, "Forces animation flags on emoji, avatars, and native chat rows. Nitro-gated animated emoji still needs Discord to have the asset.")
+        );
+      }
+    };
   }
   AlwaysAnimate.defaults = { respectReducedMotion: true };
   function BlurNsfw(r) {
-    const { h, React, RN } = r, { Page, Text, Button, Toggle } = ui(r), Gate = React.createContext(false);
+    const { h, React, RN } = r, { Page, Text, Button, Toggle } = ui(r);
+    const Gate = React.createContext(false);
+    function media(obj) {
+      const type = obj.content_type || obj.contentType || "";
+      const name = obj.filename || obj.name || obj.url || "";
+      return /^(image|video)\//.test(type) || /\.(png|jpe?g|gif|webp|mp4|mov|webm)$/i.test(name);
+    }
     function Media({ original }) {
       const nested = React.useContext(Gate), [shown, reveal] = React.useState(false);
       if (nested) return original;
-      return h(Gate.Provider, { value: true }, h(RN.View, null, shown ? original : h(RN.View, { style: { height: 100, justifyContent: "center", padding: 12 } }, h(Text, null, "Sensitive media hidden")), h(Button, { text: shown ? "Hide sensitive media" : "Reveal sensitive media", variant: "secondary", onPress: () => reveal((v) => !v) })));
+      return h(Gate.Provider, { value: true }, h(
+        RN.View,
+        null,
+        shown ? original : h(RN.View, { style: { height: 120, justifyContent: "center", padding: 12, backgroundColor: "#00000099" } }, h(Text, null, "Sensitive media hidden")),
+        h(Button, { text: shown ? "Hide" : "Reveal", variant: "secondary", onPress: () => reveal((v) => !v) })
+      ));
     }
-    return { start() {
-      r.hook(["MessageImage", "MessageVideo", "MessageAttachment", "ImageAttachment", "VideoAttachment"], (element) => {
-        const p = element?.props || {}, a = p.attachment;
-        if (a && !/^(image|video)\//.test(a.content_type || a.contentType || "") && !/\.(png|jpe?g|gif|webp|mp4|mov)$/i.test(a.filename || "")) return;
-        const channel = p.channel || r.byStore("ChannelStore")?.getChannel?.(p.channelId || p.channel_id || p.message?.channel_id || p.message?.channelId);
-        if (r.store.blurAllChannels || channel?.nsfw) return h(Media, { original: element });
-      });
-    }, Settings() {
-      r.useRefresh();
-      return h(Page, { title: "BlurNSFW" }, h(Toggle, { setting: "blurAllChannels", label: "Hide media in every channel" }), h(Text, null, "Mobile uses a tap-to-reveal cover. Native chat rows without JSX hooks cannot be covered; do not rely on this as a content filter."));
-    } };
+    function nsfwChannel(props) {
+      const channel = props.channel || r.byStore("ChannelStore")?.getChannel?.(props.channelId || props.channel_id || props.message?.channel_id || props.message?.channelId);
+      return r.store.blurAllChannels || !!(channel?.nsfw || channel?.nsfw_ || props.nsfw);
+    }
+    return {
+      start() {
+        r.hook(["MessageImage", "MessageVideo", "MessageAttachment", "ImageAttachment", "VideoAttachment", "MediaAttachment", "EmbedMedia", "MessageMedia", "Attachment"], (element) => {
+          try {
+            const p = element?.props || {}, a = p.attachment || p.media || p;
+            if (a && !media(a) && a.filename) return;
+            if (nsfwChannel(p)) return h(Media, { original: element });
+          } catch {
+            return;
+          }
+        });
+        r.patchRows((rows) => {
+          const next = cloneRows(rows);
+          walk(next, (node) => {
+            const channel = r.byStore("ChannelStore")?.getChannel?.(node.channelId || node.channel_id || node.message?.channel_id);
+            if (!(r.store.blurAllChannels || channel?.nsfw || node.nsfw) || !media(node)) return;
+            node.spoiler = true;
+            node.obscure = true;
+            node.hidden = true;
+          });
+          return next;
+        });
+      },
+      Settings() {
+        r.useRefresh();
+        return h(
+          Page,
+          { title: "BlurNSFW" },
+          h(Toggle, { setting: "blurAllChannels", label: "Hide media in every channel" }),
+          h(Text, null, "Marks NSFW attachments as spoilers in native chat and covers JSX media with a reveal button.")
+        );
+      }
+    };
   }
   BlurNsfw.defaults = { blurAllChannels: false };
   function appLink(value) {
     try {
       const u = new URL(value);
-      if (u.protocol !== "https:" || u.username || u.password) return null;
-      if (u.hostname === "open.spotify.com" && /^\/(?:intl-[a-z-]+\/)?(?:track|album|artist|playlist|episode|show)\/[A-Za-z0-9]+\/?$/.test(u.pathname)) return "spotify:" + u.pathname.replace(/^\/(?:intl-[a-z-]+\/)?/, "").replace(/\/$/, "").replace("/", ":");
-      if (["store.steampowered.com", "steamcommunity.com"].includes(u.hostname)) return "steam://openurl/" + u.href;
-      if (u.hostname === "tidal.com" && /^\/browse\/(track|album|artist|playlist)\/[\w-]+\/?$/.test(u.pathname)) return "tidal://" + u.pathname.slice(8);
-      if (u.hostname === "music.apple.com") return "musics://" + u.host + u.pathname + u.search;
-      if (u.hostname === "t.me" && /^\/[A-Za-z][\w]{4,}\/?$/.test(u.pathname)) return "tg://resolve?domain=" + encodeURIComponent(u.pathname.slice(1).replace(/\/$/, ""));
+      if (!["http:", "https:"].includes(u.protocol) || u.username || u.password) return null;
+      const host = u.hostname.replace(/^www\./, "");
+      const path = u.pathname.replace(/\/$/, "");
+      if (host === "open.spotify.com" && /^\/(?:intl-[a-z-]+\/)?(?:track|album|artist|playlist|episode|show)\/[A-Za-z0-9]+$/.test(path)) {
+        return "spotify:" + path.replace(/^\/(?:intl-[a-z-]+\/)?/, "").replace("/", ":");
+      }
+      if (["store.steampowered.com", "steamcommunity.com", "help.steampowered.com"].includes(host)) return "steam://openurl/" + u.href;
+      if (host === "tidal.com" && /^\/browse\/(track|album|artist|playlist)\/[\w-]+$/.test(path)) return "tidal://" + path.slice(8);
+      if (host === "music.apple.com") return "musics://" + u.host + u.pathname + u.search;
+      if (host === "t.me" || host === "telegram.me") {
+        const parts = path.slice(1).split("/");
+        const domain = parts[0];
+        if (domain && domain.startsWith("+")) return "tg://join?invite=" + encodeURIComponent(domain.slice(1));
+        if (domain && /^[A-Za-z][\w]{3,}$/.test(domain) && !parts[1]) return "tg://resolve?domain=" + encodeURIComponent(domain);
+        if (domain && parts[1]) return "tg://resolve?domain=" + encodeURIComponent(domain) + "&post=" + encodeURIComponent(parts[1]);
+      }
+      if (host === "instagram.com" || host === "instagr.am") {
+        const ig = path.slice(1).split("/");
+        if (["p", "reel", "reels", "tv"].includes(ig[0]) && ig[1]) return "instagram://media?shortcode=" + encodeURIComponent(ig[1]);
+        if (ig[0] && !["stories", "explore", "accounts"].includes(ig[0])) return "instagram://user?username=" + encodeURIComponent(ig[0]);
+      }
+      if (host === "tiktok.com" || host.endsWith(".tiktok.com")) {
+        const user = path.match(/^\/@([^/]+)/);
+        if (user) return "tiktok://user?username=" + encodeURIComponent(user[1]);
+        if (host === "vm.tiktok.com" || path.startsWith("/t/")) return "tiktok://" + path;
+        return "snssdk1233://" + path;
+      }
     } catch {
     }
     return null;
   }
   function OpenInApp(r) {
     const { h } = r, { Page, Text, Toggle } = ui(r);
-    return { start() {
-      addUrlHandler(r, 10, (url, fallback) => {
-        const app = appLink(url);
-        if (!r.store.enabled || !app) return false;
-        Promise.resolve(r.RN.Linking.canOpenURL(app)).then(async (supported) => {
-          if (!r.active) return;
-          if (supported) {
-            try {
-              await openExternal(r, app);
-              return;
-            } catch {
-            }
-          }
-          fallback();
-        }).catch(() => r.active && fallback());
-        return true;
-      });
-    }, Settings() {
-      r.useRefresh();
-      return h(Page, { title: "OpenInApp" }, h(Toggle, { setting: "enabled", label: "Open supported links in their app" }), h(Text, null, "Spotify, Steam, Tidal, Apple Music and public Telegram usernames. Falls back when an app is unavailable. SpotifyPreview takes priority. iOS scheme allowlists may limit detection."));
-    } };
+    return {
+      start() {
+        addUrlHandler(r, 10, (url, fallback) => {
+          const app = appLink(url);
+          if (!r.store.enabled || !app) return false;
+          openExternal(r, app).catch(() => r.active && fallback());
+          return true;
+        });
+      },
+      Settings() {
+        r.useRefresh();
+        return h(
+          Page,
+          { title: "OpenInApp" },
+          h(Toggle, { setting: "enabled", label: "Open supported links in their app" }),
+          h(Text, null, "Spotify, Steam, Tidal, Apple Music, Telegram, Instagram and TikTok. iOS cannot probe whether an app is installed, so the app URL is opened directly and the original link is used if that fails. SpotifyPreview still takes priority for Spotify URLs.")
+        );
+      }
+    };
   }
   OpenInApp.defaults = { enabled: true };
+  function ValidUser(r) {
+    const { h, React } = r, { Page, Text, Button, Input, Toggle } = ui(r);
+    const pending = /* @__PURE__ */ new Map();
+    let next = 0;
+    async function resolve(id) {
+      if (!/^\d{16,22}$/.test(id)) throw new Error("Enter a numeric Discord user ID");
+      const cached = r.byStore("UserStore")?.getUser?.(id);
+      if (cached?.username && cached.username !== "Unknown User" && cached.username !== "unknownuser") return cached;
+      if (pending.has(id)) return pending.get(id);
+      const wait = Math.max(0, next - Date.now());
+      next = Date.now() + 1200;
+      const task = (wait ? new Promise((ok) => setTimeout(ok, wait)) : Promise.resolve()).then(() => r.discord(`/users/${id}`)).then((result) => {
+        const user = result.json();
+        if (!user?.id || !user?.username) throw new Error("User could not be resolved");
+        r.common.FluxDispatcher?.dispatch?.({ type: "USER_UPDATE", user });
+        r.common.FluxDispatcher?.dispatch?.({ type: "LOAD_USER_SUCCESS", user });
+        return user;
+      }).finally(() => pending.delete(id));
+      pending.set(id, task);
+      return task;
+    }
+    function idsFrom(value) {
+      return [...new Set(Array.from(String(value || "").matchAll(/<@!?(\d{16,22})>/g), (match) => match[1]))];
+    }
+    function unknown(user) {
+      return !user || !user.username || user.username === "Unknown User" || user.username === "unknownuser" || user.isUnknown;
+    }
+    function harvest(message) {
+      const ids = idsFrom(message?.content);
+      for (const mention of message?.mentions || []) if (mention?.id) ids.push(mention.id);
+      for (const id of ids) {
+        const user = r.byStore("UserStore")?.getUser?.(id);
+        if (unknown(user)) resolve(id).catch(() => {
+        });
+      }
+    }
+    function Settings() {
+      const [id, setId] = React.useState(""), [result, setResult] = React.useState(""), [busy, setBusy] = React.useState(false);
+      return h(
+        Page,
+        { title: "ValidUser" },
+        h(Toggle, { setting: "autoResolve", label: "Automatically resolve unknown mentions" }),
+        h(Input, { label: "User ID", value: id, onChange: setId, keyboardType: "number-pad" }),
+        h(Button, { text: busy ? "Resolving\u2026" : "Resolve user", disabled: busy, onPress: () => {
+          setBusy(true);
+          resolve(id.trim()).then((u) => setResult(`${u.global_name || u.globalName || u.username} (@${u.username})`)).catch((e) => setResult(e.message)).finally(() => setBusy(false));
+        } }),
+        h(Text, null, result || "Unknown mentions are fetched and USER_UPDATE is dispatched so @Unknown User is replaced with the real username.")
+      );
+    }
+    return {
+      start() {
+        r.subscribe("MESSAGE_CREATE", (event) => {
+          if (r.store.autoResolve) harvest(event?.message || event);
+        });
+        r.subscribe("MESSAGE_UPDATE", (event) => {
+          if (r.store.autoResolve) harvest(event?.message || event);
+        });
+        r.subscribe("LOAD_MESSAGES_SUCCESS", (event) => {
+          if (!r.store.autoResolve) return;
+          for (const message of event?.messages || []) harvest(message);
+        });
+        const store = r.byStore("UserStore") || r.find("getUser", "getCurrentUser");
+        r.patch("after", store, "getUser", (args, user) => {
+          const id = String(args?.[0] || "");
+          if (r.store.autoResolve && /^\d{16,22}$/.test(id) && unknown(user)) resolve(id).catch(() => {
+          });
+        });
+        r.hook(["Mention", "UserMention", "UnknownUser", "MentionedUser"], (element) => {
+          const id = element.props?.userId || element.props?.id || element.props?.user?.id;
+          const user = id && r.byStore("UserStore")?.getUser?.(id);
+          if (id && unknown(user)) resolve(id).catch(() => {
+          });
+        });
+        r.command({ name: "resolveuser", description: "Resolve a Discord user ID", options: [{ name: "id", description: "User ID", type: 3, required: true }], async execute(options) {
+          const user = await resolve(String(options.find((o) => o.name === "id")?.value || ""));
+          r.toast(`${user.global_name || user.username} (@${user.username})`);
+        } });
+      },
+      Settings,
+      resolve
+    };
+  }
+  ValidUser.defaults = { autoResolve: true };
+  function setNativeVolume(r, gain) {
+    const modules = r.RN.NativeModules || {};
+    const candidates = [
+      r.find("setOutputVolume"),
+      r.find("setAbsoluteOutputVolume"),
+      r.find("setVolume", "getVolume"),
+      r.find("setLocalVolume"),
+      r.find("setOutputVolumeScalar"),
+      modules.VoiceEngine,
+      modules.AudioManager,
+      modules.MediaEngine,
+      modules.VoiceManager,
+      modules.RTCEngine,
+      modules.AudioModule
+    ].filter(Boolean);
+    let applied = 0;
+    for (const mod of candidates) {
+      for (const method of ["setOutputVolume", "setAbsoluteOutputVolume", "setOutputVolumeScalar", "setLocalVolume", "setVolume", "setSinkVolume"]) {
+        if (typeof mod[method] !== "function") continue;
+        try {
+          mod[method](gain);
+          applied++;
+        } catch {
+          try {
+            mod[method](gain * 100);
+            applied++;
+          } catch {
+          }
+        }
+      }
+    }
+    return applied;
+  }
+  function VolumeBooster(r) {
+    const { h } = r, { Page, Text, Toggle, Slider } = ui(r);
+    function apply(percent) {
+      const gain = Math.max(1, Math.min(5, Number(percent) / 100));
+      const n = setNativeVolume(r, gain);
+      r.status.support = n ? `Applied ${percent}% via ${n} native volume method(s).` : "No VoiceEngine/MediaEngine volume method found; slider max is still raised where Discord renders a 200 cap.";
+      r.changed();
+      return n;
+    }
+    return {
+      start() {
+        apply(r.store.percent || 200);
+        r.hook(["Slider", "FormSlider", "TableSliderRow", "NativeSlider"], (element) => {
+          const max = element.props?.maximumValue ?? element.props?.maxValue;
+          if (max === 200 || max === 1) {
+            return r.React.cloneElement(element, {
+              maximumValue: max === 1 ? 5 : 500,
+              maxValue: max === 1 ? 5 : 500
+            });
+          }
+        });
+        const settings = r.find("setOutputVolume") || r.find("setLocalVolume");
+        if (settings && typeof settings.setOutputVolume === "function") {
+          r.patch("before", settings, "setOutputVolume", (args) => {
+            if (typeof args[0] === "number" && r.store.enabled) args[0] = args[0] * ((r.store.percent || 200) / 100);
+          });
+        }
+      },
+      Settings() {
+        r.useRefresh();
+        return h(
+          Page,
+          { title: "VolumeBooster" },
+          h(Toggle, { setting: "enabled", label: "Boost voice output volume" }),
+          h(Text, null, `Boost: ${r.store.percent}%`),
+          h(Slider, { value: r.store.percent, minimumValue: 100, maximumValue: 500, step: 10, onValueChange: (value) => {
+            r.set("percent", Math.round(value));
+            apply(value);
+          } }),
+          h(Text, { muted: true }, r.status.support || "Uses MediaEngine/VoiceEngine volume setters when present, and raises Discord volume sliders that cap at 200%.")
+        );
+      }
+    };
+  }
+  VolumeBooster.defaults = { enabled: true, percent: 200 };
 
   // OpenInApp.entry.js
-  var OpenInApp_entry_default = register({ "id": "mime.openinapp", "name": "OpenInApp", "description": "Open supported service links in installed apps, with browser fallback.", "version": "1.1.0", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Chloe", "id": "1084592643784331324" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/OpenInApp" }, OpenInApp);
+  var OpenInApp_entry_default = register({ "id": "mime.openinapp", "name": "OpenInApp", "description": "Open Spotify, Steam, Telegram, Instagram, TikTok and other service links in their apps.", "version": "1.2.0", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Chloe", "id": "1084592643784331324" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/OpenInApp" }, OpenInApp);
   return __toCommonJS(OpenInApp_entry_exports);
 })();

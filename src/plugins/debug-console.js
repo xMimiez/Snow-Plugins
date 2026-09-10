@@ -21,6 +21,7 @@ export default function DebugConsole(r) {
     function capture(level, args) {
         if (!r.active) return;
         const text = redact(args.map(formatArgument).join(' ')).slice(0, 12000);
+        if (/Requested message \S+ does not have a value in the requested locale/i.test(text)) return;
         const last = entries[entries.length - 1];
         if (last?.level === level && last.text === text) { last.count++; last.time = new Date().toLocaleTimeString(); }
         else { entries.push({ id: ++id, level, text, time: new Date().toLocaleTimeString(), count: 1 }); entries = entries.slice(-400); }

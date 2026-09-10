@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.spotifypreview",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "display": {
     "name": "SpotifyPreview",
     "description": "Official Spotify embeds in an owned Snow sheet.",

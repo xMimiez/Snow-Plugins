@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.previewfile",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "display": {
     "name": "PreviewFile",
     "description": "Expandable previews for supported text attachments.",

@@ -28,7 +28,7 @@ async function harness(defaults = {}, modules = []) {
 }
 test('all Bunny spec-3 artifacts export definePlugin and match the hosted manifest', async()=>{
     const registry=JSON.parse(fs.readFileSync(path.join(root,'src/registry.json')));
-    assert.equal(registry.length,18);
+    assert.equal(registry.length,17);
     for(const meta of registry){
         const manifest=JSON.parse(fs.readFileSync(path.join(root,meta.folder,'manifest.json')));
         const bytes=fs.readFileSync(path.join(root,meta.folder,manifest.main));
@@ -64,7 +64,7 @@ test('GifRoulette registers once, sends once by return, and handles empty favori
     const {default:factory,gifUrls}=await import('../src/plugins/gif-roulette.js');
     assert.deepEqual(gifUrls({favoriteGifs:{gifs:{'https://tenor.com/view/a':{src:'https://media/a.gif'}}}}),['https://tenor.com/view/a']);
     const {r,commands,toasts}=await harness({},[{getFavoriteGIFs:()=>['https://media/a.gif']}]); const plugin=factory(r);plugin.start();
-    assert.equal(commands.size,1); assert.equal(commands.get('gifroulette').id,undefined);
+    assert.equal(commands.size,1); assert.equal(typeof commands.get('gifroulette').id,'string');
     assert.deepEqual(await commands.get('gifroulette').execute([]),{content:'https://media/a.gif'});await r.dispose();assert.equal(commands.size,0);
     const empty=await harness(); factory(empty.r).start(); assert.equal(await empty.commands.get('gifroulette').execute([]),undefined);assert.equal(empty.toasts.length,1);await empty.r.dispose();
 });
@@ -139,7 +139,7 @@ test('invite commands do nothing before confirmation and preserve server feature
     for(const pause of [true,false]){requests=[];let tree;await Renderer.act(async()=>{tree=Renderer.create(React.createElement(p.Confirm,{guildId:'123456789012345678',pause,close:()=>{}}));});await Renderer.act(async()=>{const b=tree.root.findAllByType('Button').find(b=>b.props.text===(pause?'Pause invites':'Resume invites'));b.props.onPress();b.props.onPress();await tick();});assert.equal(requests.length,2);assert.equal(requests[1].method,'PATCH');assert.deepEqual(JSON.parse(requests[1].body).features,pause?['COMMUNITY','NEWS','INVITES_DISABLED']:['COMMUNITY','NEWS']);await Renderer.act(async()=>tree.unmount());}await r.dispose();
 });
 test('sheet render error shows a working Close button instead of trapping the UI',async()=>{const {r,sheets}=await harness();let tree;function Broken(){throw new Error('fixture failure');}const old=console.error;console.error=()=>{};try{r.open('broken',Broken);const Component=[...sheets.values()][0];await Renderer.act(async()=>{tree=Renderer.create(React.createElement(Component));});assert.match(JSON.stringify(tree.toJSON()),/Could not display/);await Renderer.act(async()=>tree.root.findAllByType('Button').find(b=>b.props.text==='Close').props.onPress());assert.equal(sheets.size,0);}finally{console.error=old;await Renderer.act(async()=>tree?.unmount());await r.dispose();}});
-test('all 18 production bundles start, render settings and stop',async()=>{
+test('all production bundles start, render settings and stop',async()=>{
     const registry=JSON.parse(fs.readFileSync(path.join(root,'src/registry.json')));
     for(const meta of registry){const fixture=await harness(),manifest=JSON.parse(fs.readFileSync(path.join(root,meta.folder,'manifest.json')));let definition,tree;
         const silent={log(){},info(){},warn(){},error(){},debug(){}};

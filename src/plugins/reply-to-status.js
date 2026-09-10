@@ -96,12 +96,27 @@ export default function ReplyToStatus(r) {
     }
     return {
         start() {
-            r.hook(['UserProfileActionSheet','UserProfile','UserProfileModal','UserProfileHeader','UserProfileCustomStatus','ProfileCustomStatus'], element => {
-                const p = element.props || {};
-                const userId = p.userId || p.user?.id || p.displayProfile?.userId;
-                const presence = userId && r.byStore('PresenceStore');
-                const status = normalizeStatus(p.customStatus || p.activity || p.activities || presence?.getActivities?.(userId));
-                return h(ProfileGate, { userId, status, key: element.key }, element);
+            function wrap(element) {
+                const p = element?.props || {};
+                if (p.__mimeReplyWrapped) return;
+                const userId = p.userId || p.user?.id || p.displayProfile?.userId || p.displayProfile?.user?.id;
+                if (!userId) return;
+                const presence = r.byStore('PresenceStore');
+                const status = normalizeStatus(p.customStatus || p.activity || p.activities || p.status || presence?.getActivities?.(userId) || presence?.getStatus?.(userId));
+                if (!status) return;
+                return h(ProfileGate, { userId, status, key: element.key }, r.React.cloneElement(element, { __mimeReplyWrapped: true }));
+            }
+            r.hook([
+                'UserProfileActionSheet', 'UserProfile', 'UserProfileModal', 'UserProfileHeader', 'UserProfileCustomStatus',
+                'ProfileCustomStatus', 'UserProfileSheet', 'ProfileActionSheet', 'UserProfileContainer', 'PrimaryUserProfile',
+                'DisplayProfile', 'OverlayProfile', 'UserProfileCard',
+            ], wrap);
+            r.patch('after', r.React, 'createElement', (args, result) => {
+                if (!r.active || !result?.props) return;
+                const type = args[0];
+                const name = typeof type === 'string' ? type : (type?.displayName || type?.name || '');
+                if (!/profile/i.test(name)) return;
+                return wrap(result) ?? result;
             });
         },
         stop() { dismiss?.(); dismiss = null; owners.clear(); },

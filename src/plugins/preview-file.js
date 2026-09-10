@@ -1,6 +1,12 @@
 import { ui } from '../runtime.js';
 export const MAX_BYTES = 256 * 1024;
-export function previewable(a) { return !!a && /\.(txt|md|json|js|jsx|ts|tsx|py|css|html|xml|yml|yaml|csv|log|ini|sh|c|cpp|h|java|rs|go)$/i.test(a.filename || a.name || '') && Number(a.size) <= MAX_BYTES && Number(a.size) >= 0; }
+export function previewable(a) {
+    if (!a || a.failed || a.error || a.state === 'FAILED' || a.status === 'FAILED' || a.uploadFailed) return false;
+    const name = a.filename || a.name || '';
+    const url = a.url || a.proxy_url || a.proxyUrl;
+    if (!url || typeof url !== 'string') return false;
+    return /\.(txt|md|json|js|jsx|ts|tsx|py|css|html|xml|yml|yaml|csv|log|ini|sh|c|cpp|h|java|rs|go)$/i.test(name) && Number(a.size || 0) <= MAX_BYTES && Number(a.size || 0) >= 0;
+}
 export function attachmentUrl(value) { const u = new URL(value); if (u.protocol !== 'https:' || !['cdn.discordapp.com', 'media.discordapp.net'].includes(u.hostname) || !u.pathname.startsWith('/attachments/') || u.username || u.password) throw new Error('Only Discord attachment URLs are supported'); return u.href; }
 export default function PreviewFile(r) {
     const { h, React, RN } = r, { Page, Text, Button } = ui(r), cache = new Map(), Gate = React.createContext(false);
@@ -22,7 +28,12 @@ export default function PreviewFile(r) {
             text === null ? h(Button, { text: busy ? 'Loading preview…' : error ? 'Retry preview' : 'Preview file', variant: 'secondary', disabled: busy, onPress: fetchPreview }) : h(RN.View, { style: { padding: 12, gap: 8, borderWidth: 1, borderColor: '#80808060', borderRadius: 8 } }, h(Text, { selectable: true, numberOfLines: 8, style: { fontFamily: RN.Platform?.OS === 'ios' ? 'Menlo' : 'monospace' } }, text.split('\n').slice(0, 8).join('\n').slice(0, 2000)), h(Button, { text: 'Expand file', variant: 'secondary', onPress: () => { try { r.open('file', Full, { a, text }); } catch (e) { r.error('Preview file', e); } } })), error ? h(Text, null, error) : null));
     }
     return { start() {
-        r.hook(['MessageAttachment', 'Attachment', 'FileAttachment', 'MessageFileAttachment'], element => { const a = element?.props?.attachment; if (previewable(a)) return h(Card, { original: element, a }); });
+        r.hook(['MessageAttachment', 'Attachment', 'FileAttachment', 'MessageFileAttachment', 'MediaAttachment', 'AttachmentCard'], element => {
+            try {
+                const a = element?.props?.attachment || element?.props?.file || element?.props?.upload;
+                if (previewable(a)) return h(Card, { original: element, a });
+            } catch { return; }
+        });
         r.command({ name:'previewfile', description:'Preview a small Discord text attachment locally', options:[{name:'url',description:'Discord attachment URL',type:3,required:true}], async execute(options) {
             const url = attachmentUrl(String(options.find(o=>o.name==='url')?.value || ''));
             const a = {url,filename:decodeURIComponent(new URL(url).pathname.split('/').pop()),size:0};

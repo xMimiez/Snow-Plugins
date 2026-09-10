@@ -1756,12 +1756,13 @@ function normalizePickedImage(ret) {
 }
 
 function pickImage(cb) {
-    var opts = { mediaType: "photo", selectionLimit: 1, includeBase64: true };
+    var opts = { mediaType: "photo", selectionLimit: 1, includeBase64: true, presentationStyle: "fullScreen", includeExtra: true };
     function done(ret) {
         var n = normalizePickedImage(ret);
         if (n) cb(n);
         else if (ret && !ret.didCancel && !ret.cancelled) showToast("Could not read that image");
     }
+    function launch() {
     var lib = findByProps("launchImageLibrary", "launchCamera") || findByProps("launchImageLibrary");
     if (lib && typeof lib.launchImageLibrary === "function") {
         try { lib.launchImageLibrary(opts, done); return true; } catch (_e) {}
@@ -1794,6 +1795,11 @@ function pickImage(cb) {
     }
     showToast("No image picker on this Discord build");
     return false;
+    }
+    hideSheet();
+    r.hideSheets?.();
+    setTimeout(launch, 400);
+    return true;
 }
 
 function altText(v) {

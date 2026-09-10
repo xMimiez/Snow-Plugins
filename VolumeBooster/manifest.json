@@ -2,10 +2,10 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.volumebooster",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "display": {
     "name": "VolumeBooster",
-    "description": "Compatibility probe: native gain API still required; no audio boosting yet.",
+    "description": "Raise Discord voice volume using native MediaEngine/VoiceEngine setters and unlocked sliders.",
     "authors": [
       {
         "name": "Nuckyz",

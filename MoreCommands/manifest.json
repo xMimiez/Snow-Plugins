@@ -2,10 +2,10 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.morecommands",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "display": {
     "name": "MoreCommands",
-    "description": "Migration entry: MoreCommands moved to GifRoulette; all other commands removed.",
+    "description": "Fun and utility slash commands, including /gifroulette.",
     "authors": [
       {
         "name": "Mime | N0_.q3",

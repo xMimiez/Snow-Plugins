@@ -133,23 +133,107 @@ var plugin = (() => {
           if (r.active) callback(payload);
         }));
       },
+      channelId(ctx) {
+        if (typeof ctx === "string" && /^\d{5,}$/.test(ctx)) return ctx;
+        if (ctx && !Array.isArray(ctx)) {
+          const id = ctx.channel?.id || ctx.channel?.channelId || ctx.channelId || ctx.channel_id;
+          if (id) return id;
+        }
+        const selected = r.byStore("SelectedChannelStore");
+        return selected?.getChannelId?.() || selected?.getCurrentlySelectedChannelId?.() || selected?.getLastSelectedChannelId?.() || null;
+      },
+      async send(channelId, content) {
+        if (!channelId || content == null || content === "") return false;
+        const text = String(content);
+        try {
+          await r.discord(`/channels/${channelId}/messages`, { method: "POST", body: JSON.stringify({ content: text }) });
+          return true;
+        } catch (error) {
+          r.status.lastSendError = error?.message || String(error);
+        }
+        const util = r.find("sendMessage", "receiveMessage") || r.find("sendMessage", "sendBotMessage") || r.find("sendMessage");
+        const snowflake = r.find("fromTimestamp");
+        const nonce = typeof snowflake?.fromTimestamp === "function" ? String(snowflake.fromTimestamp(Date.now())) : String(Date.now());
+        const body = { content: text, tts: false, nonce, invalidEmojis: [], validNonShortcutEmojis: [] };
+        if (typeof util?.sendMessage === "function") {
+          try {
+            util.sendMessage(channelId, body);
+            return true;
+          } catch {
+          }
+          try {
+            util.sendMessage(channelId, body, true);
+            return true;
+          } catch {
+          }
+          try {
+            util.sendMessage(channelId, text);
+            return true;
+          } catch {
+          }
+        }
+        return false;
+      },
+      local(channelId, content) {
+        const util = r.find("sendBotMessage");
+        if (typeof util?.sendBotMessage === "function") {
+          try {
+            util.sendBotMessage(channelId, content);
+            return true;
+          } catch {
+          }
+        }
+        r.toast(String(content));
+        return false;
+      },
       command(command) {
         const register2 = r.api.commands?.registerCommand;
         if (typeof register2 !== "function") throw new Error(`${meta.name}: commands.registerCommand unavailable`);
+        if (!r._commands) r._commands = [];
+        if (r._nextCommandId == null) r._nextCommandId = -91e4 - Math.abs(hashId(meta.id)) % 9e3;
+        const name = command.name;
         const execute = command.execute;
-        return r.own(register2({
+        const prepared = {
           ...command,
-          options: command.options || [],
-          async execute(...args) {
+          name,
+          displayName: command.displayName || name,
+          displayDescription: command.displayDescription || command.description,
+          untranslatedName: command.untranslatedName || name,
+          untranslatedDescription: command.untranslatedDescription || command.description,
+          applicationId: "-1",
+          type: command.type ?? 1,
+          inputType: 0,
+          options: (command.options || []).map((opt) => ({
+            ...opt,
+            displayName: opt.displayName || opt.name,
+            displayDescription: opt.displayDescription || opt.description || opt.name
+          })),
+          async execute(args, ctx) {
             if (!r.active) return;
             try {
-              const result = await execute(...args);
-              return r.active ? result : void 0;
+              const result = await execute(args, ctx);
+              if (!r.active) return;
+              if (result && typeof result === "object" && typeof result.content === "string") {
+                const cid = r.channelId(ctx) || r.channelId(args);
+                if (cid && await r.send(cid, result.content)) return;
+              }
+              return result;
             } catch (error) {
-              if (r.active) r.error(`/${command.name}`, error);
+              if (r.active) r.error(`/${name}`, error);
             }
           }
-        }));
+        };
+        const remove = register2(prepared);
+        prepared.id = String(r._nextCommandId--);
+        r._commands.push(prepared);
+        patchCommandList(r);
+        return r.own(() => {
+          try {
+            remove?.();
+          } catch {
+          }
+          r._commands = r._commands.filter((item) => item !== prepared);
+        });
       },
       async request(url, options = {}, timeout = 15e3, maxBytes = Infinity) {
         if (!r.active) throw new Error("Plugin stopped");
@@ -202,17 +286,70 @@ var plugin = (() => {
         return r.request("https://discord.com/api/v9" + path, { ...options, headers: { "Content-Type": "application/json", ...options.headers, Authorization: token } });
       },
       hook(names, transform) {
+        const set = new Set(names);
         const jsx = B.api?.react?.jsx;
-        if (!jsx?.onJsxCreate || !jsx?.deleteJsxCreate) throw new Error(`${meta.name}: Snow JSX hooks unavailable`);
-        for (const name of names) {
-          const callback = (_Component, element) => {
-            if (!r.active) return;
-            r.status[name] = (r.status[name] || 0) + 1;
-            return transform(element, name);
-          };
-          jsx.onJsxCreate(name, callback);
-          r.own(() => jsx.deleteJsxCreate(name, callback));
+        if (jsx?.onJsxCreate && jsx?.deleteJsxCreate) {
+          for (const name of names) {
+            const callback = (_Component, element) => {
+              if (!r.active) return;
+              r.status[name] = (r.status[name] || 0) + 1;
+              try {
+                return transform(element, name);
+              } catch (error) {
+                r.error(`JSX ${name}`, error);
+              }
+            };
+            jsx.onJsxCreate(name, callback);
+            r.own(() => jsx.deleteJsxCreate(name, callback));
+          }
         }
+        r.patch("after", React, "createElement", (args, result) => {
+          if (!r.active || !result) return;
+          const type = args[0];
+          const name = typeof type === "string" ? type : type?.displayName || type?.name || type?.type?.name;
+          if (!name || !set.has(name)) return;
+          r.status[name] = (r.status[name] || 0) + 1;
+          try {
+            return transform(result, name) ?? result;
+          } catch (error) {
+            r.error(`createElement ${name}`, error);
+          }
+        });
+      },
+      patchRows(transform) {
+        const apply = (value) => {
+          try {
+            const wasString = typeof value === "string";
+            const rows = wasString ? JSON.parse(value) : value;
+            const next = transform(rows);
+            if (next == null) return value;
+            return wasString ? typeof next === "string" ? next : JSON.stringify(next) : next;
+          } catch {
+            return value;
+          }
+        };
+        const modules = r.RN.NativeModules || {};
+        for (const key of Object.keys(modules)) {
+          if (typeof modules[key]?.updateRows === "function") {
+            r.patch("before", modules[key], "updateRows", (args) => {
+              if (args && args[1] != null) args[1] = apply(args[1]);
+            });
+          }
+        }
+        const manager = r.byName("RowManager");
+        const proto = manager?.prototype || manager;
+        if (typeof proto?.generate === "function") {
+          r.patch("after", proto, "generate", (_args, row) => apply(row));
+        }
+      },
+      hideSheets() {
+        for (const close of [...openSheets.values()]) {
+          try {
+            close();
+          } catch {
+          }
+        }
+        openSheets.clear();
       },
       open(key, Component, props = {}) {
         const sheets = B.ui?.sheets;
@@ -288,6 +425,39 @@ var plugin = (() => {
     };
     return r;
   }
+  function hashId(value) {
+    let hash = 0;
+    for (const char of String(value || "")) hash = hash * 31 + char.charCodeAt(0) | 0;
+    return hash;
+  }
+  function patchCommandList(r) {
+    if (r._commandListPatched) return;
+    const module = r.find("getBuiltInCommands");
+    if (typeof module?.getBuiltInCommands !== "function") return;
+    r._commandListPatched = true;
+    r.patch("after", module, "getBuiltInCommands", (_args, result) => {
+      const list = Array.isArray(result) ? result : [];
+      const byName = Object.fromEntries((r._commands || []).map((command) => [command.name, command]));
+      if (!Object.keys(byName).length) return;
+      const seen = {};
+      const out = [];
+      for (const command of list) {
+        const name = command?.name || command?.untranslatedName;
+        if (name && byName[name]) {
+          if (seen[name]) continue;
+          seen[name] = true;
+          out.push(byName[name]);
+        } else out.push(command);
+      }
+      for (const command of r._commands || []) {
+        if (!seen[command.name]) {
+          out.push(command);
+          seen[command.name] = true;
+        }
+      }
+      return out;
+    });
+  }
   function ui(r) {
     const { h, C, D, RN, store } = r;
     function Text({ children, muted = false, heading = false, color, ...props }) {
@@ -326,7 +496,12 @@ var plugin = (() => {
         onValueChange: (v) => r.set(setting, v)
       });
     }
-    return { Text, Button, Page, Input, Toggle };
+    function Slider({ value, onValueChange, minimumValue = 0, maximumValue = 1, step, ...props }) {
+      const Comp = D.Slider || C.Slider;
+      if (Comp) return h(Comp, { value, onValueChange, minimumValue, maximumValue, step, ...props });
+      return h(Input, { value: String(value), onChange: (text) => onValueChange(Number(text) || 0), keyboardType: "numeric" });
+    }
+    return { Text, Button, Page, Input, Toggle, Slider };
   }
   function register(meta, factory) {
     const B = bunny;
@@ -366,16 +541,388 @@ var plugin = (() => {
     });
   }
 
-  // project:src/plugins/more-commands.js
-  function MoreCommands(r) {
-    const { Page, Text } = ui(r);
-    return { start() {
-    }, Settings() {
-      return r.h(Page, { title: "MoreCommands \u2192 GifRoulette" }, r.h(Text, null, "MoreCommands has moved to GifRoulette. Install and enable GifRoulette for /gifroulette. All other old commands have been removed. This migration entry does not register duplicate commands."));
-    } };
+  // project:src/plugins/gif-roulette.js
+  function unwrapDiscordProxy(url) {
+    if (!url || typeof url !== "string") return url;
+    const match = url.match(/\/external\/[^/]+\/(https?)\/([^?]+)/);
+    if (match) {
+      try {
+        return match[1] + "://" + decodeURIComponent(match[2]);
+      } catch {
+        return url;
+      }
+    }
+    return url;
+  }
+  function isWeakGifUrl(url) {
+    return !url || url.includes("images-ext-") || url.includes("format=webp");
+  }
+  function gifUrlFrom(entry) {
+    if (!entry) return null;
+    if (typeof entry === "string") return /^https?:\/\//.test(entry) ? unwrapDiscordProxy(entry) : null;
+    const raw = entry.url || entry.gif || entry.uri || entry.src || entry.video || entry.sourceURI;
+    return raw ? unwrapDiscordProxy(raw) : null;
+  }
+  function favoriteGifsMapFrom(value) {
+    if (!value) return null;
+    if (Array.isArray(value) || Array.isArray(value.favorites)) return value.favorites || value;
+    if (value.favoriteGifs?.gifs) return value.favoriteGifs.gifs;
+    if (value.favorite_gifs?.gifs) return value.favorite_gifs.gifs;
+    if (value.gifs && typeof value.gifs === "object") return value.gifs;
+    if (value.favoriteGifs && typeof value.favoriteGifs === "object") return value.favoriteGifs;
+    if (value.favoriteGIFs && typeof value.favoriteGIFs === "object") return value.favoriteGIFs;
+    return null;
+  }
+  function collectGifUrls(gifs) {
+    const urls = [];
+    const push = (url) => {
+      if (url && !urls.includes(url)) urls.push(url);
+    };
+    if (!gifs) return urls;
+    if (typeof gifs.forEach === "function" && typeof gifs.keys === "function" && !Array.isArray(gifs)) {
+      gifs.forEach((val, key) => {
+        if (typeof key === "string" && /^https?:\/\//.test(key)) push(unwrapDiscordProxy(key));
+        else push(gifUrlFrom(val));
+      });
+      return urls;
+    }
+    if (Array.isArray(gifs)) {
+      for (const item of gifs) push(gifUrlFrom(item));
+      return urls;
+    }
+    for (const [key, value] of Object.entries(gifs)) {
+      if (/^https?:\/\//.test(key)) push(unwrapDiscordProxy(key));
+      else push(gifUrlFrom(value));
+    }
+    return urls;
+  }
+  function readFavoriteGifsFromModule(mod) {
+    if (!mod) return null;
+    const inner = mod.FrecencyUserSettingsActionCreators || mod.default || mod;
+    try {
+      inner.loadIfNecessary?.();
+    } catch {
+    }
+    for (const getter of ["getCurrentValue", "getState", "getFavoriteGifs", "getFavoriteGIFs", "getSavedGifs", "getFavorites", "getFavoriteGIFsMobile"]) {
+      if (typeof inner[getter] !== "function") continue;
+      try {
+        const value = inner[getter]();
+        const map = favoriteGifsMapFrom(value) || favoriteGifsMapFrom(value?.frecencyUserSettings) || favoriteGifsMapFrom(value?.settings);
+        if (map && collectGifUrls(map).length) return map;
+      } catch {
+      }
+    }
+    if (Array.isArray(inner.favorites) && inner.favorites.length) return inner.favorites;
+    return favoriteGifsMapFrom(inner.favoriteGifs) || favoriteGifsMapFrom(inner);
+  }
+  function pickFavoriteGif(r) {
+    const modules = [
+      r.find("addFavoriteGIF"),
+      r.find("useFavoriteGIFsMobile"),
+      r.find("FrecencyUserSettingsActionCreators"),
+      r.byStore("FrecencyUserSettingsStore"),
+      r.byStore("FavoriteGIFStore"),
+      r.byStore("UserSettingsProtoStore"),
+      r.find("favoriteGifs"),
+      r.find("getFavoriteGifs"),
+      r.find("getFavoriteGIFs"),
+      r.find("loadIfNecessary", "getCurrentValue"),
+      r.find("ProtoClass", "getCurrentValue")
+    ].filter(Boolean);
+    let urls = [];
+    for (const module of modules) {
+      urls = collectGifUrls(readFavoriteGifsFromModule(module));
+      if (urls.length) break;
+    }
+    if (!urls.length) return null;
+    const strong = urls.filter((url) => !isWeakGifUrl(url));
+    const pool = strong.length ? strong : urls;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+  async function sendFavoriteGif(r, ctx) {
+    const channelId = r.channelId(ctx);
+    const url = pickFavoriteGif(r);
+    if (!url) {
+      r.local(channelId, "No favorite GIFs found. Star a GIF in the GIF picker first.");
+      r.toast("No favorite GIFs found. Star a GIF in Discord first.");
+      return;
+    }
+    if (channelId && await r.send(channelId, url)) return;
+    return { content: url };
   }
 
+  // project:src/plugins/more-commands.js
+  var faces = [
+    ["dissatisfaction", " \uFF1E\uFE4F\uFF1C"],
+    ["smug", "\u0CA0_\u0CA0"],
+    ["happy", "\u30FD(\xB4\u25BD`)/"],
+    ["crying", "\u0CA5_\u0CA5"],
+    ["angry", "\u30FD(\uFF40\u0414\xB4)\uFF89"],
+    ["anger", "\u30FD(\uFF4F`\u76BF\u2032\uFF4F)\uFF89"],
+    ["joy", "<(\uFFE3\uFE36\uFFE3)>"],
+    ["blush", "\u0AEE \u02F6\u1D54 \u1D55 \u1D54\u02F6 \u10D0"],
+    ["confused", "(\u2022\u0E34_\u2022\u0E34)?"],
+    ["sleeping", "(\u1D17_\u1D17)"],
+    ["laughing", "o(\u2267\u25BD\u2266)o"],
+    ["giving", "(\uFF89\u25D5\u30EE\u25D5)\uFF89*:\uFF65\uFF9F\u2727"],
+    ["peace", "\u270C(\u25D5\u203F-)\u270C"],
+    ["ending1", "\u13EA \u08EA\u05B8 \u06F0 \u0359\u22B9"],
+    ["uwu", "(>\u2A4A<)"],
+    ["comfy", "(\u2500\u203F\u203F\u2500)\u2661"],
+    ["lovehappy", "(*\u2267\u03C9\u2266*)"],
+    ["loveee", "(\u2044 \u2044>\u2044 \u25BD \u2044<\u2044 \u2044)"],
+    ["give", "(\u30CE= \u2A4A = )\u30CE"],
+    ["lovegive", "\u10E6\u309D\u25E1\u2579)\u30CE\u2661"],
+    ["music", "(\uFFE3\u25BD\uFFE3)/\u266B\u2022\xA8\u2022.\xB8\xB8\u266A"],
+    ["stars", ".\u{16954} \u0741 \u02D6\u0E4B \u08ED \u2B51"],
+    ["lovegiving", "\u2E1C(\uFF61\u02C3 \u1D55 \u02C2 )\u2E1D\u2661"]
+  ];
+  var freakyMap = {
+    q: "\u{1D4FA}",
+    w: "\u{1D500}",
+    e: "\u{1D4EE}",
+    r: "\u{1D4FB}",
+    t: "\u{1D4FD}",
+    y: "\u{1D502}",
+    u: "\u{1D4FE}",
+    i: "\u{1D4F2}",
+    o: "\u{1D4F8}",
+    p: "\u{1D4F9}",
+    a: "\u{1D4EA}",
+    s: "\u{1D4FC}",
+    d: "\u{1D4ED}",
+    f: "\u{1D4EF}",
+    g: "\u{1D4F0}",
+    h: "\u{1D4F1}",
+    j: "\u{1D4F3}",
+    k: "\u{1D4F4}",
+    l: "\u{1D4F5}",
+    z: "\u{1D503}",
+    x: "\u{1D501}",
+    c: "\u{1D4EC}",
+    v: "\u{1D4FF}",
+    b: "\u{1D4EB}",
+    n: "\u{1D4F7}",
+    m: "\u{1D4F6}",
+    Q: "\u{1D4E0}",
+    W: "\u{1D4E6}",
+    E: "\u{1D4D4}",
+    R: "\u{1D4E1}",
+    T: "\u{1D4E3}",
+    Y: "\u{1D4E8}",
+    U: "\u{1D4E4}",
+    I: "\u{1D4D8}",
+    O: "\u{1D4DE}",
+    P: "\u{1D4DF}",
+    A: "\u{1D4D0}",
+    S: "\u{1D4E2}",
+    D: "\u{1D4D3}",
+    F: "\u{1D4D5}",
+    G: "\u{1D4D6}",
+    H: "\u{1D4D7}",
+    J: "\u{1D4D9}",
+    K: "\u{1D4DA}",
+    L: "\u{1D4DB}",
+    Z: "\u{1D4E9}",
+    X: "\u{1D4E7}",
+    C: "\u{1D4D2}",
+    V: "\u{1D4E5}",
+    B: "\u{1D4D1}",
+    N: "\u{1D4DD}",
+    M: "\u{1D4DC}"
+  };
+  var morseMap = {
+    A: ".-",
+    B: "-...",
+    C: "-.-.",
+    D: "-..",
+    E: ".",
+    F: "..-.",
+    G: "--.",
+    H: "....",
+    I: "..",
+    J: ".---",
+    K: "-.-",
+    L: ".-..",
+    M: "--",
+    N: "-.",
+    O: "---",
+    P: ".--.",
+    Q: "--.-",
+    R: ".-.",
+    S: "...",
+    T: "-",
+    U: "..-",
+    V: "...-",
+    W: ".--",
+    X: "-..-",
+    Y: "-.--",
+    Z: "--..",
+    0: "-----",
+    1: ".----",
+    2: "..---",
+    3: "...--",
+    4: "....-",
+    5: ".....",
+    6: "-....",
+    7: "--...",
+    8: "---..",
+    9: "----.",
+    " ": "/"
+  };
+  var endings = ["rawr x3", "OwO", "UwU", ":3", "nyaa~~", "^^", "\u{1F97A}", "XD", "(\u02C6 \uFECC \u02C6)\u2661"];
+  var replacements = [["small", "smol"], ["cute", "kawaii"], ["love", "luv"], ["stupid", "baka"], ["hello", "hewwo"]];
+  function arg(args, name, fallback) {
+    const found = (args || []).find((item) => item && item.name === name);
+    return found && found.value != null ? found.value : fallback;
+  }
+  function mock(input) {
+    return [...String(input)].map((char, i) => i % 2 ? char.toUpperCase() : char.toLowerCase()).join("");
+  }
+  function freaky(text, extra) {
+    const mapped = [...String(text || "freaky")].map((char) => freakyMap[char] || char).join("");
+    return extra ? mapped + (Math.random() < 0.25 ? " \u{1F445}" : " \u2764\uFE0F") : mapped;
+  }
+  function toMorse(text) {
+    return String(text).toUpperCase().split("").map((char) => morseMap[char] ?? "").join(" ");
+  }
+  function fromMorse(text) {
+    const reversed = Object.fromEntries(Object.entries(morseMap).map(([k, v]) => [v, k]));
+    const raw = String(text).split(" ").map((code) => reversed[code] ?? "").join("").toLowerCase();
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  }
+  function uwuify(message) {
+    const words = String(message).match(/\S+|\s+/g);
+    if (!words) return "";
+    let out = "";
+    for (const word of words) {
+      if (word.startsWith("https://") || [...word].every((char) => char === word[0])) {
+        out += word;
+        continue;
+      }
+      let replaced = word;
+      for (const [from, to] of replacements) replaced = replaced.replace(new RegExp("\\b" + from + "\\b", "gi"), to);
+      out += replaced === word ? word.replace(/n(?=[aeo])/g, "ny").replace(/l|r/g, "w") : replaced;
+    }
+    return out + " " + endings[Math.floor(Math.random() * endings.length)];
+  }
+  function MoreCommands(r) {
+    const { Page, Text, Toggle } = ui(r);
+    const opt = (name, description, extra = {}) => ({ name, description, type: 3, required: false, ...extra });
+    function cmd(name, description, options, execute) {
+      r.command({ name, description, options: options || [], execute });
+    }
+    return {
+      start() {
+        cmd("systeminfo", "Show device information", [], () => {
+          const n = globalThis.navigator || {};
+          const s = globalThis.screen || {};
+          return { content: [
+            `> **Platform**: ${r.RN.Platform?.OS || n.platform || "unknown"}`,
+            `> **CPU cores**: ${n.hardwareConcurrency || "N/A"}`,
+            `> **Screen**: ${s.width || "?"}x${s.height || "?"}`,
+            `> **Languages**: ${(n.languages || []).join(", ") || n.language || "N/A"}`,
+            `> **Online**: ${n.onLine === false ? "no" : "yes"}`
+          ].join("\n") };
+        });
+        cmd("getuptime", "Show app uptime", [], () => {
+          const seconds = Math.floor((performance?.now?.() || 0) / 1e3);
+          return { content: `> **Uptime**: ${Math.floor(seconds / 60)} minutes` };
+        });
+        cmd("gettime", "Show the current time", [], () => ({ content: `> **Current time**: ${(/* @__PURE__ */ new Date()).toLocaleString()}` }));
+        cmd("choose", "Pick a random choice", [opt("choices", "Comma-separated choices", { required: true })], (args) => {
+          const choices = String(arg(args, "choices", "")).split(",").map((item) => item.trim()).filter(Boolean);
+          return { content: choices.length ? "I choose: " + choices[Math.floor(Math.random() * choices.length)] : "Give me some choices." };
+        });
+        cmd("rolldice", "Roll a die", [opt("sides", "Number of sides", { type: 4 })], (args) => {
+          const sides = Number(arg(args, "sides", 6));
+          if (!Number.isSafeInteger(sides) || sides < 2 || sides > 1e3) return { content: "Choose a whole number from 2 to 1000." };
+          return { content: `Rolled ${1 + Math.floor(Math.random() * sides)} on a ${sides}-sided die.` };
+        });
+        cmd("flipcoin", "Flip a coin", [], () => ({ content: Math.random() < 0.5 ? "Heads" : "Tails" }));
+        cmd("ask", "Ask a yes/no question", [opt("question", "Your question", { required: true })], (args) => {
+          const answers = ["Yes", "No", "Maybe", "Ask again later", "Definitely", "I would not count on it"];
+          return { content: `**${arg(args, "question", "")}**
+${answers[Math.floor(Math.random() * answers.length)]}` };
+        });
+        cmd("randomanimal", "Random cat or dog image", [opt("animal", "cat or dog")], async (args) => {
+          const kind = String(arg(args, "animal", Math.random() < 0.5 ? "cat" : "dog")).toLowerCase();
+          const url = kind === "dog" ? "https://dog.ceo/api/breeds/image/random" : "https://api.thecatapi.com/v1/images/search";
+          const data = (await r.request(url)).json();
+          const image = Array.isArray(data) ? data[0]?.url : data?.message || data?.url;
+          return { content: image || "No image returned." };
+        });
+        cmd("randomnumber", "Random number", [opt("min", "Minimum", { type: 4 }), opt("max", "Maximum", { type: 4 })], (args) => {
+          const min = Number(arg(args, "min", 1)), max = Number(arg(args, "max", 100));
+          if (![min, max].every(Number.isFinite) || min > max) return { content: "Provide a valid min and max." };
+          return { content: String(min + Math.floor(Math.random() * (max - min + 1))) };
+        });
+        cmd("transform", "Transform text", [opt("text", "Text", { required: true }), opt("transformation", "toLowerCase, toUpperCase, reverse")], (args) => {
+          const text = String(arg(args, "text", ""));
+          const mode = String(arg(args, "transformation", "toLowerCase"));
+          const out = mode === "toUpperCase" ? text.toUpperCase() : mode === "reverse" ? [...text].reverse().join("") : text.toLowerCase();
+          return { content: out };
+        });
+        cmd("wordcount", "Count words", [opt("message", "Text", { required: true })], (args) => {
+          const text = String(arg(args, "message", "")).trim();
+          const words = text ? text.split(/\s+/).length : 0;
+          return { content: `${words} words, ${text.length} characters` };
+        });
+        cmd("countdown", "Count down locally", [opt("number", "Start from", { type: 4 })], async (args, ctx) => {
+          let n = Number(arg(args, "number", 3));
+          if (!Number.isSafeInteger(n) || n < 1 || n > 10) n = 3;
+          for (let i = n; i >= 0; i--) {
+            r.local(r.channelId(ctx), i === 0 ? "\u{1F389} Go! \u{1F389}" : i + "...");
+            if (i) await new Promise((resolve) => setTimeout(resolve, 1e3));
+          }
+        });
+        cmd("nekos", "Send a neko image", [], async () => {
+          const data = (await r.request("https://nekos.best/api/v2/neko")).json();
+          return { content: data?.results?.[0]?.url || "No image returned." };
+        });
+        cmd("anime-boys", "Send cute anime boys", [{ name: "cat", description: "Cat boys", type: 5, required: false }], async (args) => {
+          const sub = arg(args, "cat") === true || arg(args, "cat") === "true" ? "animecatboys" : "cuteanimeboys";
+          const data = (await r.request("https://www.reddit.com/r/" + sub + "/random.json")).json();
+          const url = data?.[0]?.data?.children?.[0]?.data?.url || data?.data?.children?.[0]?.data?.url;
+          return { content: url || "No image returned." };
+        });
+        cmd("ping", "Local pong", [], (_a, ctx) => {
+          r.local(r.channelId(ctx), "Pong!");
+        });
+        cmd("echo", "Show text locally", [opt("message", "Text")], (args, ctx) => {
+          r.local(r.channelId(ctx), String(arg(args, "message", "")));
+        });
+        cmd("lenny", "Send a lenny face", [opt("message", "Prefix")], (args) => ({ content: arg(args, "message", "") + " ( \u0361\xB0 \u035C\u0296 \u0361\xB0)" }));
+        cmd("mock", "mOcK tExT", [opt("message", "Text", { required: true })], (args) => ({ content: mock(arg(args, "message", "")) }));
+        cmd("slap", "Slap someone", [opt("victim", "Who to slap", { required: true })], (args) => {
+          const me = r.byStore("UserStore")?.getCurrentUser?.();
+          return { content: `<@${me?.id || "me"}> slaps ${arg(args, "victim", "the void")} around a bit with a large trout` };
+        });
+        cmd("freaky", "Make text freaky", [opt("message", "Text", { required: true })], (args) => ({ content: freaky(arg(args, "message", ""), r.store.addFreakyEnding) }));
+        cmd("morse", "To or from Morse", [opt("text", "Text", { required: true })], (args) => {
+          const input = String(arg(args, "text", ""));
+          return { content: /^[.\-/ ]+$/.test(input) ? fromMorse(input) : toMorse(input) };
+        });
+        cmd("uwuify", "uwuify text", [opt("message", "Text", { required: true })], (args) => ({ content: uwuify(arg(args, "message", "")) }));
+        cmd("gifroulette", "Send a random favorite GIF", [], (_a, ctx) => sendFavoriteGif(r, ctx));
+        for (const [name, face] of faces) {
+          cmd(name, face, [opt("message", "Prefix")], (args) => ({ content: (arg(args, "message", "") + " " + face).trim() }));
+        }
+      },
+      Settings() {
+        r.useRefresh();
+        return r.h(
+          Page,
+          { title: "MoreCommands" },
+          r.h(Toggle, { setting: "addFreakyEnding", label: "Add a random ending to /freaky" }),
+          r.h(Text, { muted: true }, "Commands send through Discord REST when Snow does not auto-send command results. /gifroulette uses your starred GIFs.")
+        );
+      }
+    };
+  }
+  MoreCommands.defaults = { addFreakyEnding: true };
+
   // MoreCommands.entry.js
-  var MoreCommands_entry_default = register({ "id": "mime.morecommands", "name": "MoreCommands", "description": "Migration entry: MoreCommands moved to GifRoulette; all other commands removed.", "version": "2.1.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/MoreCommands" }, MoreCommands);
+  var MoreCommands_entry_default = register({ "id": "mime.morecommands", "name": "MoreCommands", "description": "Fun and utility slash commands, including /gifroulette.", "version": "2.2.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/MoreCommands" }, MoreCommands);
   return __toCommonJS(MoreCommands_entry_exports);
 })();

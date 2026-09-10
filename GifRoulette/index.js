@@ -133,23 +133,107 @@ var plugin = (() => {
           if (r.active) callback(payload);
         }));
       },
+      channelId(ctx) {
+        if (typeof ctx === "string" && /^\d{5,}$/.test(ctx)) return ctx;
+        if (ctx && !Array.isArray(ctx)) {
+          const id = ctx.channel?.id || ctx.channel?.channelId || ctx.channelId || ctx.channel_id;
+          if (id) return id;
+        }
+        const selected = r.byStore("SelectedChannelStore");
+        return selected?.getChannelId?.() || selected?.getCurrentlySelectedChannelId?.() || selected?.getLastSelectedChannelId?.() || null;
+      },
+      async send(channelId, content) {
+        if (!channelId || content == null || content === "") return false;
+        const text = String(content);
+        try {
+          await r.discord(`/channels/${channelId}/messages`, { method: "POST", body: JSON.stringify({ content: text }) });
+          return true;
+        } catch (error) {
+          r.status.lastSendError = error?.message || String(error);
+        }
+        const util = r.find("sendMessage", "receiveMessage") || r.find("sendMessage", "sendBotMessage") || r.find("sendMessage");
+        const snowflake = r.find("fromTimestamp");
+        const nonce = typeof snowflake?.fromTimestamp === "function" ? String(snowflake.fromTimestamp(Date.now())) : String(Date.now());
+        const body = { content: text, tts: false, nonce, invalidEmojis: [], validNonShortcutEmojis: [] };
+        if (typeof util?.sendMessage === "function") {
+          try {
+            util.sendMessage(channelId, body);
+            return true;
+          } catch {
+          }
+          try {
+            util.sendMessage(channelId, body, true);
+            return true;
+          } catch {
+          }
+          try {
+            util.sendMessage(channelId, text);
+            return true;
+          } catch {
+          }
+        }
+        return false;
+      },
+      local(channelId, content) {
+        const util = r.find("sendBotMessage");
+        if (typeof util?.sendBotMessage === "function") {
+          try {
+            util.sendBotMessage(channelId, content);
+            return true;
+          } catch {
+          }
+        }
+        r.toast(String(content));
+        return false;
+      },
       command(command) {
         const register2 = r.api.commands?.registerCommand;
         if (typeof register2 !== "function") throw new Error(`${meta.name}: commands.registerCommand unavailable`);
+        if (!r._commands) r._commands = [];
+        if (r._nextCommandId == null) r._nextCommandId = -91e4 - Math.abs(hashId(meta.id)) % 9e3;
+        const name = command.name;
         const execute = command.execute;
-        return r.own(register2({
+        const prepared = {
           ...command,
-          options: command.options || [],
-          async execute(...args) {
+          name,
+          displayName: command.displayName || name,
+          displayDescription: command.displayDescription || command.description,
+          untranslatedName: command.untranslatedName || name,
+          untranslatedDescription: command.untranslatedDescription || command.description,
+          applicationId: "-1",
+          type: command.type ?? 1,
+          inputType: 0,
+          options: (command.options || []).map((opt) => ({
+            ...opt,
+            displayName: opt.displayName || opt.name,
+            displayDescription: opt.displayDescription || opt.description || opt.name
+          })),
+          async execute(args, ctx) {
             if (!r.active) return;
             try {
-              const result = await execute(...args);
-              return r.active ? result : void 0;
+              const result = await execute(args, ctx);
+              if (!r.active) return;
+              if (result && typeof result === "object" && typeof result.content === "string") {
+                const cid = r.channelId(ctx) || r.channelId(args);
+                if (cid && await r.send(cid, result.content)) return;
+              }
+              return result;
             } catch (error) {
-              if (r.active) r.error(`/${command.name}`, error);
+              if (r.active) r.error(`/${name}`, error);
             }
           }
-        }));
+        };
+        const remove = register2(prepared);
+        prepared.id = String(r._nextCommandId--);
+        r._commands.push(prepared);
+        patchCommandList(r);
+        return r.own(() => {
+          try {
+            remove?.();
+          } catch {
+          }
+          r._commands = r._commands.filter((item) => item !== prepared);
+        });
       },
       async request(url, options = {}, timeout = 15e3, maxBytes = Infinity) {
         if (!r.active) throw new Error("Plugin stopped");
@@ -202,17 +286,70 @@ var plugin = (() => {
         return r.request("https://discord.com/api/v9" + path, { ...options, headers: { "Content-Type": "application/json", ...options.headers, Authorization: token } });
       },
       hook(names, transform) {
+        const set = new Set(names);
         const jsx = B.api?.react?.jsx;
-        if (!jsx?.onJsxCreate || !jsx?.deleteJsxCreate) throw new Error(`${meta.name}: Snow JSX hooks unavailable`);
-        for (const name of names) {
-          const callback = (_Component, element) => {
-            if (!r.active) return;
-            r.status[name] = (r.status[name] || 0) + 1;
-            return transform(element, name);
-          };
-          jsx.onJsxCreate(name, callback);
-          r.own(() => jsx.deleteJsxCreate(name, callback));
+        if (jsx?.onJsxCreate && jsx?.deleteJsxCreate) {
+          for (const name of names) {
+            const callback = (_Component, element) => {
+              if (!r.active) return;
+              r.status[name] = (r.status[name] || 0) + 1;
+              try {
+                return transform(element, name);
+              } catch (error) {
+                r.error(`JSX ${name}`, error);
+              }
+            };
+            jsx.onJsxCreate(name, callback);
+            r.own(() => jsx.deleteJsxCreate(name, callback));
+          }
         }
+        r.patch("after", React, "createElement", (args, result) => {
+          if (!r.active || !result) return;
+          const type = args[0];
+          const name = typeof type === "string" ? type : type?.displayName || type?.name || type?.type?.name;
+          if (!name || !set.has(name)) return;
+          r.status[name] = (r.status[name] || 0) + 1;
+          try {
+            return transform(result, name) ?? result;
+          } catch (error) {
+            r.error(`createElement ${name}`, error);
+          }
+        });
+      },
+      patchRows(transform) {
+        const apply = (value) => {
+          try {
+            const wasString = typeof value === "string";
+            const rows = wasString ? JSON.parse(value) : value;
+            const next = transform(rows);
+            if (next == null) return value;
+            return wasString ? typeof next === "string" ? next : JSON.stringify(next) : next;
+          } catch {
+            return value;
+          }
+        };
+        const modules = r.RN.NativeModules || {};
+        for (const key of Object.keys(modules)) {
+          if (typeof modules[key]?.updateRows === "function") {
+            r.patch("before", modules[key], "updateRows", (args) => {
+              if (args && args[1] != null) args[1] = apply(args[1]);
+            });
+          }
+        }
+        const manager = r.byName("RowManager");
+        const proto = manager?.prototype || manager;
+        if (typeof proto?.generate === "function") {
+          r.patch("after", proto, "generate", (_args, row) => apply(row));
+        }
+      },
+      hideSheets() {
+        for (const close of [...openSheets.values()]) {
+          try {
+            close();
+          } catch {
+          }
+        }
+        openSheets.clear();
       },
       open(key, Component, props = {}) {
         const sheets = B.ui?.sheets;
@@ -288,6 +425,39 @@ var plugin = (() => {
     };
     return r;
   }
+  function hashId(value) {
+    let hash = 0;
+    for (const char of String(value || "")) hash = hash * 31 + char.charCodeAt(0) | 0;
+    return hash;
+  }
+  function patchCommandList(r) {
+    if (r._commandListPatched) return;
+    const module = r.find("getBuiltInCommands");
+    if (typeof module?.getBuiltInCommands !== "function") return;
+    r._commandListPatched = true;
+    r.patch("after", module, "getBuiltInCommands", (_args, result) => {
+      const list = Array.isArray(result) ? result : [];
+      const byName = Object.fromEntries((r._commands || []).map((command) => [command.name, command]));
+      if (!Object.keys(byName).length) return;
+      const seen = {};
+      const out = [];
+      for (const command of list) {
+        const name = command?.name || command?.untranslatedName;
+        if (name && byName[name]) {
+          if (seen[name]) continue;
+          seen[name] = true;
+          out.push(byName[name]);
+        } else out.push(command);
+      }
+      for (const command of r._commands || []) {
+        if (!seen[command.name]) {
+          out.push(command);
+          seen[command.name] = true;
+        }
+      }
+      return out;
+    });
+  }
   function ui(r) {
     const { h, C, D, RN, store } = r;
     function Text({ children, muted = false, heading = false, color, ...props }) {
@@ -326,7 +496,12 @@ var plugin = (() => {
         onValueChange: (v) => r.set(setting, v)
       });
     }
-    return { Text, Button, Page, Input, Toggle };
+    function Slider({ value, onValueChange, minimumValue = 0, maximumValue = 1, step, ...props }) {
+      const Comp = D.Slider || C.Slider;
+      if (Comp) return h(Comp, { value, onValueChange, minimumValue, maximumValue, step, ...props });
+      return h(Input, { value: String(value), onChange: (text) => onValueChange(Number(text) || 0), keyboardType: "numeric" });
+    }
+    return { Text, Button, Page, Input, Toggle, Slider };
   }
   function register(meta, factory) {
     const B = bunny;
@@ -367,53 +542,129 @@ var plugin = (() => {
   }
 
   // project:src/plugins/gif-roulette.js
-  function gifUrls(value) {
-    const source = value?.favoriteGifs?.gifs || value?.favorite_gifs?.gifs || value?.gifs || value?.favorites || value;
-    const urls = [];
-    function add(value2) {
-      if (typeof value2 !== "string" || !/^https?:\/\//i.test(value2)) return;
-      const proxy = value2.match(/\/external\/[^/]+\/(https?)\/([^?]+)/);
-      if (proxy) {
-        try {
-          value2 = proxy[1] + "://" + decodeURIComponent(proxy[2]);
-        } catch {
-          return;
-        }
+  function unwrapDiscordProxy(url) {
+    if (!url || typeof url !== "string") return url;
+    const match = url.match(/\/external\/[^/]+\/(https?)\/([^?]+)/);
+    if (match) {
+      try {
+        return match[1] + "://" + decodeURIComponent(match[2]);
+      } catch {
+        return url;
       }
-      if (!urls.includes(value2)) urls.push(value2);
     }
-    if (Array.isArray(source)) source.forEach((v) => add(typeof v === "string" ? v : v?.url || v?.src));
-    else if (source && typeof source === "object") Object.entries(source).forEach(([key, v]) => add(/^https?:/.test(key) ? key : typeof v === "string" ? v : v?.url || v?.src));
+    return url;
+  }
+  function isWeakGifUrl(url) {
+    return !url || url.includes("images-ext-") || url.includes("format=webp");
+  }
+  function gifUrlFrom(entry) {
+    if (!entry) return null;
+    if (typeof entry === "string") return /^https?:\/\//.test(entry) ? unwrapDiscordProxy(entry) : null;
+    const raw = entry.url || entry.gif || entry.uri || entry.src || entry.video || entry.sourceURI;
+    return raw ? unwrapDiscordProxy(raw) : null;
+  }
+  function favoriteGifsMapFrom(value) {
+    if (!value) return null;
+    if (Array.isArray(value) || Array.isArray(value.favorites)) return value.favorites || value;
+    if (value.favoriteGifs?.gifs) return value.favoriteGifs.gifs;
+    if (value.favorite_gifs?.gifs) return value.favorite_gifs.gifs;
+    if (value.gifs && typeof value.gifs === "object") return value.gifs;
+    if (value.favoriteGifs && typeof value.favoriteGifs === "object") return value.favoriteGifs;
+    if (value.favoriteGIFs && typeof value.favoriteGIFs === "object") return value.favoriteGIFs;
+    return null;
+  }
+  function collectGifUrls(gifs) {
+    const urls = [];
+    const push = (url) => {
+      if (url && !urls.includes(url)) urls.push(url);
+    };
+    if (!gifs) return urls;
+    if (typeof gifs.forEach === "function" && typeof gifs.keys === "function" && !Array.isArray(gifs)) {
+      gifs.forEach((val, key) => {
+        if (typeof key === "string" && /^https?:\/\//.test(key)) push(unwrapDiscordProxy(key));
+        else push(gifUrlFrom(val));
+      });
+      return urls;
+    }
+    if (Array.isArray(gifs)) {
+      for (const item of gifs) push(gifUrlFrom(item));
+      return urls;
+    }
+    for (const [key, value] of Object.entries(gifs)) {
+      if (/^https?:\/\//.test(key)) push(unwrapDiscordProxy(key));
+      else push(gifUrlFrom(value));
+    }
     return urls;
   }
+  function readFavoriteGifsFromModule(mod) {
+    if (!mod) return null;
+    const inner = mod.FrecencyUserSettingsActionCreators || mod.default || mod;
+    try {
+      inner.loadIfNecessary?.();
+    } catch {
+    }
+    for (const getter of ["getCurrentValue", "getState", "getFavoriteGifs", "getFavoriteGIFs", "getSavedGifs", "getFavorites", "getFavoriteGIFsMobile"]) {
+      if (typeof inner[getter] !== "function") continue;
+      try {
+        const value = inner[getter]();
+        const map = favoriteGifsMapFrom(value) || favoriteGifsMapFrom(value?.frecencyUserSettings) || favoriteGifsMapFrom(value?.settings);
+        if (map && collectGifUrls(map).length) return map;
+      } catch {
+      }
+    }
+    if (Array.isArray(inner.favorites) && inner.favorites.length) return inner.favorites;
+    return favoriteGifsMapFrom(inner.favoriteGifs) || favoriteGifsMapFrom(inner);
+  }
+  function pickFavoriteGif(r) {
+    const modules = [
+      r.find("addFavoriteGIF"),
+      r.find("useFavoriteGIFsMobile"),
+      r.find("FrecencyUserSettingsActionCreators"),
+      r.byStore("FrecencyUserSettingsStore"),
+      r.byStore("FavoriteGIFStore"),
+      r.byStore("UserSettingsProtoStore"),
+      r.find("favoriteGifs"),
+      r.find("getFavoriteGifs"),
+      r.find("getFavoriteGIFs"),
+      r.find("loadIfNecessary", "getCurrentValue"),
+      r.find("ProtoClass", "getCurrentValue")
+    ].filter(Boolean);
+    let urls = [];
+    for (const module of modules) {
+      urls = collectGifUrls(readFavoriteGifsFromModule(module));
+      if (urls.length) break;
+    }
+    if (!urls.length) return null;
+    const strong = urls.filter((url) => !isWeakGifUrl(url));
+    const pool = strong.length ? strong : urls;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+  async function sendFavoriteGif(r, ctx) {
+    const channelId = r.channelId(ctx);
+    const url = pickFavoriteGif(r);
+    if (!url) {
+      r.local(channelId, "No favorite GIFs found. Star a GIF in the GIF picker first.");
+      r.toast("No favorite GIFs found. Star a GIF in Discord first.");
+      return;
+    }
+    if (channelId && await r.send(channelId, url)) return;
+    return { content: url };
+  }
   function GifRoulette(r) {
-    return { start() {
-      r.command({ name: "gifroulette", description: "Send a random favorite GIF", async execute() {
-        const modules = [
-          r.find("addFavoriteGIF"),
-          r.find("getFavoriteGIFs"),
-          r.find("getFavoriteGifs"),
-          r.find("FrecencyUserSettingsActionCreators")?.FrecencyUserSettingsActionCreators,
-          r.byStore("FavoriteGIFStore"),
-          r.byStore("FrecencyUserSettingsStore"),
-          r.find("loadIfNecessary", "getCurrentValue")
-        ];
-        for (const module of modules.filter(Boolean)) {
-          if (module.loadIfNecessary) await module.loadIfNecessary();
-          for (const getter of ["getCurrentValue", "getState", "getFavoriteGIFs", "getFavoriteGifs", "getFavorites"]) {
-            if (typeof module[getter] !== "function") continue;
-            const urls2 = gifUrls(module[getter]());
-            if (urls2.length) return { content: urls2[Math.floor(Math.random() * urls2.length)] };
+    return {
+      start() {
+        r.command({
+          name: "gifroulette",
+          description: "Send a random favorite GIF",
+          execute(_args, ctx) {
+            return sendFavoriteGif(r, ctx);
           }
-          const urls = gifUrls(module);
-          if (urls.length) return { content: urls[Math.floor(Math.random() * urls.length)] };
-        }
-        r.toast("No favorite GIFs found. Star a GIF in Discord first.");
-      } });
-    } };
+        });
+      }
+    };
   }
 
   // GifRoulette.entry.js
-  var GifRoulette_entry_default = register({ "id": "mime.gifroulette", "name": "GifRoulette", "description": "Send one random favorite GIF with /gifroulette.", "version": "2.1.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/GifRoulette" }, GifRoulette);
+  var GifRoulette_entry_default = register({ "id": "mime.gifroulette", "name": "GifRoulette", "description": "Send one random favorite GIF with /gifroulette.", "version": "2.2.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/GifRoulette" }, GifRoulette);
   return __toCommonJS(GifRoulette_entry_exports);
 })();

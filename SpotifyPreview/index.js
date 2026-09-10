@@ -133,23 +133,107 @@ var plugin = (() => {
           if (r.active) callback(payload);
         }));
       },
+      channelId(ctx) {
+        if (typeof ctx === "string" && /^\d{5,}$/.test(ctx)) return ctx;
+        if (ctx && !Array.isArray(ctx)) {
+          const id = ctx.channel?.id || ctx.channel?.channelId || ctx.channelId || ctx.channel_id;
+          if (id) return id;
+        }
+        const selected = r.byStore("SelectedChannelStore");
+        return selected?.getChannelId?.() || selected?.getCurrentlySelectedChannelId?.() || selected?.getLastSelectedChannelId?.() || null;
+      },
+      async send(channelId, content) {
+        if (!channelId || content == null || content === "") return false;
+        const text = String(content);
+        try {
+          await r.discord(`/channels/${channelId}/messages`, { method: "POST", body: JSON.stringify({ content: text }) });
+          return true;
+        } catch (error) {
+          r.status.lastSendError = error?.message || String(error);
+        }
+        const util = r.find("sendMessage", "receiveMessage") || r.find("sendMessage", "sendBotMessage") || r.find("sendMessage");
+        const snowflake = r.find("fromTimestamp");
+        const nonce = typeof snowflake?.fromTimestamp === "function" ? String(snowflake.fromTimestamp(Date.now())) : String(Date.now());
+        const body = { content: text, tts: false, nonce, invalidEmojis: [], validNonShortcutEmojis: [] };
+        if (typeof util?.sendMessage === "function") {
+          try {
+            util.sendMessage(channelId, body);
+            return true;
+          } catch {
+          }
+          try {
+            util.sendMessage(channelId, body, true);
+            return true;
+          } catch {
+          }
+          try {
+            util.sendMessage(channelId, text);
+            return true;
+          } catch {
+          }
+        }
+        return false;
+      },
+      local(channelId, content) {
+        const util = r.find("sendBotMessage");
+        if (typeof util?.sendBotMessage === "function") {
+          try {
+            util.sendBotMessage(channelId, content);
+            return true;
+          } catch {
+          }
+        }
+        r.toast(String(content));
+        return false;
+      },
       command(command) {
         const register2 = r.api.commands?.registerCommand;
         if (typeof register2 !== "function") throw new Error(`${meta.name}: commands.registerCommand unavailable`);
+        if (!r._commands) r._commands = [];
+        if (r._nextCommandId == null) r._nextCommandId = -91e4 - Math.abs(hashId(meta.id)) % 9e3;
+        const name = command.name;
         const execute = command.execute;
-        return r.own(register2({
+        const prepared = {
           ...command,
-          options: command.options || [],
-          async execute(...args) {
+          name,
+          displayName: command.displayName || name,
+          displayDescription: command.displayDescription || command.description,
+          untranslatedName: command.untranslatedName || name,
+          untranslatedDescription: command.untranslatedDescription || command.description,
+          applicationId: "-1",
+          type: command.type ?? 1,
+          inputType: 0,
+          options: (command.options || []).map((opt) => ({
+            ...opt,
+            displayName: opt.displayName || opt.name,
+            displayDescription: opt.displayDescription || opt.description || opt.name
+          })),
+          async execute(args, ctx) {
             if (!r.active) return;
             try {
-              const result = await execute(...args);
-              return r.active ? result : void 0;
+              const result = await execute(args, ctx);
+              if (!r.active) return;
+              if (result && typeof result === "object" && typeof result.content === "string") {
+                const cid = r.channelId(ctx) || r.channelId(args);
+                if (cid && await r.send(cid, result.content)) return;
+              }
+              return result;
             } catch (error) {
-              if (r.active) r.error(`/${command.name}`, error);
+              if (r.active) r.error(`/${name}`, error);
             }
           }
-        }));
+        };
+        const remove = register2(prepared);
+        prepared.id = String(r._nextCommandId--);
+        r._commands.push(prepared);
+        patchCommandList(r);
+        return r.own(() => {
+          try {
+            remove?.();
+          } catch {
+          }
+          r._commands = r._commands.filter((item) => item !== prepared);
+        });
       },
       async request(url, options = {}, timeout = 15e3, maxBytes = Infinity) {
         if (!r.active) throw new Error("Plugin stopped");
@@ -202,17 +286,70 @@ var plugin = (() => {
         return r.request("https://discord.com/api/v9" + path, { ...options, headers: { "Content-Type": "application/json", ...options.headers, Authorization: token } });
       },
       hook(names, transform) {
+        const set = new Set(names);
         const jsx = B.api?.react?.jsx;
-        if (!jsx?.onJsxCreate || !jsx?.deleteJsxCreate) throw new Error(`${meta.name}: Snow JSX hooks unavailable`);
-        for (const name of names) {
-          const callback = (_Component, element) => {
-            if (!r.active) return;
-            r.status[name] = (r.status[name] || 0) + 1;
-            return transform(element, name);
-          };
-          jsx.onJsxCreate(name, callback);
-          r.own(() => jsx.deleteJsxCreate(name, callback));
+        if (jsx?.onJsxCreate && jsx?.deleteJsxCreate) {
+          for (const name of names) {
+            const callback = (_Component, element) => {
+              if (!r.active) return;
+              r.status[name] = (r.status[name] || 0) + 1;
+              try {
+                return transform(element, name);
+              } catch (error) {
+                r.error(`JSX ${name}`, error);
+              }
+            };
+            jsx.onJsxCreate(name, callback);
+            r.own(() => jsx.deleteJsxCreate(name, callback));
+          }
         }
+        r.patch("after", React, "createElement", (args, result) => {
+          if (!r.active || !result) return;
+          const type = args[0];
+          const name = typeof type === "string" ? type : type?.displayName || type?.name || type?.type?.name;
+          if (!name || !set.has(name)) return;
+          r.status[name] = (r.status[name] || 0) + 1;
+          try {
+            return transform(result, name) ?? result;
+          } catch (error) {
+            r.error(`createElement ${name}`, error);
+          }
+        });
+      },
+      patchRows(transform) {
+        const apply = (value) => {
+          try {
+            const wasString = typeof value === "string";
+            const rows = wasString ? JSON.parse(value) : value;
+            const next = transform(rows);
+            if (next == null) return value;
+            return wasString ? typeof next === "string" ? next : JSON.stringify(next) : next;
+          } catch {
+            return value;
+          }
+        };
+        const modules = r.RN.NativeModules || {};
+        for (const key of Object.keys(modules)) {
+          if (typeof modules[key]?.updateRows === "function") {
+            r.patch("before", modules[key], "updateRows", (args) => {
+              if (args && args[1] != null) args[1] = apply(args[1]);
+            });
+          }
+        }
+        const manager = r.byName("RowManager");
+        const proto = manager?.prototype || manager;
+        if (typeof proto?.generate === "function") {
+          r.patch("after", proto, "generate", (_args, row) => apply(row));
+        }
+      },
+      hideSheets() {
+        for (const close of [...openSheets.values()]) {
+          try {
+            close();
+          } catch {
+          }
+        }
+        openSheets.clear();
       },
       open(key, Component, props = {}) {
         const sheets = B.ui?.sheets;
@@ -288,6 +425,39 @@ var plugin = (() => {
     };
     return r;
   }
+  function hashId(value) {
+    let hash = 0;
+    for (const char of String(value || "")) hash = hash * 31 + char.charCodeAt(0) | 0;
+    return hash;
+  }
+  function patchCommandList(r) {
+    if (r._commandListPatched) return;
+    const module = r.find("getBuiltInCommands");
+    if (typeof module?.getBuiltInCommands !== "function") return;
+    r._commandListPatched = true;
+    r.patch("after", module, "getBuiltInCommands", (_args, result) => {
+      const list = Array.isArray(result) ? result : [];
+      const byName = Object.fromEntries((r._commands || []).map((command) => [command.name, command]));
+      if (!Object.keys(byName).length) return;
+      const seen = {};
+      const out = [];
+      for (const command of list) {
+        const name = command?.name || command?.untranslatedName;
+        if (name && byName[name]) {
+          if (seen[name]) continue;
+          seen[name] = true;
+          out.push(byName[name]);
+        } else out.push(command);
+      }
+      for (const command of r._commands || []) {
+        if (!seen[command.name]) {
+          out.push(command);
+          seen[command.name] = true;
+        }
+      }
+      return out;
+    });
+  }
   function ui(r) {
     const { h, C, D, RN, store } = r;
     function Text({ children, muted = false, heading = false, color, ...props }) {
@@ -326,7 +496,12 @@ var plugin = (() => {
         onValueChange: (v) => r.set(setting, v)
       });
     }
-    return { Text, Button, Page, Input, Toggle };
+    function Slider({ value, onValueChange, minimumValue = 0, maximumValue = 1, step, ...props }) {
+      const Comp = D.Slider || C.Slider;
+      if (Comp) return h(Comp, { value, onValueChange, minimumValue, maximumValue, step, ...props });
+      return h(Input, { value: String(value), onChange: (text) => onValueChange(Number(text) || 0), keyboardType: "numeric" });
+    }
+    return { Text, Button, Page, Input, Toggle, Slider };
   }
   function register(meta, factory) {
     const B = bunny;
@@ -368,33 +543,49 @@ var plugin = (() => {
 
   // project:src/url-hub.js
   var KEY = /* @__PURE__ */ Symbol.for("mime.snow.urlHandlers.v1");
+  function install(target, method, hub) {
+    if (!target || typeof target[method] !== "function" || target[method] === hub.wrapper) return;
+    const original = target[method];
+    const wrapper = function(...args) {
+      const url = typeof args[0] === "string" ? args[0] : args[0]?.url || args[0]?.uri;
+      if (url) for (const entry of [...hub.handlers]) {
+        try {
+          if (entry.handler(url, () => original.apply(this, args))) return;
+        } catch (error) {
+          entry.r.error("Open link", error);
+        }
+      }
+      return original.apply(this, args);
+    };
+    hub.restores.push(() => {
+      if (target[method] === wrapper) target[method] = original;
+    });
+    target[method] = wrapper;
+  }
   function addUrlHandler(r, priority, handler) {
     let hub = globalThis[KEY];
     if (!hub) {
-      const target = r.common.url?.openURL ? r.common.url : r.find("openURL", "openDeeplink");
-      if (!target?.openURL) throw new Error("This Discord build has no supported openURL module");
-      hub = { handlers: [], original: target.openURL, target };
-      hub.wrapper = function(...args) {
-        const url = typeof args[0] === "string" ? args[0] : args[0]?.url;
-        if (url) for (const entry2 of [...hub.handlers]) {
-          try {
-            if (entry2.handler(url, () => hub.original.apply(this, args))) return;
-          } catch (error) {
-            entry2.r.error("Open link", error);
-          }
-        }
-        return hub.original.apply(this, args);
-      };
-      target.openURL = hub.wrapper;
+      hub = { handlers: [], restores: [] };
+      const urlMod = r.common.url?.openURL ? r.common.url : r.find("openURL", "openDeeplink") || r.find("openURL", "handleURL");
+      install(urlMod, "openURL", hub);
+      install(urlMod, "openDeeplink", hub);
+      install(urlMod, "handleURL", hub);
+      install(r.RN.Linking, "openURL", hub);
+      const linkingMod = r.find("openURL", "canOpenURL");
+      if (linkingMod !== urlMod && linkingMod !== r.RN.Linking) install(linkingMod, "openURL", hub);
+      if (!hub.restores.length) throw new Error("This Discord build has no supported openURL module");
       globalThis[KEY] = hub;
     }
     const entry = { r, priority, handler };
     hub.handlers.push(entry);
     hub.handlers.sort((a, b) => b.priority - a.priority);
     r.own(() => {
-      hub.handlers = hub.handlers.filter((x) => x !== entry);
+      hub.handlers = hub.handlers.filter((item) => item !== entry);
       if (!hub.handlers.length) {
-        if (hub.target.openURL === hub.wrapper) hub.target.openURL = hub.original;
+        for (const restore of hub.restores) try {
+          restore();
+        } catch {
+        }
         delete globalThis[KEY];
       }
     });
@@ -426,14 +617,15 @@ var plugin = (() => {
       React.useEffect(() => () => {
         close = null;
       }, []);
-      const WebView = r.find("WebView")?.WebView || r.byName("WebView");
+      const WebView = r.find("WebView")?.WebView || r.find("RCTWebView")?.default || r.byName("WebView") || r.byName("RCTWebView");
       return h(
         Page,
         { title: "Spotify preview", close: dismiss },
         h(Text, { muted: true }, "Playback availability and length are controlled by Spotify."),
-        state === "loading" ? h(RN.ActivityIndicator) : null,
+        !WebView ? h(Text, null, "WebView is unavailable on this build. Use Open Spotify below.") : null,
+        state === "loading" && WebView ? h(RN.ActivityIndicator) : null,
         state === "error" ? h(Text, null, "Preview could not load. Retry or open Spotify.") : null,
-        h(WebView, {
+        WebView ? h(WebView, {
           key,
           source: { uri: link.embed },
           style: { height: 352, backgroundColor: "transparent" },
@@ -450,10 +642,10 @@ var plugin = (() => {
               return false;
             }
           }
-        }),
+        }) : null,
         h(Button, { text: "Open Spotify", onPress: async () => {
           try {
-            await openExternal(r, await RN.Linking.canOpenURL(link.app) ? link.app : link.url);
+            await openExternal(r, link.app).catch(() => openExternal(r, link.url));
             dismiss();
           } catch (e) {
             r.error("Spotify", e);
@@ -476,10 +668,15 @@ var plugin = (() => {
     return { start() {
       addUrlHandler(r, 100, (url, fallback) => {
         const link = spotifyLink(url);
-        if (!r.store.enabled || !link || !(r.find("WebView")?.WebView || r.byName("WebView"))) return false;
-        close?.();
-        close = r.open("preview", Preview, { link, fallback });
-        return true;
+        if (!r.store.enabled || !link) return false;
+        try {
+          close?.();
+          close = r.open("preview", Preview, { link, fallback });
+          return true;
+        } catch (error) {
+          r.error("Spotify preview", error);
+          return false;
+        }
       });
     }, stop() {
       close?.();
@@ -488,6 +685,6 @@ var plugin = (() => {
   SpotifyPreview.defaults = { enabled: true };
 
   // SpotifyPreview.entry.js
-  var SpotifyPreview_entry_default = register({ "id": "mime.spotifypreview", "name": "SpotifyPreview", "description": "Official Spotify embeds in an owned Snow sheet.", "version": "2.1.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/SpotifyPreview" }, SpotifyPreview);
+  var SpotifyPreview_entry_default = register({ "id": "mime.spotifypreview", "name": "SpotifyPreview", "description": "Official Spotify embeds in an owned Snow sheet.", "version": "2.2.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/SpotifyPreview" }, SpotifyPreview);
   return __toCommonJS(SpotifyPreview_entry_exports);
 })();

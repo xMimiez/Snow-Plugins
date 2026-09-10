@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.decor",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "display": {
     "name": "Decor",
     "description": "Create and equip Decor avatar decorations. PNG/APNG preserved; JPEG converted locally.",

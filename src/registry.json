@@ -5,7 +5,7 @@
     "id": "mime.debugconsole",
     "name": "DebugConsole",
     "description": "Readable live logs with clear, copy, search and severity filters.",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "authors": [
       {
         "name": "Mime | N0_.q3",
@@ -21,7 +21,7 @@
     "id": "mime.decor",
     "name": "Decor",
     "description": "Create and equip Decor avatar decorations. PNG/APNG preserved; JPEG converted locally.",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "authors": [
       {
         "name": "Fiery",
@@ -41,7 +41,7 @@
     "id": "mime.gifroulette",
     "name": "GifRoulette",
     "description": "Send one random favorite GIF with /gifroulette.",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "authors": [
       {
         "name": "Mime | N0_.q3",
@@ -57,7 +57,7 @@
     "id": "mime.highlightcode",
     "name": "HighlightCode",
     "description": "Highlight supported native chat code blocks.",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "authors": [
       {
         "name": "mafu",
@@ -76,8 +76,8 @@
     "module": "more-commands",
     "id": "mime.morecommands",
     "name": "MoreCommands",
-    "description": "Migration entry: MoreCommands moved to GifRoulette; all other commands removed.",
-    "version": "2.1.0",
+    "description": "Fun and utility slash commands, including /gifroulette.",
+    "version": "2.2.0",
     "authors": [
       {
         "name": "Mime | N0_.q3",
@@ -93,7 +93,7 @@
     "id": "mime.nitrosniper",
     "name": "NitroSniper",
     "description": "Process new gift links with a deduplicated queue and visible results.",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "authors": [
       {
         "name": "neoarz",
@@ -113,7 +113,7 @@
     "id": "mime.previewfile",
     "name": "PreviewFile",
     "description": "Expandable previews for supported text attachments.",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "authors": [
       {
         "name": "mafu",
@@ -133,7 +133,7 @@
     "id": "mime.replytostatus",
     "name": "ReplyToStatus",
     "description": "One themed status-reply button per profile with rendered emojis.",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "authors": [
       {
         "name": "Mime | N0_.q3",
@@ -149,7 +149,7 @@
     "id": "mime.spotifypreview",
     "name": "SpotifyPreview",
     "description": "Official Spotify embeds in an owned Snow sheet.",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "authors": [
       {
         "name": "Mime | N0_.q3",
@@ -165,7 +165,7 @@
     "id": "mime.testplugin",
     "name": "TestPlugin",
     "description": "Native Snow compatibility checks, sibling files, popups and isolated WebView CSS.",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "authors": [
       {
         "name": "Mime | N0_.q3",
@@ -182,7 +182,7 @@
     "id": "mime.alwaysanimate",
     "name": "AlwaysAnimate",
     "description": "Enable supported animated mobile UI props.",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "authors": [
       {
         "name": "Fiery",
@@ -203,7 +203,7 @@
     "id": "mime.blurnsfw",
     "name": "BlurNSFW",
     "description": "Tap-to-reveal sensitive media on supported mobile components.",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "authors": [
       {
         "name": "Vendicated",
@@ -224,7 +224,7 @@
     "id": "mime.nsfwgatebypass",
     "name": "NSFWGateBypass",
     "description": "Bypass supported local guild interstitials without mutating account settings.",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "authors": [
       {
         "name": "eternal",
@@ -244,8 +244,8 @@
     "exportName": "VolumeBooster",
     "id": "mime.volumebooster",
     "name": "VolumeBooster",
-    "description": "Compatibility probe: native gain API still required; no audio boosting yet.",
-    "version": "1.1.0",
+    "description": "Raise Discord voice volume using native MediaEngine/VoiceEngine setters and unlocked sliders.",
+    "version": "1.2.0",
     "authors": [
       {
         "name": "Nuckyz",
@@ -269,8 +269,8 @@
     "exportName": "ValidUser",
     "id": "mime.validuser",
     "name": "ValidUser",
-    "description": "Resolve a user ID and populate available user data.",
-    "version": "1.1.0",
+    "description": "Automatically resolve unknown mentions and replace @Unknown User.",
+    "version": "1.2.0",
     "authors": [
       {
         "name": "Vendicated",
@@ -294,8 +294,8 @@
     "exportName": "OpenInApp",
     "id": "mime.openinapp",
     "name": "OpenInApp",
-    "description": "Open supported service links in installed apps, with browser fallback.",
-    "version": "1.1.0",
+    "description": "Open Spotify, Steam, Telegram, Instagram, TikTok and other service links in their apps.",
+    "version": "1.2.0",
     "authors": [
       {
         "name": "Vendicated",
@@ -320,7 +320,7 @@
     "id": "mime.pauseinvitesforever",
     "name": "PauseInvitesForever",
     "description": "Pause and resume server invites with explicit confirmation.",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "authors": [
       {
         "name": "Dolfies",
@@ -337,26 +337,5 @@
     ],
     "license": "GPL-3.0-or-later",
     "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PauseInvitesForever"
-  },
-  {
-    "folder": "OnePingPerDM",
-    "module": "mobile-ports",
-    "exportName": "OnePingPerDM",
-    "id": "mime.onepingperdm",
-    "name": "OnePingPerDM",
-    "description": "Compatibility probe: message-aware native audio hook still required.",
-    "version": "1.1.0",
-    "authors": [
-      {
-        "name": "ProffDea",
-        "id": "609329952180928513"
-      },
-      {
-        "name": "Mime | N0_.q3",
-        "id": "957164619061932045"
-      }
-    ],
-    "license": "GPL-3.0-or-later",
-    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/OnePingPerDM"
   }
 ]

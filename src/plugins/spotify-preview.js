@@ -12,19 +12,25 @@ export default function SpotifyPreview(r) {
         const [state, setState] = React.useState('loading'), [key, retry] = React.useState(0);
         React.useEffect(() => { const timer = setTimeout(() => setState(s => s === 'loading' ? 'error' : s), 20000); return () => clearTimeout(timer); }, [key]);
         React.useEffect(() => () => { close = null; }, []);
-        const WebView = r.find('WebView')?.WebView || r.byName('WebView');
+        const WebView = r.find('WebView')?.WebView || r.find('RCTWebView')?.default || r.byName('WebView') || r.byName('RCTWebView');
         return h(Page, { title: 'Spotify preview', close: dismiss },
             h(Text, { muted: true }, 'Playback availability and length are controlled by Spotify.'),
-            state === 'loading' ? h(RN.ActivityIndicator) : null,
+            !WebView ? h(Text, null, 'WebView is unavailable on this build. Use Open Spotify below.') : null,
+            state === 'loading' && WebView ? h(RN.ActivityIndicator) : null,
             state === 'error' ? h(Text, null, 'Preview could not load. Retry or open Spotify.') : null,
-            h(WebView, { key, source: { uri: link.embed }, style: { height: 352, backgroundColor: 'transparent' }, javaScriptEnabled: true,
+            WebView ? h(WebView, { key, source: { uri: link.embed }, style: { height: 352, backgroundColor: 'transparent' }, javaScriptEnabled: true,
                 originWhitelist: ['https://*'], onLoadEnd: () => setState(s => s === 'error' ? s : 'ready'), onError: () => setState('error'), onHttpError: () => setState('error'),
-                onShouldStartLoadWithRequest: request => { try { const u = new URL(request.url); return u.protocol === 'https:' && (u.hostname === 'open.spotify.com' || u.hostname.endsWith('.spotify.com') || u.hostname === 'spotify.com'); } catch { return false; } } }),
-            h(Button, { text: 'Open Spotify', onPress: async () => { try { await openExternal(r, (await RN.Linking.canOpenURL(link.app)) ? link.app : link.url); dismiss(); } catch (e) { r.error('Spotify', e); } } }),
+                onShouldStartLoadWithRequest: request => { try { const u = new URL(request.url); return u.protocol === 'https:' && (u.hostname === 'open.spotify.com' || u.hostname.endsWith('.spotify.com') || u.hostname === 'spotify.com'); } catch { return false; } } }) : null,
+            h(Button, { text: 'Open Spotify', onPress: async () => { try { await openExternal(r, link.app).catch(() => openExternal(r, link.url)); dismiss(); } catch (e) { r.error('Spotify', e); } } }),
             h(Button, { text: 'Open original link', variant: 'secondary', onPress: () => { dismiss(); fallback(); } }),
             state === 'error' ? h(Button, { text: 'Retry', variant: 'secondary', onPress: () => { setState('loading'); retry(n => n + 1); } }) : null);
     }
     function Settings() { r.useRefresh(); return h(Page, { title: 'SpotifyPreview' }, h(Toggle, { setting: 'enabled', label: 'Preview Spotify links' }), h(Text, { muted: true }, 'Uses the official Spotify embed. Links still open normally if Snow’s sheet or WebView is unavailable.')); }
-    return { start() { addUrlHandler(r, 100, (url, fallback) => { const link = spotifyLink(url); if (!r.store.enabled || !link || !(r.find('WebView')?.WebView || r.byName('WebView'))) return false; close?.(); close = r.open('preview', Preview, { link, fallback }); return true; }); }, stop() { close?.(); }, Settings };
+    return { start() { addUrlHandler(r, 100, (url, fallback) => {
+        const link = spotifyLink(url);
+        if (!r.store.enabled || !link) return false;
+        try { close?.(); close = r.open('preview', Preview, { link, fallback }); return true; }
+        catch (error) { r.error('Spotify preview', error); return false; }
+    }); }, stop() { close?.(); }, Settings };
 }
 SpotifyPreview.defaults = { enabled: true };
