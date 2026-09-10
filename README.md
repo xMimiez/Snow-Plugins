@@ -25,17 +25,17 @@ These releases use **Bunny spec 3**. Install from the `manifest.json` URL, then 
 | [ValidUser](ValidUser/) | 1.2.0 | Auto-resolve unknown mentions and replace @Unknown User. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/ValidUser/manifest.json) |
 | [OpenInApp](OpenInApp/) | 1.2.0 | Open Spotify, Steam, Telegram, Instagram, TikTok and other apps. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/OpenInApp/manifest.json) |
 | [PauseInvitesForever](PauseInvitesForever/) | 1.2.0 | `/pauseinvites` and `/resumeinvites` with separate confirmations. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/PauseInvitesForever/manifest.json) |
-| [InstallLinks](InstallLinks/) | 1.0.2 | Clickable https install links. Uses Snow’s preview → install candidate → enable API. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/InstallLinks/manifest.json) |
+| [InstallLinks](InstallLinks/) | 1.0.3 | `snow://` install-plugin links. Preview, install, and enable via Snow’s external plugin API. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/InstallLinks/manifest.json) |
 
 ## Snow install links
 
-Discord’s native chat **does not autolink `snow://`**. Send a normal https plugin URL instead (or use `/snowlink`, which posts a markdown link):
+InstallLinks sends a `snow://` install-plugin URL, not a GitHub hyperlink:
 
 ```text
-[Install Snow plugin](https://github.com/xMimiez/Snow-Plugins/raw/refs/heads/main/Decor/manifest.json)
+snow://snow?id=-1&command=install-plugin&params=https%3A%2F%2Fraw.githubusercontent.com%2FxMimiez%2FSnow-Plugins%2Fmain%2FDecor%2Fmanifest.json
 ```
 
-Tapping that https `manifest.json` URL opens the install sheet. Already-sent `snow://…params=https%3A%2F%2F…` messages are rewritten in native rows to the decoded https URL so they can be tapped. `/installplugin url:` still accepts either form.
+`/snowlink url:` posts that string. Taps on `snow://` open preview → `installExternalPluginCandidate` → `enableExternalPlugin`.
 
 ## Development
 

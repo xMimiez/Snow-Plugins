@@ -2,10 +2,10 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.installlinks",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "display": {
     "name": "InstallLinks",
-    "description": "Clickable https install links for Snow plugins; intercepts snow:// and manifest.json taps.",
+    "description": "Send and open snow:// install-plugin links.",
     "authors": [
       {
         "name": "Mime | N0_.q3",

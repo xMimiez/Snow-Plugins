@@ -1,24 +1,10 @@
 import { ui } from '../runtime.js';
 import { addUrlHandler } from '../url-hub.js';
 
-const SCHEME_RE = /(?:snow|enmity):\/\/[^\s<>\]]+/gi;
+const SCHEME_RE = /snow:\/\/[^\s<>\]]+/gi;
 
 export function snowInstallLink(pluginUrl) {
     return 'snow://snow?id=-1&command=install-plugin&params=' + encodeURIComponent(pluginUrl);
-}
-
-export function clickableInstallMessage(pluginUrl) {
-    const url = sanitizePluginUrl(pluginUrl);
-    if (!url) return null;
-    return `[Install Snow plugin](${url})`;
-}
-
-export function isManifestUrl(url) {
-    try {
-        const parsed = new URL(url);
-        if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return false;
-        return /\/(manifest|snow\.plugin)\.json$/i.test(parsed.pathname);
-    } catch { return false; }
 }
 
 export function parseInstallLink(value) {
@@ -26,26 +12,14 @@ export function parseInstallLink(value) {
     const trimmed = value.trim();
     let parsed;
     try { parsed = new URL(trimmed); } catch { return null; }
-    const protocol = parsed.protocol.replace(':', '').toLowerCase();
+    if (parsed.protocol.replace(':', '').toLowerCase() !== 'snow') return null;
     const host = (parsed.hostname || parsed.host || '').toLowerCase();
     const path = (parsed.pathname || '').replace(/^\//, '');
     const command = (parsed.searchParams.get('command') || path || '').toLowerCase();
     const param = parsed.searchParams.get('params') || parsed.searchParams.get('url') || parsed.searchParams.get('plugin') || '';
-    if (protocol === 'snow' || protocol === 'enmity') {
-        if (command === 'install-plugin' || command === 'installplugin' || path === 'install-plugin' || path === 'plugin') {
-            const url = sanitizePluginUrl(param);
-            return url ? { kind: 'plugin', source: protocol, url, raw: trimmed } : null;
-        }
-        if (path === 'install' || host === 'install-plugin' || host === 'plugin') {
-            const url = sanitizePluginUrl(param);
-            return url ? { kind: 'plugin', source: protocol, url, raw: trimmed } : null;
-        }
-    }
-    if (protocol === 'https') {
-        const wrapped = sanitizePluginUrl(param);
-        if (command === 'install-plugin' && wrapped) return { kind: 'plugin', source: 'https', url: wrapped, raw: trimmed };
-        const https = sanitizePluginUrl(trimmed);
-        if (https && isManifestUrl(https)) return { kind: 'plugin', source: 'https', url: https, raw: trimmed };
+    if (command === 'install-plugin' || command === 'installplugin' || path === 'install-plugin' || path === 'plugin' || path === 'install' || host === 'install-plugin' || host === 'plugin') {
+        const url = sanitizePluginUrl(param);
+        return url ? { kind: 'plugin', source: 'snow', url, raw: trimmed } : null;
     }
     return null;
 }
@@ -65,27 +39,58 @@ export function sanitizePluginUrl(value) {
     return url.href;
 }
 
-export function rewriteSnowLinks(text) {
-    if (typeof text !== 'string' || text.indexOf('://') < 0) return text;
-    return text.replace(SCHEME_RE, match => parseInstallLink(match)?.url || match);
-}
-
-export function classifyArtifact(text, url) {
-    const sample = String(text || '').slice(0, 4000);
-    if (/["']spec["']\s*:\s*3/.test(sample) && /["']type["']\s*:\s*["']plugin["']/.test(sample)) return 'snow-manifest';
-    if (/schemaVersion["']?\s*:\s*2/.test(sample) && /apiVersion["']?\s*:\s*1/.test(sample)) return 'snow-native-manifest';
-    if (/__snowRegisterPlugin/.test(sample) || /\bdefinePlugin\s*\(/.test(sample)) return 'snow-bundle';
-    if (/registerPlugin\s*\(/.test(sample) && /enmity/i.test(sample + url)) return 'enmity-plugin';
-    if (/\.js(\?|$)/i.test(url) && /module\.exports|export default/.test(sample)) return 'unknown-js';
-    if (url.endsWith('manifest.json') || url.endsWith('/')) return 'possible-manifest';
-    return 'unknown';
-}
-
 export function manifestUrl(url) {
     const href = sanitizePluginUrl(url) || url;
     if (!href) return href;
     if (/\/$/.test(href)) return href + 'manifest.json';
     return href;
+}
+
+function snowLinkParts(text) {
+    if (typeof text !== 'string' || !text.includes('snow://')) return null;
+    const parts = [];
+    let last = 0;
+    for (const match of text.matchAll(SCHEME_RE)) {
+        if (!parseInstallLink(match[0])) continue;
+        if (match.index > last) parts.push({ type: 'text', content: text.slice(last, match.index) });
+        parts.push({
+            type: 'link',
+            target: match[0],
+            url: match[0],
+            content: [{ type: 'text', content: match[0] }],
+        });
+        last = match.index + match[0].length;
+    }
+    if (!parts.length) return null;
+    if (last < text.length) parts.push({ type: 'text', content: text.slice(last) });
+    return parts;
+}
+
+function rewriteNode(node) {
+    if (Array.isArray(node)) {
+        for (let i = 0; i < node.length; i++) {
+            if (typeof node[i] === 'string') {
+                const parts = snowLinkParts(node[i]);
+                if (parts) {
+                    node.splice(i, 1, ...parts);
+                    i += parts.length - 1;
+                }
+            } else rewriteNode(node[i]);
+        }
+        return;
+    }
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.content === 'string') {
+        const parts = snowLinkParts(node.content);
+        if (parts) node.content = parts;
+    } else if (Array.isArray(node.content) || (node.content && typeof node.content === 'object')) rewriteNode(node.content);
+    if (typeof node.text === 'string') {
+        const parts = snowLinkParts(node.text);
+        if (parts) node.content = parts;
+    }
+    for (const value of Object.values(node)) {
+        if (value && typeof value === 'object' && value !== node.content) rewriteNode(value);
+    }
 }
 
 export function findSnowInstallApi(r) {
@@ -136,8 +141,8 @@ function candidateLabel(candidate) {
 }
 
 function expandUrlRegex(value) {
-    if (!(value instanceof RegExp) || !/https\?:/.test(value.source) || /snow\|enmity|snow\?:/.test(value.source)) return value;
-    return new RegExp(value.source.replace(/https\?:/g, '(?:https?|snow|enmity):'), value.flags);
+    if (!(value instanceof RegExp) || !/https\?:/.test(value.source) || /snow\?:/.test(value.source)) return value;
+    return new RegExp(value.source.replace(/https\?:/g, '(?:https?|snow):'), value.flags);
 }
 
 function patchAutolink(r) {
@@ -159,18 +164,8 @@ function patchAutolink(r) {
     }
 }
 
-function rewriteNode(node) {
-    if (!node || typeof node !== 'object') return;
-    if (typeof node.content === 'string') node.content = rewriteSnowLinks(node.content);
-    if (typeof node.text === 'string') node.text = rewriteSnowLinks(node.text);
-    if (Array.isArray(node)) for (const item of node) rewriteNode(item);
-    else for (const value of Object.values(node)) {
-        if (value && typeof value === 'object') rewriteNode(value);
-    }
-}
-
 export default function InstallLinks(r) {
-    const { h, React } = r, { Page, Text, Button, Input, Toggle } = ui(r);
+    const { h, React } = r, { Page, Text, Button, Input } = ui(r);
     let close;
     function Prompt({ link, info, candidate, close: dismiss }) {
         const [busy, setBusy] = React.useState(false);
@@ -183,21 +178,15 @@ export default function InstallLinks(r) {
                 r.toast('Installed and enabled ' + (result.runtimeId || 'plugin'));
                 setStatus('Installed and enabled as ' + result.runtimeId + '.');
             } catch (error) {
-                r.copy(link.url);
-                setStatus((error?.message || String(error)) + '\nHTTPS URL copied. You can still paste it in Snow → Plugins → Install from URL.');
+                r.copy(snowInstallLink(link.url));
+                setStatus((error?.message || String(error)) + '\nCopied the snow:// install link.');
             } finally { setBusy(false); }
         }
         return h(Page, { title: 'Install Snow plugin', close: dismiss },
-            h(Text, null, 'Source: ' + (link.source || 'https')),
-            h(Text, { selectable: true }, link.url),
-            h(Text, { muted: true }, status || 'Review the URL, then install. Enmity .js bundles are not Snow plugins; use a spec-3 manifest.json URL.'),
+            h(Text, { selectable: true }, snowInstallLink(link.url)),
+            h(Text, { muted: true }, status || 'Review this plugin, then install.'),
             h(Button, { text: busy ? 'Working…' : 'Install', disabled: busy, onPress: install }),
-            h(Button, { text: 'Open original link', variant: 'secondary', onPress: () => {
-                dismiss();
-                r._openingOriginal = true;
-                Promise.resolve(r.RN.Linking.openURL(link.url)).catch(e => r.error('Open link', e)).finally(() => { r._openingOriginal = false; });
-            } }),
-            h(Button, { text: 'Copy HTTPS URL', variant: 'secondary', onPress: () => r.copy(link.url) }));
+            h(Button, { text: 'Copy snow:// link', variant: 'secondary', onPress: () => r.copy(snowInstallLink(link.url)) }));
     }
     async function openPrompt(link) {
         const url = manifestUrl(link.url);
@@ -213,15 +202,7 @@ export default function InstallLinks(r) {
                 info = 'previewExternalPlugin failed: ' + (error?.message || error);
             }
         } else {
-            try {
-                const data = await r.request(url, {}, 8000, 200000);
-                const kind = classifyArtifact(data.text, url);
-                if (kind === 'enmity-plugin' || kind === 'unknown-js') info = 'This file looks like a standalone JS plugin (often Enmity), not a Snow manifest.';
-                else if (kind === 'snow-manifest' || kind === 'snow-native-manifest') info = 'This looks like a Snow plugin manifest, but previewExternalPlugin was not found on this build.';
-                else info = 'Could not find previewExternalPlugin / installExternalPluginCandidate / enableExternalPlugin on this Snow build.';
-            } catch (error) {
-                info = 'Could not prefetch the file: ' + (error.message || error);
-            }
+            info = 'Could not find previewExternalPlugin / installExternalPluginCandidate / enableExternalPlugin on this Snow build.';
         }
         close?.();
         close = r.open('install', Prompt, { link: resolved, info, candidate });
@@ -229,38 +210,32 @@ export default function InstallLinks(r) {
     function handle(url) {
         const link = parseInstallLink(url);
         if (!link) return false;
-        if (link.source === 'enmity' && !r.store.handleEnmity) return false;
         openPrompt(link).catch(error => r.error('Install link', error));
         return true;
     }
     function Settings() {
         const [draft, setDraft] = React.useState('');
         r.useRefresh();
+        const example = snowInstallLink('https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/Decor/manifest.json');
         return h(Page, { title: 'Install Links' },
-            h(Toggle, { setting: 'handleEnmity', label: 'Also handle enmity:// install-plugin links' }),
-            h(Toggle, { setting: 'interceptManifests', label: 'Intercept https://…/manifest.json taps' }),
-            h(Text, { muted: true }, 'Discord’s native chat only autolinks https. /snowlink now sends a clickable markdown https link. snow:// in already-sent messages is rewritten to the https plugin URL so it can be tapped.'),
+            h(Text, { muted: true }, 'Send a snow:// install-plugin link. Discord does not autolink custom schemes, so this plugin marks snow:// as a URL and intercepts taps.'),
+            h(Text, { selectable: true }, example),
             h(Input, { label: 'Plugin HTTPS URL', value: draft, onChange: setDraft, autoCapitalize: 'none' }),
             h(Button, { text: 'Preview install', onPress: () => {
                 const url = sanitizePluginUrl(draft);
                 if (!url) return r.toast('Enter an https plugin URL');
-                openPrompt({ kind: 'plugin', source: 'https', url, raw: url });
+                openPrompt({ kind: 'plugin', source: 'snow', url, raw: snowInstallLink(url) });
             } }),
-            h(Button, { text: 'Copy clickable message', variant: 'secondary', onPress: () => {
+            h(Button, { text: 'Copy snow:// link', variant: 'secondary', onPress: () => {
                 const url = sanitizePluginUrl(draft);
                 if (!url) return r.toast('Enter an https plugin URL');
-                r.copy(clickableInstallMessage(url));
-            } }),
-            h(Text, { muted: true }, 'Example sent message:\n[Install Snow plugin](https://github.com/xMimiez/Snow-Plugins/raw/refs/heads/main/Decor/manifest.json)'));
+                r.copy(snowInstallLink(url));
+            } }));
     }
     return {
         start() {
             addUrlHandler(r, 200, url => {
-                if (r._openingOriginal) return false;
-                const link = parseInstallLink(url);
-                if (!link) return false;
-                if (link.source === 'enmity' && !r.store.handleEnmity) return false;
-                if (link.source === 'https' && !r.store.interceptManifests) return false;
+                if (!parseInstallLink(url)) return false;
                 handle(url);
                 return true;
             });
@@ -273,8 +248,7 @@ export default function InstallLinks(r) {
             const linking = r.RN.Linking;
             if (linking?.canOpenURL) {
                 r.patch('instead', linking, 'canOpenURL', (args, next) => {
-                    const url = String(args[0] || '');
-                    if (/^(snow|enmity):/i.test(url) || (r.store.interceptManifests && isManifestUrl(url))) return Promise.resolve(true);
+                    if (/^snow:/i.test(String(args[0] || ''))) return Promise.resolve(true);
                     return next(...args);
                 });
             }
@@ -285,21 +259,21 @@ export default function InstallLinks(r) {
             linking?.getInitialURL?.().then(url => { if (url && r.active) handle(url); }).catch(() => {});
             r.command({
                 name: 'snowlink',
-                description: 'Send a clickable Snow plugin install link',
-                options: [{ name: 'url', description: 'HTTPS plugin URL', type: 3, required: true }],
+                description: 'Send a snow:// install-plugin link',
+                options: [{ name: 'url', description: 'HTTPS plugin manifest URL', type: 3, required: true }],
                 execute(args) {
                     const url = sanitizePluginUrl(args.find(a => a.name === 'url')?.value);
                     if (!url) { r.toast('Need an https plugin URL'); return; }
-                    return { content: clickableInstallMessage(url) };
+                    return { content: snowInstallLink(url) };
                 },
             });
             r.command({
                 name: 'installplugin',
-                description: 'Review and install a plugin from an HTTPS or snow:// URL',
-                options: [{ name: 'url', description: 'snow:// or https URL', type: 3, required: true }],
+                description: 'Review and install a plugin from a snow:// or https URL',
+                options: [{ name: 'url', description: 'snow:// or https plugin URL', type: 3, required: true }],
                 execute(args) {
                     const raw = String(args.find(a => a.name === 'url')?.value || '');
-                    const link = parseInstallLink(raw) || (sanitizePluginUrl(raw) && { kind: 'plugin', source: 'https', url: sanitizePluginUrl(raw), raw });
+                    const link = parseInstallLink(raw) || (sanitizePluginUrl(raw) && { kind: 'plugin', source: 'snow', url: sanitizePluginUrl(raw), raw });
                     if (!link) { r.toast('Need a snow:// or https plugin URL'); return; }
                     openPrompt(link);
                 },
@@ -309,4 +283,4 @@ export default function InstallLinks(r) {
         Settings,
     };
 }
-InstallLinks.defaults = { handleEnmity: true, interceptManifests: true };
+InstallLinks.defaults = {};
