@@ -45,7 +45,17 @@ export function createRuntime(B, meta, defaults = {}) {
         find(...props) { try { return B.metro.findByProps?.(...props); } catch { return undefined; } },
         byName(name, raw = false) { try { return B.metro.findByName?.(name, !raw) || B.metro.findByDisplayName?.(name, !raw); } catch { return undefined; } },
         byStore(name) { try { return B.metro.findByStoreName?.(name); } catch { return undefined; } },
-        toast(message) { if (r.active) B.ui?.showToast(String(message)); },
+        toast(message, icon) {
+            if (!r.active) return;
+            const text = String(message);
+            const show = B.ui?.showToast || B.ui?.toasts?.showToast;
+            if (typeof show !== 'function') return;
+            if (icon) {
+                try { show(text, icon); return; } catch {}
+                try { show({ content: text, icon }); return; } catch {}
+            }
+            show(text);
+        },
         error(label, error) { const text = `${label}: ${error?.message || error}`; console.error(`[${meta.name}]`, text); r.status.lastError = text; r.changed(); r.toast(text); },
         patch(kind, parent, key, callback) {
             const patcher = r.api.patcher;

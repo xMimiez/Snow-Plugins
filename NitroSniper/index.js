@@ -110,8 +110,24 @@ var plugin = (() => {
           return void 0;
         }
       },
-      toast(message) {
-        if (r.active) B.ui?.showToast(String(message));
+      toast(message, icon) {
+        if (!r.active) return;
+        const text = String(message);
+        const show = B.ui?.showToast || B.ui?.toasts?.showToast;
+        if (typeof show !== "function") return;
+        if (icon) {
+          try {
+            show(text, icon);
+            return;
+          } catch {
+          }
+          try {
+            show({ content: text, icon });
+            return;
+          } catch {
+          }
+        }
+        show(text);
       },
       error(label, error) {
         const text = `${label}: ${error?.message || error}`;
@@ -573,6 +589,7 @@ var plugin = (() => {
         while (queue.length && r.active && !stopped) {
           const item = queue.shift();
           let success = false, result = "", giftType;
+          r.toast("Claiming gift\u2026", "GiftIcon");
           try {
             for (let attempt = 0; ; attempt++) {
               try {
@@ -595,7 +612,7 @@ var plugin = (() => {
           stats[success ? "claimed" : "failed"]++;
           stats.lastResult = result;
           r.changed();
-          r.toast(result);
+          r.toast(result, success ? "NitroWheelIcon" : "CircleXIcon");
           if (r.store.webhookUrl) {
             try {
               try {
@@ -682,6 +699,6 @@ var plugin = (() => {
   NitroSniper.defaults = { ignoreOwnGiftLinks: false, webhookUrl: "" };
 
   // NitroSniper.entry.js
-  var NitroSniper_entry_default = register({ "id": "mime.nitrosniper", "name": "NitroSniper", "description": "Process new gift links with a deduplicated queue and visible results.", "version": "2.2.0", "authors": [{ "name": "neoarz", "id": "218675193592283137" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NitroSniper" }, NitroSniper);
+  var NitroSniper_entry_default = register({ "id": "mime.nitrosniper", "name": "NitroSniper", "description": "Process new gift links with a deduplicated queue and visible results.", "version": "2.2.1", "authors": [{ "name": "neoarz", "id": "218675193592283137" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NitroSniper" }, NitroSniper);
   return __toCommonJS(NitroSniper_entry_exports);
 })();

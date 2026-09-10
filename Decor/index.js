@@ -6501,8 +6501,24 @@ var plugin = (() => {
           return void 0;
         }
       },
-      toast(message) {
-        if (r.active) B.ui?.showToast(String(message));
+      toast(message, icon) {
+        if (!r.active) return;
+        const text = String(message);
+        const show = B.ui?.showToast || B.ui?.toasts?.showToast;
+        if (typeof show !== "function") return;
+        if (icon) {
+          try {
+            show(text, icon);
+            return;
+          } catch {
+          }
+          try {
+            show({ content: text, icon });
+            return;
+          } catch {
+          }
+        }
+        show(text);
       },
       error(label, error) {
         const text = `${label}: ${error?.message || error}`;

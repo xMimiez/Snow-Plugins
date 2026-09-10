@@ -93,7 +93,7 @@
     "id": "mime.nitrosniper",
     "name": "NitroSniper",
     "description": "Process new gift links with a deduplicated queue and visible results.",
-    "version": "2.2.0",
+    "version": "2.2.1",
     "authors": [
       {
         "name": "neoarz",

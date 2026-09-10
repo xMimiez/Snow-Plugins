@@ -13,7 +13,7 @@ These releases use **Bunny spec 3**. Install from the `manifest.json` URL, then 
 | [GifRoulette](GifRoulette/) | 2.2.0 | `/gifroulette` sends one random favorite GIF. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/GifRoulette/manifest.json) |
 | [HighlightCode](HighlightCode/) | 2.2.0 | Highlight supported native chat code blocks. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/HighlightCode/manifest.json) |
 | [MoreCommands](MoreCommands/) | 2.2.0 | Fun and utility slash commands, including `/gifroulette`. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/MoreCommands/manifest.json) |
-| [NitroSniper](NitroSniper/) | 2.2.0 | Process new gift links with a queue and visible results. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/NitroSniper/manifest.json) |
+| [NitroSniper](NitroSniper/) | 2.2.1 | Process new gift links with a queue and visible results. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/NitroSniper/manifest.json) |
 | [PreviewFile](PreviewFile/) | 2.2.0 | Expandable previews for small text attachments. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/PreviewFile/manifest.json) |
 | [ReplyToStatus](ReplyToStatus/) | 2.2.0 | Reply button on profiles; quoted DM replies. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/ReplyToStatus/manifest.json) |
 | [SpotifyPreview](SpotifyPreview/) | 2.2.0 | Spotify link sheet with embed and app/browser actions. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/SpotifyPreview/manifest.json) |

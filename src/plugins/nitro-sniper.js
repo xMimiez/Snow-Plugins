@@ -26,6 +26,7 @@ export default function NitroSniper(r) {
             while (queue.length && r.active && !stopped) {
                 const item = queue.shift();
                 let success = false, result = '', giftType;
+                r.toast('Claiming gift…', 'GiftIcon');
                 try {
                     // A single request path; never retry an uncertain timeout or run a second callback API.
                     for (let attempt = 0; ; attempt++) {
@@ -40,7 +41,8 @@ export default function NitroSniper(r) {
                     success = true; result = 'Gift claimed';
                 } catch (e) { result = `Claim failed: ${e.message}`; }
                 if (stopped || !r.active) return;
-                stats[success ? 'claimed' : 'failed']++; stats.lastResult = result; r.changed(); r.toast(result);
+                stats[success ? 'claimed' : 'failed']++; stats.lastResult = result; r.changed();
+                r.toast(result, success ? 'NitroWheelIcon' : 'CircleXIcon');
                 if (r.store.webhookUrl) {
                     try {
                         try { const resolved = (await r.discord(`/entitlements/gift-codes/${item.code}?with_application=false&with_subscription_plan=true`)).json(); giftType = resolved?.subscription_plan?.name || resolved?.store_listing?.sku?.name; } catch { /* Optional enrichment; claim result remains visible. */ }
