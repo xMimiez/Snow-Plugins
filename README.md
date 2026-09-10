@@ -26,6 +26,7 @@ These releases use **Bunny spec 3**. Install from the `manifest.json` URL, then 
 | [OpenInApp](OpenInApp/) | 1.2.0 | Open Spotify, Steam, Telegram, Instagram, TikTok and other apps. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/OpenInApp/manifest.json) |
 | [PauseInvitesForever](PauseInvitesForever/) | 1.2.0 | `/pauseinvites` and `/resumeinvites` with separate confirmations. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/PauseInvitesForever/manifest.json) |
 | [InstallLinks](InstallLinks/) | 1.0.6 | `snow://` install-plugin links. Opens Snow’s third-party install prompt. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/InstallLinks/manifest.json) |
+| [TokenUtils](TokenUtils/) | 1.0.0 | `/get-token` copy alert and `/token-info` username, display name, email, number. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/TokenUtils/manifest.json) |
 
 ## Snow install links
 
