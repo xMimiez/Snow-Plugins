@@ -691,14 +691,28 @@ var plugin = (() => {
         } })
       );
     }
-    function show(link, fallback) {
+    function show(link) {
       try {
         close?.();
-        close = r.open("preview", Preview, { link, fallback });
+        close = r.open("preview", Preview, { link, fallback: null });
         return true;
       } catch (error) {
-        r.error("Spotify preview", error);
-        return false;
+        try {
+          r.api.ui.openAlert("spotify-preview", r.h(r.D.AlertModal || r.C.AlertModal, {
+            title: "Spotify preview",
+            content: link.url,
+            extraContent: r.h(Preview, { link, close: () => r.api.ui.dismissAlert("spotify-preview") }),
+            actions: r.h(
+              r.D.AlertActions || r.C.AlertActions,
+              null,
+              r.h(r.D.AlertActionButton || r.C.AlertActionButton, { text: "Close", onPress: () => r.api.ui.dismissAlert("spotify-preview") })
+            )
+          }));
+          return true;
+        } catch {
+          r.error("Spotify preview", error);
+          return true;
+        }
       }
     }
     function Settings() {
@@ -712,20 +726,34 @@ var plugin = (() => {
     }
     return {
       start() {
-        addUrlHandler(r, 1e3, (url, fallback) => {
+        addUrlHandler(r, 1e4, (url) => {
           const link = spotifyLink(url);
           if (!r.store.enabled || !link) return false;
-          return show(link, fallback);
+          show(link);
+          return true;
         });
-        if (r.RN.Linking?.openURL) {
-          r.patch("instead", r.RN.Linking, "openURL", (args, next) => {
-            const link = spotifyLink(args[0]);
-            if (r.store.enabled && link) {
-              show(link, () => next(...args));
-              return Promise.resolve();
+        const intercept = (args, next) => {
+          const link = spotifyLink(typeof args[0] === "string" ? args[0] : args[0]?.url);
+          if (r.store.enabled && link) {
+            show(link);
+            return Promise.resolve();
+          }
+          return next(...args);
+        };
+        if (r.RN.Linking?.openURL) r.patch("instead", r.RN.Linking, "openURL", intercept);
+        const extras = r.find("openDeeplink", "openURL") || r.find("handleURL", "openURL");
+        if (extras && extras !== r.RN.Linking) {
+          if (typeof extras.openDeeplink === "function") r.patch("instead", extras, "openDeeplink", intercept);
+          if (typeof extras.handleURL === "function") r.patch("instead", extras, "handleURL", intercept);
+        }
+        const modules = r.RN.NativeModules || {};
+        for (const key of Object.keys(modules)) {
+          if (typeof modules[key]?.openURL === "function") {
+            try {
+              r.patch("instead", modules[key], "openURL", intercept);
+            } catch {
             }
-            return next(...args);
-          });
+          }
         }
       },
       stop() {
@@ -737,6 +765,6 @@ var plugin = (() => {
   SpotifyPreview.defaults = { enabled: true };
 
   // SpotifyPreview.entry.js
-  var SpotifyPreview_entry_default = register({ "id": "mime.spotifypreview", "name": "SpotifyPreview", "description": "Official Spotify embeds in an owned Snow sheet.", "version": "2.2.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/SpotifyPreview" }, SpotifyPreview);
+  var SpotifyPreview_entry_default = register({ "id": "mime.spotifypreview", "name": "SpotifyPreview", "description": "Official Spotify embeds in an owned Snow sheet.", "version": "2.2.2", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/SpotifyPreview" }, SpotifyPreview);
   return __toCommonJS(SpotifyPreview_entry_exports);
 })();

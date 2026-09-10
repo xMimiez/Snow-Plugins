@@ -2,36 +2,35 @@ import { ui } from '../runtime.js';
 
 export default function PauseInvitesForever(r) {
     const { h, React } = r, { Page, Text, Button } = ui(r);
+    function hasFlag(features, pause) {
+        const list = Array.from(features || []);
+        return pause ? list.includes('INVITES_DISABLED') : !list.includes('INVITES_DISABLED');
+    }
     async function setInvites(guildId, pause) {
-        const guild = r.byStore('GuildStore')?.getGuild?.(guildId);
-        const current = Array.from(guild?.features || []);
-        const features = current.filter(f => f !== 'INVITES_DISABLED');
+        const guild = r.byStore('GuildStore')?.getGuild?.(guildId) || {};
+        const features = Array.from(guild.features || []).filter(f => f !== 'INVITES_DISABLED');
         if (pause) features.push('INVITES_DISABLED');
-        const errors = [];
-        try {
-            await r.discord(`/guilds/${guildId}/incident-actions`, {
-                method: 'PUT',
-                body: JSON.stringify({
-                    invites_disabled_until: pause ? '2099-12-31T23:59:59.000+00:00' : null,
-                    dms_disabled_until: null,
-                }),
-            });
-            return;
-        } catch (error) { errors.push(error); }
-        const update = r.find('updateGuild')?.updateGuild || r.find('saveGuild')?.saveGuild || r.find('editGuild')?.editGuild;
-        if (typeof update === 'function') {
-            try { await update(guildId, { features }); return; } catch (error) { errors.push(error); }
-        }
-        const rest = r.find('patch', 'get') || r.find('put', 'patch');
+        const rest = r.find('patch', 'post', 'get') || r.find('put', 'patch', 'get');
+        let lastError;
         if (typeof rest?.patch === 'function') {
-            try { await rest.patch({ url: `/guilds/${guildId}`, body: { features } }); return; } catch (error) { errors.push(error); }
+            try { await rest.patch({ url: `/guilds/${guildId}`, body: { features } }); }
+            catch (error) { lastError = error; }
         }
-        try {
-            await r.discord(`/guilds/${guildId}`, { method: 'PATCH', body: JSON.stringify({ features }) });
-            return;
-        } catch (error) { errors.push(error); }
-        const last = errors[errors.length - 1];
-        throw new Error(last?.message || 'Could not update invite pause. Need Pause Invites or Manage Server.');
+        if (lastError || !rest?.patch) {
+            try {
+                await r.discord(`/guilds/${guildId}`, { method: 'PATCH', body: JSON.stringify({ features }) });
+                lastError = null;
+            } catch (error) { lastError = error; }
+        }
+        r.common.FluxDispatcher?.dispatch?.({ type: 'GUILD_UPDATE', guild: { id: guildId, features } });
+        let confirmed = hasFlag(r.byStore('GuildStore')?.getGuild?.(guildId)?.features, pause);
+        if (!confirmed) {
+            try {
+                const fresh = (await r.discord(`/guilds/${guildId}`)).json();
+                confirmed = hasFlag(fresh?.features, pause);
+            } catch {}
+        }
+        if (!confirmed) throw new Error(lastError?.message || 'Discord did not change invite pause. Need Pause Invites / Manage Server, and a community server.');
     }
     function Confirm({ guildId, pause, close }) {
         const [busy, setBusy] = React.useState(false), inFlight = React.useRef(false), mounted = React.useRef(true);
@@ -64,7 +63,7 @@ export default function PauseInvitesForever(r) {
             r.command({ name: 'pauseinvites', description: 'Pause server invites without a timer', execute: run(true) });
             r.command({ name: 'resumeinvites', description: 'Resume server invites', execute: run(false) });
         },
-        Settings() { return h(Page, { title: 'PauseInvitesForever' }, h(Text, null, 'Uses Discord’s invite-pause (incident-actions) API first, then guild features. Need Pause Invites or Manage Server.')); },
+        Settings() { return h(Page, { title: 'PauseInvitesForever' }, h(Text, null, 'Sets the INVITES_DISABLED guild feature and checks Discord actually applied it.')); },
         Confirm,
     };
 }

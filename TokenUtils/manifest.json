@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.tokenutils",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "display": {
     "name": "TokenUtils",
     "description": "/get-token and /token-info for the current Authorization token.",

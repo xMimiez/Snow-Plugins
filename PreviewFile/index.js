@@ -648,6 +648,53 @@ var plugin = (() => {
     }
     return {
       start() {
+        const fetching = /* @__PURE__ */ new Set();
+        function snippet(text) {
+          return String(text).split("\n").slice(0, 10).join("\n").slice(0, 2e3);
+        }
+        function consider(message) {
+          if (!message) return;
+          for (const a of message.attachments || []) {
+            const url = a.url || a.proxy_url || a.proxyUrl;
+            if (!previewable(a) || !url || cache.has(url) || fetching.has(url)) continue;
+            fetching.add(url);
+            load(a).then((text) => {
+              cache.set(url, text);
+              r.common.FluxDispatcher?.dispatch?.({ type: "MESSAGE_UPDATE", message });
+            }).catch(() => {
+            }).finally(() => fetching.delete(url));
+          }
+        }
+        function inject(node) {
+          if (!node || typeof node !== "object") return;
+          const attachments = node.attachments || node.message?.attachments;
+          if (Array.isArray(attachments)) {
+            const blocks = [];
+            for (const a of attachments) {
+              const url = a.url || a.proxy_url || a.proxyUrl;
+              const text = url && cache.get(url);
+              if (text) blocks.push({ type: "codeBlock", content: snippet(text), lang: "txt" });
+            }
+            if (blocks.length) {
+              if (Array.isArray(node.content)) node.content = blocks.concat(node.content);
+              else if (typeof node.content === "string") node.content = snippet(cache.get(attachments[0].url || attachments[0].proxy_url) || "") + "\n" + node.content;
+              else if (node.message && typeof node.message.content === "string") {
+                node.message.content = "```\n" + snippet(cache.get(attachments[0].url || attachments[0].proxy_url) || "") + "\n```\n" + node.message.content;
+              }
+            }
+          }
+          if (Array.isArray(node)) for (const item of node) inject(item);
+          else for (const value of Object.values(node)) if (value && typeof value === "object") inject(value);
+        }
+        r.subscribe("MESSAGE_CREATE", (event) => consider(event?.message || event));
+        r.subscribe("LOAD_MESSAGES_SUCCESS", (event) => {
+          for (const message of event?.messages || []) consider(message);
+        });
+        r.patchRows((rows) => {
+          const next = typeof rows === "string" ? JSON.parse(rows) : JSON.parse(JSON.stringify(rows));
+          inject(next);
+          return typeof rows === "string" ? JSON.stringify(next) : next;
+        });
         r.hook(["MessageAttachment", "Attachment", "FileAttachment", "MessageFileAttachment", "MediaAttachment", "AttachmentCard", "MessageAccessories", "File", "DefaultAttachment", "AttachmentContent"], wrap);
         r.patch("after", r.React, "createElement", (args, result) => {
           if (!r.active || !result?.props || result.props.__mimePreview) return;
@@ -678,6 +725,6 @@ var plugin = (() => {
   }
 
   // PreviewFile.entry.js
-  var PreviewFile_entry_default = register({ "id": "mime.previewfile", "name": "PreviewFile", "description": "Expandable previews for supported text attachments.", "version": "2.2.1", "authors": [{ "name": "mafu", "id": "519760564755365888" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PreviewFile" }, PreviewFile);
+  var PreviewFile_entry_default = register({ "id": "mime.previewfile", "name": "PreviewFile", "description": "Expandable previews for supported text attachments.", "version": "2.2.2", "authors": [{ "name": "mafu", "id": "519760564755365888" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PreviewFile" }, PreviewFile);
   return __toCommonJS(PreviewFile_entry_exports);
 })();

@@ -34,9 +34,6 @@ export function appLink(value) {
         if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password) return null;
         const host = u.hostname.replace(/^www\./, '');
         const path = u.pathname.replace(/\/$/, '');
-        if (host === 'open.spotify.com' && /^\/(?:intl-[a-z-]+\/)?(?:track|album|artist|playlist|episode|show)\/[A-Za-z0-9]+$/.test(path)) {
-            return 'spotify:' + path.replace(/^\/(?:intl-[a-z-]+\/)?/, '').replace('/', ':');
-        }
         const steam = steamTargets(value);
         if (steam.length) return steam[0];
         if (host === 'tidal.com' && /^\/browse\/(track|album|artist|playlist)\/[\w-]+$/.test(path)) return 'tidal://' + path.slice(8);
@@ -63,12 +60,11 @@ export function appLink(value) {
     return null;
 }
 
-async function openFirst(r, urls, fallback) {
-    for (const url of urls) {
-        try {
-            await openExternal(r, url);
-            return;
-        } catch {}
+async function openSteam(r, href, fallback) {
+    const ios = r.RN.Platform?.OS === 'ios';
+    const targets = ios ? [href, ...steamTargets(href)] : [...steamTargets(href), href];
+    for (const url of targets) {
+        try { await r.RN.Linking.openURL(url); return; } catch {}
     }
     if (r.active) fallback();
 }
@@ -81,7 +77,7 @@ export default function OpenInApp(r) {
                 if (!r.store.enabled) return false;
                 const steam = steamTargets(url);
                 if (steam.length) {
-                    openFirst(r, steam, fallback);
+                    openSteam(r, url, fallback);
                     return true;
                 }
                 const app = appLink(url);

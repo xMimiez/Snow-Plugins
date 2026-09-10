@@ -560,50 +560,41 @@ var plugin = (() => {
   // project:src/plugins/pause-invites.js
   function PauseInvitesForever(r) {
     const { h, React } = r, { Page, Text, Button } = ui(r);
+    function hasFlag(features, pause) {
+      const list = Array.from(features || []);
+      return pause ? list.includes("INVITES_DISABLED") : !list.includes("INVITES_DISABLED");
+    }
     async function setInvites(guildId, pause) {
-      const guild = r.byStore("GuildStore")?.getGuild?.(guildId);
-      const current = Array.from(guild?.features || []);
-      const features = current.filter((f) => f !== "INVITES_DISABLED");
+      const guild = r.byStore("GuildStore")?.getGuild?.(guildId) || {};
+      const features = Array.from(guild.features || []).filter((f) => f !== "INVITES_DISABLED");
       if (pause) features.push("INVITES_DISABLED");
-      const errors = [];
-      try {
-        await r.discord(`/guilds/${guildId}/incident-actions`, {
-          method: "PUT",
-          body: JSON.stringify({
-            invites_disabled_until: pause ? "2099-12-31T23:59:59.000+00:00" : null,
-            dms_disabled_until: null
-          })
-        });
-        return;
-      } catch (error) {
-        errors.push(error);
-      }
-      const update = r.find("updateGuild")?.updateGuild || r.find("saveGuild")?.saveGuild || r.find("editGuild")?.editGuild;
-      if (typeof update === "function") {
-        try {
-          await update(guildId, { features });
-          return;
-        } catch (error) {
-          errors.push(error);
-        }
-      }
-      const rest = r.find("patch", "get") || r.find("put", "patch");
+      const rest = r.find("patch", "post", "get") || r.find("put", "patch", "get");
+      let lastError;
       if (typeof rest?.patch === "function") {
         try {
           await rest.patch({ url: `/guilds/${guildId}`, body: { features } });
-          return;
         } catch (error) {
-          errors.push(error);
+          lastError = error;
         }
       }
-      try {
-        await r.discord(`/guilds/${guildId}`, { method: "PATCH", body: JSON.stringify({ features }) });
-        return;
-      } catch (error) {
-        errors.push(error);
+      if (lastError || !rest?.patch) {
+        try {
+          await r.discord(`/guilds/${guildId}`, { method: "PATCH", body: JSON.stringify({ features }) });
+          lastError = null;
+        } catch (error) {
+          lastError = error;
+        }
       }
-      const last = errors[errors.length - 1];
-      throw new Error(last?.message || "Could not update invite pause. Need Pause Invites or Manage Server.");
+      r.common.FluxDispatcher?.dispatch?.({ type: "GUILD_UPDATE", guild: { id: guildId, features } });
+      let confirmed = hasFlag(r.byStore("GuildStore")?.getGuild?.(guildId)?.features, pause);
+      if (!confirmed) {
+        try {
+          const fresh = (await r.discord(`/guilds/${guildId}`)).json();
+          confirmed = hasFlag(fresh?.features, pause);
+        } catch {
+        }
+      }
+      if (!confirmed) throw new Error(lastError?.message || "Discord did not change invite pause. Need Pause Invites / Manage Server, and a community server.");
     }
     function Confirm({ guildId, pause, close }) {
       const [busy, setBusy] = React.useState(false), inFlight = React.useRef(false), mounted = React.useRef(true);
@@ -647,13 +638,13 @@ var plugin = (() => {
         r.command({ name: "resumeinvites", description: "Resume server invites", execute: run(false) });
       },
       Settings() {
-        return h(Page, { title: "PauseInvitesForever" }, h(Text, null, "Uses Discord\u2019s invite-pause (incident-actions) API first, then guild features. Need Pause Invites or Manage Server."));
+        return h(Page, { title: "PauseInvitesForever" }, h(Text, null, "Sets the INVITES_DISABLED guild feature and checks Discord actually applied it."));
       },
       Confirm
     };
   }
 
   // PauseInvitesForever.entry.js
-  var PauseInvitesForever_entry_default = register({ "id": "mime.pauseinvitesforever", "name": "PauseInvitesForever", "description": "Pause and resume server invites with explicit confirmation.", "version": "1.2.1", "authors": [{ "name": "Dolfies", "id": "852892297661906993" }, { "name": "amia", "id": "142007603549962240" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PauseInvitesForever" }, PauseInvitesForever);
+  var PauseInvitesForever_entry_default = register({ "id": "mime.pauseinvitesforever", "name": "PauseInvitesForever", "description": "Pause and resume server invites with explicit confirmation.", "version": "1.2.2", "authors": [{ "name": "Dolfies", "id": "852892297661906993" }, { "name": "amia", "id": "142007603549962240" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PauseInvitesForever" }, PauseInvitesForever);
   return __toCommonJS(PauseInvitesForever_entry_exports);
 })();

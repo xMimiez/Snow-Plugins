@@ -59,6 +59,11 @@ export default function TokenUtils(r) {
     }
     return {
         start() {
+            if (!r.store.warningShown) {
+                alert('token-utils-warning', 'Warning!', 'This script can manage tokens; We are not responsible if you get banned', [
+                    { text: 'OK', onPress: () => { r.set('warningShown', true); close('token-utils-warning'); } },
+                ]);
+            }
             r.command({
                 name: 'get-token',
                 description: 'Show the current Authorization token',
@@ -76,3 +81,4 @@ export default function TokenUtils(r) {
         Settings,
     };
 }
+TokenUtils.defaults = { warningShown: false };

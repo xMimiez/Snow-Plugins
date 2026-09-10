@@ -645,9 +645,6 @@ var plugin = (() => {
       if (!["http:", "https:"].includes(u.protocol) || u.username || u.password) return null;
       const host = u.hostname.replace(/^www\./, "");
       const path = u.pathname.replace(/\/$/, "");
-      if (host === "open.spotify.com" && /^\/(?:intl-[a-z-]+\/)?(?:track|album|artist|playlist|episode|show)\/[A-Za-z0-9]+$/.test(path)) {
-        return "spotify:" + path.replace(/^\/(?:intl-[a-z-]+\/)?/, "").replace("/", ":");
-      }
       const steam = steamTargets(value);
       if (steam.length) return steam[0];
       if (host === "tidal.com" && /^\/browse\/(track|album|artist|playlist)\/[\w-]+$/.test(path)) return "tidal://" + path.slice(8);
@@ -674,10 +671,12 @@ var plugin = (() => {
     }
     return null;
   }
-  async function openFirst(r, urls, fallback) {
-    for (const url of urls) {
+  async function openSteam(r, href, fallback) {
+    const ios = r.RN.Platform?.OS === "ios";
+    const targets = ios ? [href, ...steamTargets(href)] : [...steamTargets(href), href];
+    for (const url of targets) {
       try {
-        await openExternal(r, url);
+        await r.RN.Linking.openURL(url);
         return;
       } catch {
       }
@@ -692,7 +691,7 @@ var plugin = (() => {
           if (!r.store.enabled) return false;
           const steam = steamTargets(url);
           if (steam.length) {
-            openFirst(r, steam, fallback);
+            openSteam(r, url, fallback);
             return true;
           }
           const app = appLink(url);
@@ -715,6 +714,6 @@ var plugin = (() => {
   OpenInApp.defaults = { enabled: true };
 
   // OpenInApp.entry.js
-  var OpenInApp_entry_default = register({ "id": "mime.openinapp", "name": "OpenInApp", "description": "Open Spotify, Steam, Telegram, Instagram, TikTok and other service links in their apps.", "version": "1.2.1", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Chloe", "id": "1084592643784331324" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/OpenInApp" }, OpenInApp);
+  var OpenInApp_entry_default = register({ "id": "mime.openinapp", "name": "OpenInApp", "description": "Open Steam, Telegram, Instagram, TikTok and other service links in their apps.", "version": "1.2.2", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Chloe", "id": "1084592643784331324" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/OpenInApp" }, OpenInApp);
   return __toCommonJS(OpenInApp_entry_exports);
 })();

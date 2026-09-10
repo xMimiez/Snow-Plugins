@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.alwaysanimate",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "display": {
     "name": "AlwaysAnimate",
     "description": "Animate server icons, server banners, user avatars, and user banners.",

@@ -686,14 +686,15 @@ ${value.trim()}`;
       if (!owns) return children;
       return h(GateContext.Provider, { value: true }, h(
         RN.View,
-        { style: { flexShrink: 1 } },
-        children,
-        h(RN.View, { style: { paddingHorizontal: 16, paddingVertical: 8 } }, h(Button, {
-          text: "Reply to Status",
-          variant: "secondary",
+        {
+          style: { flexDirection: "row", alignItems: "center", width: "100%" }
+        },
+        h(RN.View, { style: { flex: 1, minWidth: 0 } }, children),
+        h(RN.Pressable || RN.TouchableOpacity, {
           accessibilityLabel: "Reply to Status",
-          onPress: () => open(userId, status)
-        }))
+          onPress: () => open(userId, status),
+          style: { marginLeft: 8, paddingHorizontal: 10, paddingVertical: 6 }
+        }, h(Text, null, "Reply"))
       ));
     }
     return {
@@ -701,38 +702,19 @@ ${value.trim()}`;
         function wrap(element) {
           const p = element?.props || {};
           if (p.__mimeReplyWrapped) return;
-          const userId = p.userId || p.user?.id || p.displayProfile?.userId || p.displayProfile?.user?.id || p.userProfile?.userId;
+          const userId = p.userId || p.user?.id || p.displayProfile?.userId || p.displayProfile?.user?.id || p.userProfile?.userId || r.byStore("UserProfileStore")?.getUserProfile?.()?.userId || r.find("getUserProfile")?.getUserProfile?.()?.userId;
           if (!userId) return;
           const presence = r.byStore("PresenceStore");
           const status = normalizeStatus(p.customStatus || p.activity || p.activities || p.status || presence?.getActivities?.(userId)) || { text: p.bio || p.pronouns || "No custom status" };
           return h(ProfileGate, { userId, status, key: element.key }, r.React.cloneElement(element, { __mimeReplyWrapped: true }));
         }
-        r.hook([
-          "UserProfileActionSheet",
-          "UserProfile",
-          "UserProfileModal",
-          "UserProfileHeader",
-          "UserProfileCustomStatus",
-          "ProfileCustomStatus",
-          "UserProfileSheet",
-          "ProfileActionSheet",
-          "UserProfileContainer",
-          "PrimaryUserProfile",
-          "DisplayProfile",
-          "OverlayProfile",
-          "UserProfileCard",
-          "UserProfileInfo",
-          "Profile",
-          "ShowMoreButton"
-        ], wrap);
+        r.hook(["UserProfileCustomStatus", "ProfileCustomStatus", "CustomStatus", "UserCustomStatus", "CustomStatusText"], wrap);
         r.patch("after", r.React, "createElement", (args, result) => {
           if (!r.active || !result?.props) return;
           const p = args[1] || result.props;
           const type = args[0];
           const name = typeof type === "string" ? type : type?.displayName || type?.name || "";
-          const looksLikeProfile = /profile|userinfo|actionsheet/i.test(name) || (p.userId || p.user?.id || p.displayProfile) && (p.customStatus || p.displayProfile || p.pronouns || p.bio || p.guildId != null);
-          if (!looksLikeProfile) return;
-          return wrap(result) ?? result;
+          if (/customstatus/i.test(name) || p.customStatus && (p.userId || p.user)) return wrap(result) ?? result;
         });
       },
       stop() {
@@ -756,6 +738,6 @@ ${value.trim()}`;
   }
 
   // ReplyToStatus.entry.js
-  var ReplyToStatus_entry_default = register({ "id": "mime.replytostatus", "name": "ReplyToStatus", "description": "One themed status-reply button per profile with rendered emojis.", "version": "2.2.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ReplyToStatus" }, ReplyToStatus);
+  var ReplyToStatus_entry_default = register({ "id": "mime.replytostatus", "name": "ReplyToStatus", "description": "One themed status-reply button per profile with rendered emojis.", "version": "2.2.2", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ReplyToStatus" }, ReplyToStatus);
   return __toCommonJS(ReplyToStatus_entry_exports);
 })();

@@ -8,67 +8,73 @@ function walk(value, visit) {
 }
 
 export default function AlwaysAnimate(r) {
-    const { h, React } = r, { Page, Text, Toggle } = ui(r);
-    let reduced = false;
-    function allowed() { return !(reduced && r.store.respectReducedMotion); }
+    const { h, React, RN } = r, { Page, Text, Toggle } = ui(r);
     function animateUrl(url) {
-        if (!allowed() || typeof url !== 'string') return url;
-        return url.replace(/\/(avatars|banners|icons|splashes|role-icons)\/([^/]+)\/a_([^/?]+)\.(png|webp|jpg)/i, '/$1/$2/a_$3.gif');
+        if (typeof url !== 'string') return url;
+        return url
+            .replace(/\/(avatars|banners|guilds\/[^/]+\/banners|icons|splashes|role-icons)\/([^/?]+)\/(a_[^/?]+)\.(?:png|webp|jpg|jpeg)(\?[^#]*)?/gi, '/$1/$2/$3.gif$4')
+            .replace(/\/avatars\/(\d+)\/(a_[^/?]+)\.(?:png|webp)(\?[^#]*)?/gi, '/avatars/$1/$2.gif$3')
+            .replace(/\/banners\/(\d+)\/(a_[^/?]+)\.(?:png|webp)(\?[^#]*)?/gi, '/banners/$1/$2.gif$3')
+            .replace(/\/icons\/(\d+)\/(a_[^/?]+)\.(?:png|webp)(\?[^#]*)?/gi, '/icons/$1/$2.gif$3');
     }
-    function forceProps(element) {
-        if (!element?.props || !allowed()) return;
-        const props = {};
-        for (const key of ['canAnimate', 'animate', 'animateEmoji', 'animateGradient', 'loop', 'shouldAnimate', 'animated']) {
-            if (key in (element.props || {}) || typeof element.props?.[key] === 'boolean') props[key] = true;
+    function animateValue(value) {
+        if (typeof value === 'string') return animateUrl(value);
+        if (Array.isArray(value)) return value.map(animateValue);
+        if (value && typeof value === 'object') {
+            const next = { ...value };
+            if (typeof next.uri === 'string') next.uri = animateUrl(next.uri);
+            if (typeof next.url === 'string') next.url = animateUrl(next.url);
+            if (typeof next.src === 'string') next.src = animateUrl(next.src);
+            return next;
         }
-        const src = element.props.source;
-        if (src && typeof src === 'object' && typeof src.uri === 'string') {
-            const uri = animateUrl(src.uri);
-            if (uri !== src.uri) props.source = { ...src, uri };
-        }
-        return Object.keys(props).length ? React.cloneElement(element, props) : undefined;
+        return value;
+    }
+    function forceElement(element) {
+        if (!element?.props || element.props.__mimeAnimated) return;
+        const props = { __mimeAnimated: true, animate: true, animated: true, canAnimate: true, shouldAnimate: true, loop: true };
+        const src = animateValue(element.props.source || element.props.src);
+        if (src && src !== element.props.source) props.source = src;
+        if (element.props.src) props.src = animateValue(element.props.src);
+        return React.cloneElement(element, props);
     }
     function patchUrlFn(parent, key) {
         r.patch('before', parent, key, args => {
-            if (!allowed() || !args) return;
+            if (!args) return;
             if (args[0] && typeof args[0] === 'object') Object.assign(args[0], { canAnimate: true, animated: true, animate: true });
             for (let i = 0; i < args.length; i++) if (typeof args[i] === 'boolean') args[i] = true;
         });
-        r.patch('after', parent, key, (_args, result) => typeof result === 'string' ? animateUrl(result) : result);
+        r.patch('after', parent, key, (_args, result) => animateValue(result));
     }
     return {
-        async start() {
-            try { reduced = !!(await r.RN.AccessibilityInfo?.isReduceMotionEnabled?.()); } catch { reduced = false; }
-            const listener = r.RN.AccessibilityInfo?.addEventListener?.('reduceMotionChanged', value => { reduced = !!value; });
-            r.own(() => listener?.remove?.());
-            for (const name of ['canUseAnimatedEmojis', 'canUseAnimatedAvatar', 'canUseNameplate', 'canUseAnimatedBanner', 'shouldAnimateEmoji', 'isAnimatedAvatarPremiumDisabled']) {
-                r.patch('after', r.find(name), name, () => allowed() ? true : undefined);
+        start() {
+            for (const name of ['canUseAnimatedEmojis', 'canUseAnimatedAvatar', 'canUseNameplate', 'canUseAnimatedBanner', 'shouldAnimateEmoji', 'isAnimatedAvatarPremiumDisabled', 'shouldAnimate']) {
+                r.patch('after', r.find(name), name, () => true);
             }
-            for (const key of ['getUserAvatarURL', 'getUserBannerURL', 'getGuildIconURL', 'getGuildBannerURL', 'getGuildSplashURL', 'getAvatarAnimation', 'getGuildIconSource', 'getGuildBannerSource']) {
+            const userStore = r.byStore('UserStore') || r.find('getCurrentUser', 'getUser');
+            r.patch('after', userStore, 'getCurrentUser', (_args, user) => {
+                if (user && (user.premiumType == null || user.premiumType < 2)) try { user.premiumType = 2; } catch {}
+            });
+            for (const key of ['getUserAvatarURL', 'getUserBannerURL', 'getGuildIconURL', 'getGuildBannerURL', 'getGuildSplashURL', 'getAvatarAnimation', 'getGuildIconSource', 'getGuildBannerSource', 'getAvatarURL', 'getBannerURL']) {
                 const mod = r.find(key);
                 if (mod) patchUrlFn(mod, key);
             }
-            r.hook([
-                'Emoji', 'CustomEmoji', 'AnimatedEmoji', 'Avatar', 'UserAvatar', 'AnimatedAvatar',
-                'GuildIcon', 'AnimatedGuildIcon', 'GuildBanner', 'UserBanner', 'ProfileBanner',
-                'DisplayBanner', 'Banner', 'Nameplate', 'RoleIcon', 'Image', 'FastImage', 'ExpoImage',
-            ], forceProps);
+            r.hook(['Emoji', 'Avatar', 'UserAvatar', 'AnimatedAvatar', 'GuildIcon', 'AnimatedGuildIcon', 'GuildBanner', 'UserBanner', 'ProfileBanner', 'Banner', 'Image', 'FastImage', 'ExpoImage'], forceElement);
             r.patch('after', React, 'createElement', (args, result) => {
-                if (!r.active || !allowed() || !result?.props) return;
+                if (!r.active || !result?.props || result.props.__mimeAnimated) return;
+                const type = args[0];
                 const p = args[1] || {};
-                if (p.guild || p.guildId || p.user || p.userId || p.bannerSource || p.icon || p.avatar) {
-                    return forceProps(result) ?? result;
-                }
+                const src = p.source?.uri || p.source || p.src || p.uri;
+                const url = typeof src === 'string' ? src : src?.uri;
+                const isImage = type === RN.Image || type === 'RCTImageView' || /image|avatar|banner|icon|fastimage/i.test(String(type?.displayName || type?.name || type || ''));
+                if (typeof url === 'string' && /discord(?:app)?\.com\/(avatars|banners|icons|guilds)\//i.test(url)) return forceElement(result) ?? result;
+                if (isImage && url) return forceElement(result) ?? result;
             });
             r.patchRows(rows => {
-                if (!allowed()) return rows;
                 const next = JSON.parse(JSON.stringify(rows));
                 walk(next, node => {
-                    for (const key of ['animate', 'animated', 'canAnimate', 'animateEmoji', 'shouldAnimate', 'loop']) {
-                        if (typeof node[key] === 'boolean' || key in node) node[key] = true;
-                    }
-                    for (const key of ['url', 'src', 'icon', 'avatar', 'banner', 'guildIcon', 'guildBanner']) {
-                        if (typeof node[key] === 'string') node[key] = animateUrl(node[key]);
+                    node.animate = true; node.animated = true; node.canAnimate = true;
+                    for (const key of Object.keys(node)) {
+                        if (typeof node[key] === 'string' && node[key].includes('discord')) node[key] = animateUrl(node[key]);
                     }
                 });
                 return next;
@@ -77,9 +83,8 @@ export default function AlwaysAnimate(r) {
         Settings() {
             r.useRefresh();
             return h(Page, { title: 'AlwaysAnimate' },
-                h(Toggle, { setting: 'respectReducedMotion', label: 'Respect Reduce Motion' }),
-                h(Text, null, 'Animates server icons, server banners, user avatars, and user banners when Discord has an animated asset.'));
+                h(Text, null, 'Rewrites animated avatar, banner, and server icon URLs to .gif and forces canAnimate on Discord helpers.'));
         },
     };
 }
-AlwaysAnimate.defaults = { respectReducedMotion: true };
+AlwaysAnimate.defaults = {};

@@ -627,6 +627,14 @@ Number: ${number}`;
     }
     return {
       start() {
+        if (!r.store.warningShown) {
+          alert("token-utils-warning", "Warning!", "This script can manage tokens; We are not responsible if you get banned", [
+            { text: "OK", onPress: () => {
+              r.set("warningShown", true);
+              close("token-utils-warning");
+            } }
+          ]);
+        }
         r.command({
           name: "get-token",
           description: "Show the current Authorization token",
@@ -646,8 +654,9 @@ Number: ${number}`;
       Settings
     };
   }
+  TokenUtils.defaults = { warningShown: false };
 
   // TokenUtils.entry.js
-  var TokenUtils_entry_default = register({ "id": "mime.tokenutils", "name": "TokenUtils", "description": "/get-token and /token-info for the current Authorization token.", "version": "1.0.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/TokenUtils" }, TokenUtils);
+  var TokenUtils_entry_default = register({ "id": "mime.tokenutils", "name": "TokenUtils", "description": "/get-token and /token-info for the current Authorization token.", "version": "1.0.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/TokenUtils" }, TokenUtils);
   return __toCommonJS(TokenUtils_entry_exports);
 })();

@@ -8857,78 +8857,67 @@ var plugin = (() => {
       };
     }
     function pickImage(cb) {
-      var opts = { mediaType: "photo", selectionLimit: 1, includeBase64: true, presentationStyle: "fullScreen", includeExtra: true };
+      var opts = { mediaType: "photo", selectionLimit: 1, includeBase64: true, presentationStyle: "overFullScreen", includeExtra: true };
       function done(ret) {
         var n = normalizePickedImage(ret);
-        if (n) cb(n);
-        else if (ret && !ret.didCancel && !ret.cancelled) showToast("Could not read that image");
+        if (n) {
+          createDraft.asset = n;
+          cb(n);
+          setTimeout(function() {
+            try {
+              openDecorTab("Create", CreateDecorationPage);
+            } catch (_e) {
+            }
+          }, 300);
+        } else if (ret && !ret.didCancel && !ret.cancelled) showToast("Could not read that image");
       }
-      function launch() {
-        var lib = findByProps("launchImageLibrary", "launchCamera") || findByProps("launchImageLibrary");
-        if (lib && typeof lib.launchImageLibrary === "function") {
-          try {
-            lib.launchImageLibrary(opts, done);
-            return true;
-          } catch (_e) {
-          }
-        }
-        var RN = getRN() || {};
-        var NM = RN.NativeModules || {};
-        var mgr = NM.ImagePickerManager || NM.RNCImagePicker || NM.RNImagePicker || NM.NativeImagePicker;
-        if (mgr) {
-          try {
-            if (typeof mgr.launchImageLibrary === "function") {
-              mgr.launchImageLibrary(opts, done);
-              return true;
-            }
-            if (typeof mgr.showImagePicker === "function") {
-              mgr.showImagePicker(opts, done);
-              return true;
-            }
-          } catch (_e2) {
-          }
-        }
-        var doc = findByProps("pickFile") || findByProps("pick", "types") || findByProps("getDocumentAsync");
-        if (doc) {
-          try {
-            if (typeof doc.pickFile === "function") {
-              Promise.resolve(doc.pickFile({ type: "image/*" })).then(done).catch(function() {
-              });
-              return true;
-            }
-            if (typeof doc.pick === "function") {
-              Promise.resolve(doc.pick({ type: ["image/*", "image/png"] })).then(done).catch(function() {
-              });
-              return true;
-            }
-            if (typeof doc.getDocumentAsync === "function") {
-              Promise.resolve(doc.getDocumentAsync({ type: "image/*" })).then(done).catch(function() {
-              });
-              return true;
-            }
-          } catch (_e3) {
-          }
-        }
-        showToast("No image picker on this Discord build");
-        return false;
-      }
-      hideSheet();
-      try {
-        r.hideSheets?.();
-      } catch {
-      }
-      var run = function() {
+      var lib = findByProps("launchImageLibrary", "launchCamera") || findByProps("launchImageLibrary");
+      if (lib && typeof lib.launchImageLibrary === "function") {
         try {
-          launch();
-        } catch (e) {
-          showToast(String(e && e.message || e));
+          lib.launchImageLibrary(opts, done);
+          return true;
+        } catch (_e) {
         }
-      };
-      if (r.RN.InteractionManager?.runAfterInteractions) r.RN.InteractionManager.runAfterInteractions(function() {
-        setTimeout(run, 250);
-      });
-      else setTimeout(run, 600);
-      return true;
+      }
+      var RN = getRN() || {};
+      var NM = RN.NativeModules || {};
+      var mgr = NM.ImagePickerManager || NM.RNCImagePicker || NM.RNImagePicker || NM.NativeImagePicker;
+      if (mgr) {
+        try {
+          if (typeof mgr.launchImageLibrary === "function") {
+            mgr.launchImageLibrary(opts, done);
+            return true;
+          }
+          if (typeof mgr.showImagePicker === "function") {
+            mgr.showImagePicker(opts, done);
+            return true;
+          }
+        } catch (_e2) {
+        }
+      }
+      var doc = findByProps("pickFile") || findByProps("pick", "types") || findByProps("getDocumentAsync");
+      if (doc) {
+        try {
+          if (typeof doc.pickFile === "function") {
+            Promise.resolve(doc.pickFile({ type: "image/*" })).then(done).catch(function() {
+            });
+            return true;
+          }
+          if (typeof doc.pick === "function") {
+            Promise.resolve(doc.pick({ type: ["image/*", "image/png"] })).then(done).catch(function() {
+            });
+            return true;
+          }
+          if (typeof doc.getDocumentAsync === "function") {
+            Promise.resolve(doc.getDocumentAsync({ type: "image/*" })).then(done).catch(function() {
+            });
+            return true;
+          }
+        } catch (_e3) {
+        }
+      }
+      showToast("No image picker on this Discord build");
+      return false;
     }
     function altText(v) {
       if (v == null) return "";
@@ -9318,6 +9307,6 @@ var plugin = (() => {
   Decor.defaults = { tokens: {} };
 
   // Decor.entry.js
-  var Decor_entry_default = register({ "id": "mime.decor", "name": "Decor", "description": "Create and equip Decor avatar decorations. PNG/APNG preserved; JPEG converted locally.", "version": "2.2.1", "authors": [{ "name": "Fiery", "id": "890228870559698955" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/Decor" }, Decor);
+  var Decor_entry_default = register({ "id": "mime.decor", "name": "Decor", "description": "Create and equip Decor avatar decorations. PNG/APNG preserved; JPEG converted locally.", "version": "2.2.2", "authors": [{ "name": "Fiery", "id": "890228870559698955" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/Decor" }, Decor);
   return __toCommonJS(Decor_entry_exports);
 })();
