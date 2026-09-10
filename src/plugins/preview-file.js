@@ -21,19 +21,8 @@ export function attachmentUrl(value) {
     return u.href;
 }
 
-function findInReactTree(node, filter) {
-    if (!node) return undefined;
-    if (filter(node)) return node;
-    const kids = Array.isArray(node) ? node : node.props?.children;
-    const arr = Array.isArray(kids) ? kids : kids != null ? [kids] : [];
-    for (const child of arr) {
-        const found = findInReactTree(child, filter);
-        if (found) return found;
-    }
-}
-
 export default function PreviewFile(r) {
-    const { h, React, RN, D } = r, { Page, Text, Button } = ui(r), cache = new Map();
+    const { h, React, RN, D, C, B } = r, { Page, Text, Button } = ui(r), cache = new Map();
     async function load(a) {
         const url = attachmentUrl(a.url || a.proxy_url || a.proxyUrl);
         if (cache.has(url)) return cache.get(url);
@@ -53,62 +42,52 @@ export default function PreviewFile(r) {
                     h(Text, { selectable: true, style: { fontFamily: RN.Platform?.OS === 'ios' ? 'Menlo' : 'monospace' } }, shown))));
     }
     async function openViewer(file) {
-        const ActionSheet = r.find('openLazy', 'hideActionSheet');
-        try { ActionSheet?.hideActionSheet?.(); } catch {}
+        try { B.ui.sheets.hideSheet?.(); } catch {}
         const text = await load(file);
-        const Navigation = r.find('push', 'pop');
-        const Navigator = r.byName('Navigator') || r.find('Navigator')?.Navigator;
-        const closeBtn = r.find('getRenderCloseButton')?.getRenderCloseButton || r.find('getHeaderCloseButton')?.getHeaderCloseButton;
-        if (Navigation?.push && Navigator) {
-            Navigation.push(() => h(Navigator, {
-                initialRouteName: 'ViewFile',
-                goBackOnBackPress: true,
-                screens: {
-                    ViewFile: {
-                        title: file.filename || 'View file',
-                        headerLeft: closeBtn?.(() => Navigation.pop()),
-                        render: () => h(Viewer, { a: file, text, close: () => Navigation.pop() }),
-                    },
-                },
-            }));
-            return;
-        }
         r.open('file', Viewer, { a: file, text });
     }
-    function addRow(buttons, file) {
-        if (!buttons || buttons.some(row => row?.props?.label === 'View file')) return;
-        const ActionSheetRow = r.find('ActionSheetRow')?.ActionSheetRow || D.TableRow;
-        if (!ActionSheetRow) return;
-        const iconSource = r.B?.assets?.findAssetId?.('FileIcon') || r.B?.assets?.getAssetIDByName?.('FileIcon');
-        const row = h(ActionSheetRow, {
-            label: 'View file',
-            icon: ActionSheetRow.Icon && iconSource ? h(ActionSheetRow.Icon, { source: iconSource }) : undefined,
-            onPress: () => { openViewer(file).catch(e => r.error('View file', e)); },
+    function viewRow(file) {
+        const Row = D.ActionSheetRow || D.TableRow || C.TableRow;
+        const icon = D.TableRow?.Icon && C.RowIcon ? h(C.RowIcon, { name: 'FileIcon' }) : undefined;
+        if (!Row) return null;
+        return h(Row, { label: 'View file', icon, onPress: () => { openViewer(file).catch(e => r.error('View file', e)); } });
+    }
+    function insertRow(tree, file) {
+        if (!tree || typeof tree !== 'object' || !file) return tree;
+        const kids = React.Children.toArray(tree.props?.children);
+        if (!kids.length) return tree;
+        if (kids.some(child => child?.props?.label === 'View file')) return tree;
+        const rawAt = kids.findIndex(child => /view\s*raw/i.test(String(child?.props?.label || '')));
+        const hasRows = rawAt >= 0 || kids.some(child => child?.props?.label);
+        if (hasRows) {
+            const row = viewRow(file);
+            const next = rawAt >= 0 ? [...kids.slice(0, rawAt + 1), row, ...kids.slice(rawAt + 1)] : [...kids, row];
+            return React.cloneElement(tree, { children: next });
+        }
+        let changed = false;
+        const mapped = kids.map(child => {
+            const out = insertRow(child, file);
+            if (out !== child) changed = true;
+            return out;
         });
-        const rawAt = buttons.findIndex(child => /view\s*raw/i.test(String(child?.props?.label || '')));
-        if (rawAt >= 0) buttons.splice(rawAt + 1, 0, row);
-        else buttons.push(row);
+        return changed ? React.cloneElement(tree, { children: mapped }) : tree;
     }
     return {
         start() {
-            const ActionSheet = r.find('openLazy', 'hideActionSheet');
-            if (!ActionSheet?.openLazy) return;
-            r.patch('before', ActionSheet, 'openLazy', args => {
-                const [component, key, data] = args;
-                const message = data?.message;
-                const file = (message?.attachments || []).find(previewable);
-                if (key !== 'MessageLongPressActionSheet' || !file || typeof component?.then !== 'function') return;
-                component.then(instance => {
-                    const unpatch = r.B.patcher.after('default', instance, (_args, tree) => {
-                        try { React.useEffect(() => () => unpatch?.(), []); } catch {}
-                        const buttons = findInReactTree(tree, node => Array.isArray(node) && node.some(child => child?.type?.name === 'ButtonRow' || child?.type?.name === 'ActionSheetRow' || child?.props?.label));
-                        addRow(buttons, file);
-                    });
-                });
+            r.hook(['MessageLongPressActionSheet'], (element) => {
+                const Component = element.type;
+                function Sheet(props) {
+                    let tree;
+                    try { tree = typeof Component === 'function' && !Component.prototype?.render ? Component(props) : h(Component, props); }
+                    catch { tree = h(Component, props); }
+                    const file = (props.message?.attachments || []).find(previewable);
+                    return file ? insertRow(tree, file) || tree : tree;
+                }
+                return h(Sheet, element.props);
             });
         },
         stop() { cache.clear(); },
-        Settings() { return h(Page, { title: 'PreviewFile' }, h(Text, null, 'Hold a message with a text attachment. View file appears under View Raw and opens a raw-style window with up to 100 lines.')); },
+        Settings() { return h(Page, { title: 'PreviewFile' }, h(Text, null, 'Hold a message with a text file. View file is added under View Raw on Snow’s MessageLongPressActionSheet via jsx.onJsxCreate. Opens a window with up to 100 lines.')); },
         load,
     };
 }

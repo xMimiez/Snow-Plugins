@@ -2,10 +2,10 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.replytostatus",
-  "version": "2.2.5",
+  "version": "2.2.6",
   "display": {
     "name": "ReplyToStatus",
-    "description": "One themed status-reply button per profile with rendered emojis.",
+    "description": "Reply button on the top-right of the profile card.",
     "authors": [
       {
         "name": "Mime | N0_.q3",

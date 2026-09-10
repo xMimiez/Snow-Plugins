@@ -16,7 +16,7 @@ The repository’s root MIT license covers original Mime code. Per-plugin LICENS
 | ReplyToStatus | Mime | N0_.q3 (957164619061932045) |
 | SpotifyPreview | Mime | N0_.q3 (957164619061932045) |
 | TestPlugin | Mime | N0_.q3 (957164619061932045) |
-| AlwaysAnimate | Fiery (890228870559698955), Mime | N0_.q3 (957164619061932045) |
+
 | BlurNSFW | Vendicated (343383572805058560), Mime | N0_.q3 (957164619061932045) |
 | NSFWGateBypass | eternal (263689920210534400), Mime | N0_.q3 (957164619061932045) |
 | VolumeBooster | Nuckyz (235834946571337729), sadan (521819891141967883), Mime | N0_.q3 (957164619061932045) |
@@ -27,7 +27,7 @@ The repository’s root MIT license covers original Mime code. Per-plugin LICENS
 
 ## Upstream references
 
-- [Equicord plugins](https://github.com/Equicord/Equicord/tree/3b617d4f02be78808dfbfc1b192e1fd20fe5db00/src/plugins): Decor, AlwaysAnimate, BlurNSFW, VolumeBooster, ValidUser, OpenInApp, PauseInvitesForever and OnePingPerDM. Copyright Vencord/Equicord contributors; GPL-3.0-or-later.
+- [Equicord plugins](https://github.com/Equicord/Equicord/tree/3b617d4f02be78808dfbfc1b192e1fd20fe5db00/src/plugins): Decor, BlurNSFW, VolumeBooster, ValidUser, OpenInApp, PauseInvitesForever and OnePingPerDM. Copyright Vencord/Equicord contributors; GPL-3.0-or-later.
 - [neoarz/NitroSniper](https://github.com/neoarz/NitroSniper/tree/4877e9e73565e0f157df96e8b6c8735e9647b226): MIT, original notice in NitroSniper/LICENSE.
 - [Decor mobile reference](https://github.com/decor-discord/vendetta-plugin/tree/4aa195a5f32cecd97afcfad40a525b50e429ef1f): Fiery and contributors; preserved existing mobile rendering lineage, API and RN multipart file shape.
 - [NSFWGateBypass](https://github.com/marioparaschiv/enmity-addons/tree/3ac819ba570dd70dba715b288d91bef2e0ed12d3/Plugins/NSFWGateBypass): eternal. The new Snow implementation independently checks the two local gate functions; upstream source was inspected for behavior and attribution, not copied wholesale. No upstream license file was identified in that repository snapshot.
