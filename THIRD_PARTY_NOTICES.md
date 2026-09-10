@@ -23,6 +23,7 @@ The repository’s root MIT license covers original Mime code. Per-plugin LICENS
 | ValidUser | Vendicated (343383572805058560), Dolfies (852892297661906993), Mime | N0_.q3 (957164619061932045) |
 | OpenInApp | Vendicated (343383572805058560), Chloe (1084592643784331324), Mime | N0_.q3 (957164619061932045) |
 | PauseInvitesForever | Dolfies (852892297661906993), amia (142007603549962240), Mime | N0_.q3 (957164619061932045) |
+| GlobalBadges | domi.btnr (354191516979429376), Mime | N0_.q3 (957164619061932045) |
 | OnePingPerDM | ProffDea (609329952180928513), Mime | N0_.q3 (957164619061932045) |
 
 ## Upstream references
@@ -33,6 +34,7 @@ The repository’s root MIT license covers original Mime code. Per-plugin LICENS
 - [NSFWGateBypass](https://github.com/marioparaschiv/enmity-addons/tree/3ac819ba570dd70dba715b288d91bef2e0ed12d3/Plugins/NSFWGateBypass): eternal. The new Snow implementation independently checks the two local gate functions; upstream source was inspected for behavior and attribution, not copied wholesale. No upstream license file was identified in that repository snapshot.
 - [HighlightCode](https://github.com/m4fn3/HighlightCode): mafu; existing Snow port lineage and GPL license.
 - PreviewFile: mafu, retained from the existing repository attribution; this release independently implements the file card/viewer behavior.
+- [GlobalBadges](https://github.com/domi-btnr/Enmity-Stuff/tree/main/GlobalBadges): HypedDomi / domi.btnr; Snow port fetches EquiBadges and ObaWorkshop BadgeVault.
 
 ## Bundled image libraries
 

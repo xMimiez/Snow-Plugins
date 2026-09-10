@@ -1,0 +1,26 @@
+{
+  "spec": 3,
+  "type": "plugin",
+  "id": "mime.globalbadges",
+  "version": "1.0.0",
+  "display": {
+    "name": "GlobalBadges",
+    "description": "Profile badges from EquiBadges (all client mods) and ObaWorkshop BadgeVault.",
+    "authors": [
+      {
+        "name": "domi.btnr",
+        "id": "354191516979429376"
+      },
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.js",
+  "extras": {
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/GlobalBadges",
+    "bunny": {}
+  }
+}

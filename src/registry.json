@@ -313,5 +313,25 @@
     ],
     "license": "MIT",
     "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/TokenUtils"
+  },
+  {
+    "folder": "GlobalBadges",
+    "module": "global-badges",
+    "id": "mime.globalbadges",
+    "name": "GlobalBadges",
+    "description": "Profile badges from EquiBadges (all client mods) and ObaWorkshop BadgeVault.",
+    "version": "1.0.0",
+    "authors": [
+      {
+        "name": "domi.btnr",
+        "id": "354191516979429376"
+      },
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ],
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/GlobalBadges"
   }
 ]
