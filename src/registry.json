@@ -337,5 +337,21 @@
     ],
     "license": "GPL-3.0-or-later",
     "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PauseInvitesForever"
+  },
+  {
+    "folder": "InstallLinks",
+    "module": "install-links",
+    "id": "mime.installlinks",
+    "name": "InstallLinks",
+    "description": "Handle snow:// install-plugin links (Enmity-style) and copy Snow install URLs.",
+    "version": "1.0.0",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ],
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/InstallLinks"
   }
 ]
