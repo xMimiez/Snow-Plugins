@@ -14,11 +14,11 @@ These releases use **Bunny spec 3**. Install from the `manifest.json` URL, then 
 | [HighlightCode](HighlightCode/) | 2.2.0 | Highlight supported native chat code blocks. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/HighlightCode/manifest.json) |
 | [MoreCommands](MoreCommands/) | 2.2.0 | Fun and utility slash commands, including `/gifroulette`. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/MoreCommands/manifest.json) |
 | [NitroSniper](NitroSniper/) | 2.2.1 | Process new gift links with a queue and visible results. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/NitroSniper/manifest.json) |
-| [PreviewFile](PreviewFile/) | 2.2.4 | Hold a message → View file (above Copy text). Up to 100 lines. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/PreviewFile/manifest.json) |
-| [ReplyToStatus](ReplyToStatus/) | 2.2.4 | Reply prompt when opening a profile; `/replytostatus`. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/ReplyToStatus/manifest.json) |
+| [PreviewFile](PreviewFile/) | 2.2.5 | Hold a message → View file under View Raw. Up to 100 lines. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/PreviewFile/manifest.json) |
+| [ReplyToStatus](ReplyToStatus/) | 2.2.5 | Reply to Status row on the profile action sheet; `/replytostatus`. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/ReplyToStatus/manifest.json) |
 | [SpotifyPreview](SpotifyPreview/) | 2.2.2 | Intercepts Spotify links and shows a preview sheet instead of the app. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/SpotifyPreview/manifest.json) |
 | [TestPlugin](TestPlugin/) | 2.2.0 | Compatibility checks. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/TestPlugin/manifest.json) |
-| [AlwaysAnimate](AlwaysAnimate/) | 1.2.3 | Animate server icons, server banners, user avatars, and user banners. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/AlwaysAnimate/manifest.json) |
+| [AlwaysAnimate](AlwaysAnimate/) | 1.2.4 | Animate server icons, server banners, user avatars, and user banners. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/AlwaysAnimate/manifest.json) |
 | [BlurNSFW](BlurNSFW/) | 1.2.0 | Spoiler/cover NSFW media on mobile. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/BlurNSFW/manifest.json) |
 | [NSFWGateBypass](NSFWGateBypass/) | 1.2.0 | Bypass supported local guild NSFW gates. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/NSFWGateBypass/manifest.json) |
 | [VolumeBooster](VolumeBooster/) | 1.2.1 | Optional voice output boost without patching Discord sliders. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/VolumeBooster/manifest.json) |

@@ -112,8 +112,8 @@
     "module": "preview-file",
     "id": "mime.previewfile",
     "name": "PreviewFile",
-    "description": "View file from the message long-press sheet, above Copy text.",
-    "version": "2.2.4",
+    "description": "View file under View Raw on the message long-press sheet.",
+    "version": "2.2.5",
     "authors": [
       {
         "name": "mafu",
@@ -133,7 +133,7 @@
     "id": "mime.replytostatus",
     "name": "ReplyToStatus",
     "description": "One themed status-reply button per profile with rendered emojis.",
-    "version": "2.2.4",
+    "version": "2.2.5",
     "authors": [
       {
         "name": "Mime | N0_.q3",
@@ -181,7 +181,7 @@
     "id": "mime.alwaysanimate",
     "name": "AlwaysAnimate",
     "description": "Animate server icons, server banners, user avatars, and user banners.",
-    "version": "1.2.3",
+    "version": "1.2.4",
     "authors": [
       {
         "name": "Fiery",

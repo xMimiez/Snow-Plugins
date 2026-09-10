@@ -569,42 +569,39 @@ var plugin = (() => {
     }
     function withGif(source) {
       if (typeof source === "string") return gifUrl(source);
-      if (source && typeof source === "object" && typeof source.uri === "string") return { ...source, uri: gifUrl(source.uri) };
+      if (source && typeof source === "object" && typeof source.uri === "string") {
+        const uri = gifUrl(source.uri);
+        return uri === source.uri ? source : { ...source, uri };
+      }
       return source;
     }
     function rewrite(element) {
       if (!element?.props || element.props.__mimeAnimated) return;
-      const source = withGif(element.props.source || element.props.src);
-      return React.cloneElement(element, {
-        __mimeAnimated: true,
-        source,
-        src: withGif(element.props.src),
-        animate: true,
-        animated: true,
-        canAnimate: true
-      });
+      const next = withGif(element.props.source || element.props.src);
+      if (next === (element.props.source || element.props.src) && !/\/a_/.test(String(element.props.source?.uri || element.props.source || ""))) return;
+      return React.cloneElement(element, { __mimeAnimated: true, source: next, animate: true, animated: true, canAnimate: true });
     }
     return {
       start() {
-        for (const key of ["canUseAnimatedAvatar", "canUseAnimatedBanner", "canUseAnimatedEmojis", "shouldAnimate"]) {
+        for (const key of ["canUseAnimatedAvatar", "canUseAnimatedBanner", "canUseAnimatedEmojis"]) {
           r.patch("after", r.find(key), key, () => true);
         }
-        for (const key of ["getUserAvatarURL", "getUserBannerURL", "getGuildIconURL", "getGuildBannerURL", "getAvatarURL", "getBannerURL"]) {
-          const mod = r.find(key);
-          r.patch("before", mod, key, (args) => {
-            if (!args) return;
-            if (args[0] && typeof args[0] === "object") Object.assign(args[0], { canAnimate: true, animated: true });
-            for (let i = 0; i < args.length; i++) if (typeof args[i] === "boolean") args[i] = true;
+        for (const key of ["getUserAvatarURL", "getUserBannerURL", "getGuildIconURL", "getGuildBannerURL"]) {
+          r.patch("before", r.find(key), key, (args) => {
+            if (args?.[0] && typeof args[0] === "object") Object.assign(args[0], { canAnimate: true, animated: true });
+            if (args) {
+              for (let i = 0; i < args.length; i++) if (typeof args[i] === "boolean") args[i] = true;
+            }
           });
-          r.patch("after", mod, key, (_args, result) => typeof result === "string" ? gifUrl(result) : withGif(result));
+          r.patch("after", r.find(key), key, (_args, result) => typeof result === "string" ? gifUrl(result) : withGif(result));
         }
-        r.hook(["Image", "Avatar", "UserAvatar", "AnimatedAvatar", "GuildIcon", "UserBanner", "ProfileBanner", "Banner", "FastImage"], rewrite);
+        r.hook(["Image", "Avatar", "UserAvatar", "AnimatedAvatar", "GuildIcon", "UserBanner", "ProfileBanner", "Banner", "FastImage", "ExpoImage"], rewrite);
       },
       Settings() {
         return h(
           Page,
           { title: "AlwaysAnimate" },
-          h(Text, null, "Uses Snow/Bunny Metro finders, patcher, and JSX hooks so animated avatar and banner URLs request .gif instead of static webp.")
+          h(Text, null, "Snow/Bunny patcher + JSX hooks. Animated avatar/banner hashes (a_) are requested as .gif.")
         );
       }
     };
@@ -612,6 +609,6 @@ var plugin = (() => {
   AlwaysAnimate.defaults = {};
 
   // AlwaysAnimate.entry.js
-  var AlwaysAnimate_entry_default = register({ "id": "mime.alwaysanimate", "name": "AlwaysAnimate", "description": "Animate server icons, server banners, user avatars, and user banners.", "version": "1.2.3", "authors": [{ "name": "Fiery", "id": "890228870559698955" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/AlwaysAnimate" }, AlwaysAnimate);
+  var AlwaysAnimate_entry_default = register({ "id": "mime.alwaysanimate", "name": "AlwaysAnimate", "description": "Animate server icons, server banners, user avatars, and user banners.", "version": "1.2.4", "authors": [{ "name": "Fiery", "id": "890228870559698955" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/AlwaysAnimate" }, AlwaysAnimate);
   return __toCommonJS(AlwaysAnimate_entry_exports);
 })();

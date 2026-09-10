@@ -2,10 +2,10 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.previewfile",
-  "version": "2.2.4",
+  "version": "2.2.5",
   "display": {
     "name": "PreviewFile",
-    "description": "View file from the message long-press sheet, above Copy text.",
+    "description": "View file under View Raw on the message long-press sheet.",
     "authors": [
       {
         "name": "mafu",

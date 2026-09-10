@@ -708,56 +708,49 @@ ${value.trim()}`;
           const status = normalizeStatus(p.customStatus || p.activity || p.activities || p.status || presence?.getActivities?.(userId)) || { text: p.bio || p.pronouns || "No custom status" };
           return h(ProfileGate, { userId, status, key: element.key }, r.React.cloneElement(element, { __mimeReplyWrapped: true }));
         }
-        let currentUserId = null;
-        function remember(id) {
-          if (id) currentUserId = String(id);
-        }
-        function idFrom(args) {
-          const a = args && args[0];
-          if (!a) return null;
-          if (typeof a === "string" && /^\d+$/.test(a)) return a;
-          return a.userId || a.user?.id || a.userID || a.id;
-        }
-        for (const key of ["openUserProfileActionSheet", "openUserProfile", "showUserProfile", "openUserProfileModal"]) {
-          const mod = r.find(key);
-          if (mod && typeof mod[key] === "function") {
-            r.patch("after", mod, key, (args) => {
-              remember(idFrom(args));
-              const userId = currentUserId;
-              if (!userId) return;
-              setTimeout(() => {
-                if (!r.active || currentUserId !== userId) return;
-                const presence = r.byStore("PresenceStore");
-                const status = normalizeStatus(presence?.getActivities?.(userId)) || { text: "No custom status" };
-                const AlertModal = r.D.AlertModal || r.C.AlertModal;
-                const AlertActions = r.D.AlertActions || r.C.AlertActions;
-                const AlertActionButton = r.D.AlertActionButton || r.C.AlertActionButton;
-                if (!AlertModal) return;
-                r.api.ui.openAlert("reply-to-status", h(AlertModal, {
-                  title: "Reply to status",
-                  content: status.text || "Reply to this user?",
-                  actions: h(
-                    AlertActions,
-                    null,
-                    h(AlertActionButton, { text: "Reply", onPress: () => {
-                      r.api.ui.dismissAlert("reply-to-status");
-                      open(userId, status);
-                    } }),
-                    h(AlertActionButton, { text: "Not now", variant: "secondary", onPress: () => r.api.ui.dismissAlert("reply-to-status") })
-                  )
-                }));
-              }, 400);
-            });
+        function findInReactTree(node, filter) {
+          if (!node) return void 0;
+          if (filter(node)) return node;
+          const kids = Array.isArray(node) ? node : node.props?.children;
+          const arr = Array.isArray(kids) ? kids : kids != null ? [kids] : [];
+          for (const child of arr) {
+            const found = findInReactTree(child, filter);
+            if (found) return found;
           }
         }
+        const ActionSheet = r.find("openLazy", "hideActionSheet");
+        if (ActionSheet?.openLazy) {
+          r.patch("before", ActionSheet, "openLazy", (args) => {
+            const [component, key, data] = args;
+            const userId = data?.userId || data?.user?.id || data?.userID || data?.displayProfile?.userId;
+            if (!/Profile/i.test(String(key || "")) || !userId || typeof component?.then !== "function") return;
+            component.then((instance) => {
+              const unpatch = r.B.patcher.after("default", instance, (_a, tree) => {
+                try {
+                  React.useEffect(() => () => unpatch?.(), []);
+                } catch {
+                }
+                const buttons = findInReactTree(tree, (node) => Array.isArray(node) && node.some((child) => child?.type?.name === "ButtonRow" || child?.type?.name === "ActionSheetRow" || child?.props?.label));
+                if (!buttons || buttons.some((row) => row?.props?.label === "Reply to Status")) return;
+                const ActionSheetRow = r.find("ActionSheetRow")?.ActionSheetRow || r.D.TableRow;
+                if (!ActionSheetRow) return;
+                const presence = r.byStore("PresenceStore");
+                const status = normalizeStatus(presence?.getActivities?.(userId)) || { text: "No custom status" };
+                buttons.unshift(h(ActionSheetRow, {
+                  label: "Reply to Status",
+                  onPress: () => {
+                    try {
+                      ActionSheet.hideActionSheet();
+                    } catch {
+                    }
+                    open(userId, status);
+                  }
+                }));
+              });
+            });
+          });
+        }
         r.hook(["UserProfileCustomStatus", "ProfileCustomStatus", "CustomStatus", "UserCustomStatus", "CustomStatusText"], wrap);
-        r.patch("after", r.React, "createElement", (args, result) => {
-          if (!r.active || !result?.props || result.props.__mimeReplyWrapped) return;
-          const p = args[1] || result.props;
-          const type = args[0];
-          const name = typeof type === "string" ? type : type?.displayName || type?.name || "";
-          if (/customstatus/i.test(name) || p.customStatus && (p.userId || p.user)) return wrap(result) ?? result;
-        });
         r.command({
           name: "replytostatus",
           description: "Reply to a user custom status",
@@ -790,6 +783,6 @@ ${value.trim()}`;
   }
 
   // ReplyToStatus.entry.js
-  var ReplyToStatus_entry_default = register({ "id": "mime.replytostatus", "name": "ReplyToStatus", "description": "One themed status-reply button per profile with rendered emojis.", "version": "2.2.4", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ReplyToStatus" }, ReplyToStatus);
+  var ReplyToStatus_entry_default = register({ "id": "mime.replytostatus", "name": "ReplyToStatus", "description": "One themed status-reply button per profile with rendered emojis.", "version": "2.2.5", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ReplyToStatus" }, ReplyToStatus);
   return __toCommonJS(ReplyToStatus_entry_exports);
 })();
