@@ -320,11 +320,15 @@
     "id": "mime.globalbadges",
     "name": "GlobalBadges",
     "description": "Profile badges from EquiBadges (all client mods) and ObaWorkshop BadgeVault.",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "authors": [
       {
         "name": "domi.btnr",
         "id": "354191516979429376"
+      },
+      {
+        "name": "Wolfie",
+        "id": "347096063569559553"
       },
       {
         "name": "Mime | N0_.q3",

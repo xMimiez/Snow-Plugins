@@ -558,143 +558,151 @@ var plugin = (() => {
   }
 
   // project:src/plugins/global-badges.js
-  var EQUI = "https://badges.equicord.org";
-  var VAULT = "https://plugins.obamabot.me/BadgeVault/User";
-  var EXPIRES = 1e3 * 60 * 15;
-  var cache = /* @__PURE__ */ new Map();
-  function asList(mod, entries) {
+  var EQUI_USERS = "https://badges.equicord.org/users";
+  var EQUI_USER = "https://badges.equicord.org";
+  var VAULT_USER = "https://plugins.obamabot.me/BadgeVault/User";
+  var REFRESH = 1e3 * 60 * 30;
+  var serviceMap = {
+    badgevault: "BadgeVault",
+    nekocord: "Nekocord",
+    reviewdb: "ReviewDB",
+    aero: "Aero",
+    aliucord: "Aliucord",
+    raincord: "Raincord",
+    velocity: "Velocity",
+    enmity: "Enmity",
+    paicord: "Paicord",
+    bunny: "Bunny",
+    goosemod: "GooseMod",
+    replugged: "Replugged",
+    betterdiscord: "BetterDiscord",
+    vendroidenhanced: "VendroidEnhanced",
+    revenge: "Revenge",
+    record: "ReCord",
+    vencord: "Vencord",
+    equicord: "Equicord",
+    discord: "Discord"
+  };
+  var byUser = {};
+  var badgeProps = {};
+  var refreshTimer;
+  function flattenEquiUser(entries, showPrefix) {
     if (!Array.isArray(entries)) return [];
-    return entries.map((badge) => {
-      if (typeof badge === "string") {
-        const names = { hunter: "Bug Hunter", early: "Early User" };
-        const short = badge.replace(mod, "").trim().split(" ")[0] || badge;
-        return { name: names[badge] || badge, badge: `${EQUI}/public/badges/${mod}/${short}.png`, custom: false, source: mod };
-      }
-      const url = badge.badge || badge.url || badge.image;
-      const name = badge.name || badge.tooltip || badge.label || mod;
+    return entries.map((b, idx) => {
+      const url = b.badge || b.url;
+      const mod = b.mod || "custom";
       if (!url || !String(url).startsWith("https://")) return null;
-      if (badge.pending) return null;
-      return { name, badge: url, custom: true, source: mod };
+      const modName = serviceMap[String(mod).toLowerCase()] || mod;
+      const tip = b.tooltip || b.name || b.label || modName;
+      const label = showPrefix ? `${modName} \u2014 ${tip}` : tip;
+      return { mod, badge: url, tooltip: label, key: `${mod}-${idx}-${url}` };
     }).filter(Boolean);
   }
-  async function fetchEqui(r, id) {
-    const data = (await r.request(`${EQUI}/${id}?separated=true&capitalize=true`, {}, 12e3)).json();
-    const groups = data?.badges && typeof data.badges === "object" ? data.badges : data;
-    const out = {};
-    if (!groups || typeof groups !== "object") return out;
-    for (const [mod, entries] of Object.entries(groups)) {
-      const list = asList(mod, entries);
-      if (list.length) out[mod] = list;
+  function mergeUser(id, list) {
+    const existing = byUser[id] || [];
+    const urls = new Set(existing.map((b) => b.badge));
+    for (const badge of list) if (!urls.has(badge.badge)) {
+      existing.push(badge);
+      urls.add(badge.badge);
     }
-    return out;
+    if (existing.length) byUser[id] = existing;
   }
-  async function fetchVault(r, id) {
-    const data = (await r.request(`${VAULT}/${id}.json`, {}, 12e3)).json();
-    if (data?.blocked) return { BadgeVault: [] };
-    return { BadgeVault: asList("BadgeVault", data?.badges || []) };
+  async function loadBadges(r, showPrefix) {
+    try {
+      const data = (await r.request(EQUI_USERS, {}, 2e4, 2 * 1024 * 1024)).json();
+      const users = data?.users || data || {};
+      const next = {};
+      for (const [id, entries] of Object.entries(users)) {
+        const list = flattenEquiUser(entries, showPrefix);
+        if (list.length) next[id] = list;
+      }
+      byUser = next;
+    } catch (error) {
+      r.B?.logger?.warn?.("GlobalBadges EquiBadges bulk load failed", error);
+    }
   }
-  async function fetchBadges(r, id) {
-    const hit = cache.get(id);
-    if (hit && hit.expires > Date.now()) return hit.badges;
-    const badges = {};
-    const results = await Promise.allSettled([fetchEqui(r, id), fetchVault(r, id)]);
-    for (const result of results) {
-      if (result.status !== "fulfilled" || !result.value) continue;
-      for (const [mod, list] of Object.entries(result.value)) {
-        if (!list.length) continue;
-        const existing = badges[mod] || [];
-        const urls = new Set(existing.map((b) => b.badge));
-        for (const badge of list) if (!urls.has(badge.badge)) {
-          existing.push(badge);
-          urls.add(badge.badge);
+  async function loadUser(r, id, showPrefix) {
+    const results = await Promise.allSettled([
+      r.request(`${EQUI_USER}/${id}?separated=true`, {}, 1e4).then((d) => d.json()),
+      r.request(`${VAULT_USER}/${id}.json`, {}, 1e4).then((d) => d.json())
+    ]);
+    if (results[0].status === "fulfilled") {
+      const body = results[0].value;
+      const groups = body?.badges && typeof body.badges === "object" && !Array.isArray(body.badges) ? body.badges : null;
+      if (groups) {
+        const list = [];
+        for (const [mod, entries] of Object.entries(groups)) {
+          for (const item of flattenEquiUser((entries || []).map((e) => ({ ...e, mod })), showPrefix)) list.push(item);
         }
-        badges[mod] = existing;
+        mergeUser(id, list);
+      } else if (Array.isArray(body)) mergeUser(id, flattenEquiUser(body, showPrefix));
+    }
+    if (results[1].status === "fulfilled") {
+      const vault = results[1].value;
+      if (!vault?.blocked) {
+        mergeUser(id, asVault(vault?.badges, showPrefix));
       }
     }
-    cache.set(id, { badges, expires: Date.now() + EXPIRES });
-    return badges;
+  }
+  function asVault(badges, showPrefix) {
+    if (!Array.isArray(badges)) return [];
+    return badges.filter((b) => b && !b.pending && String(b.badge || "").startsWith("https://")).map((b, idx) => ({
+      mod: "badgevault",
+      badge: b.badge,
+      tooltip: showPrefix ? `BadgeVault \u2014 ${b.name}` : b.name,
+      key: `vault-${idx}-${b.badge}`
+    }));
   }
   function GlobalBadges(r) {
-    const { h, React, RN } = r, { Page, Text, Toggle } = ui(r);
-    function Badge({ name, img }) {
-      return h(RN.Pressable || RN.TouchableOpacity, {
-        accessibilityLabel: name,
-        onPress: () => r.toast(name),
-        style: { alignItems: "center", justifyContent: "center", marginHorizontal: 2 }
-      }, h(RN.Image, { source: { uri: img }, style: { width: 24, height: 24, resizeMode: "contain" }, accessibilityLabel: name }));
-    }
-    function BadgeList({ userId, style }) {
-      const [badges, setBadges] = React.useState({});
-      React.useEffect(() => {
-        let live = true;
-        fetchBadges(r, userId).then((value) => {
-          if (live) setBadges(value || {});
-        }).catch(() => {
-        });
-        return () => {
-          live = false;
-        };
-      }, [userId]);
-      const icons = [];
-      for (const [mod, list] of Object.entries(badges)) {
-        for (const badge of list) {
-          if (!r.store.showCustom && badge.custom) continue;
-          const clean = String(badge.name || "").replace(new RegExp(mod, "i"), "").trim() || badge.name;
-          const label = badge.custom || !r.store.showPrefix ? badge.name : `${mod} ${clean.charAt(0).toUpperCase()}${clean.slice(1)}`;
-          icons.push(h(Badge, { key: `${mod}:${badge.badge}`, name: label, img: badge.badge }));
-        }
-      }
-      if (!icons.length) return null;
-      return h(RN.View, {
-        style: [{ flexDirection: "row", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "flex-end", paddingVertical: 2 }, style],
-        accessibilityRole: "list",
-        accessibilityLabel: "User Badges"
-      }, icons);
-    }
-    function inject(props, res) {
-      const userId = props?.user?.id || props?.userId;
-      if (!userId) return res;
-      const extra = h(BadgeList, { userId, style: props?.style });
-      if (!res) return extra;
-      try {
-        if (Array.isArray(res.props?.badges)) {
-          res.props.badges.push(extra);
-          return res;
-        }
-        const kids = React.Children.toArray(res.props?.children);
-        kids.push(extra);
-        return React.cloneElement(res, { children: kids });
-      } catch {
-        return h(RN.View, { style: { flexDirection: "row", flexWrap: "wrap", alignItems: "center" } }, res, extra);
-      }
-    }
-    function patchModule(mod) {
-      if (!mod) return;
-      const key = typeof mod.default === "function" ? "default" : typeof mod.type === "function" ? "type" : typeof mod === "function" ? null : null;
-      if (key) r.patch("after", mod, key, (args, tree) => inject(args?.[0], tree));
-      else if (typeof mod === "function" && mod.prototype?.render) r.patch("after", mod.prototype, "render", function(_args, tree) {
-        return inject(this.props, tree);
+    const { h, React } = r, { Page, Text, Toggle } = ui(r);
+    function applyBadgeProps(element) {
+      const id = element?.props?.id;
+      if (typeof id !== "string" || !id.startsWith("gb-")) return;
+      const cached = badgeProps[id];
+      if (!cached) return;
+      return React.cloneElement(element, {
+        source: cached.source,
+        label: cached.label,
+        id: cached.id
       });
     }
     return {
-      start() {
-        const metro = r.B.metro;
-        patchModule(metro.findByName?.("ProfileBadges", false));
-        patchModule(metro.findByDisplayName?.("ProfileBadges", false));
-        patchModule(metro.findByTypeName?.("ProfileBadges", false));
-        patchModule(r.byName("ProfileBadges"));
-        r.hook(["ProfileBadges"], (element) => {
-          const Component = element.type;
-          function Wrapped(props) {
-            let tree;
-            try {
-              tree = typeof Component === "function" && !Component.prototype?.render ? Component(props) : h(Component, props);
-            } catch {
-              tree = h(Component, props);
-            }
-            return inject(props, tree);
-          }
-          return h(Wrapped, element.props);
+      async start() {
+        await loadBadges(r, r.store.showPrefix);
+        refreshTimer = setInterval(() => {
+          loadBadges(r, r.store.showPrefix).catch(() => {
+          });
+        }, REFRESH);
+        r.own(() => {
+          clearInterval(refreshTimer);
+          refreshTimer = null;
+        });
+        r.hook(["ProfileBadge", "RenderBadge"], applyBadgeProps);
+        const badgeModule = r.B.metro.findByName?.("useBadges", false);
+        if (!badgeModule || typeof badgeModule.default !== "function") {
+          r.B.logger?.warn?.("GlobalBadges: useBadges was not found");
+          return;
+        }
+        r.patch("after", badgeModule, "default", (args, result) => {
+          const userId = args?.[0]?.userId || args?.[0]?.id || args?.[0]?.user?.id;
+          if (!userId || !Array.isArray(result)) return result;
+          if (!byUser[userId]) loadUser(r, userId, r.store.showPrefix).catch(() => {
+          });
+          const extras = byUser[userId];
+          if (!extras?.length) return result;
+          const seen = new Set(result.map((b) => b?.id).filter(Boolean));
+          const next = result.slice();
+          extras.forEach((badge, idx) => {
+            if (!r.store.showCustom && String(badge.mod).toLowerCase() === "badgevault") return;
+            const id = `gb-${userId}-${idx}`;
+            if (seen.has(id)) return;
+            badgeProps[id] = { id, source: { uri: badge.badge }, label: badge.tooltip, userId };
+            const item = { id, description: badge.tooltip, icon: "dummy" };
+            if (r.store.placeLeft) next.unshift(item);
+            else next.push(item);
+            seen.add(id);
+          });
+          return next;
         });
       },
       Settings() {
@@ -702,16 +710,17 @@ var plugin = (() => {
         return h(
           Page,
           { title: "GlobalBadges" },
-          h(Toggle, { setting: "showPrefix", label: "Prefix", subLabel: "Shows the client mod as a prefix" }),
-          h(Toggle, { setting: "showCustom", label: "Custom badges", subLabel: "Show custom badges from EquiBadges and BadgeVault" }),
-          h(Text, { muted: true }, "Loads badges from badges.equicord.org (all client mods) and plugins.obamabot.me/BadgeVault (ObaWorkshop). Snow\u2019s own badge source is not public yet; Bunny is requested through EquiBadges when present.")
+          h(Toggle, { setting: "showPrefix", label: "Prefix", subLabel: "Show the client mod name in the badge label" }),
+          h(Toggle, { setting: "placeLeft", label: "Place on the left", subLabel: "Insert badges at the start of the Discord badge bar" }),
+          h(Toggle, { setting: "showCustom", label: "Custom / BadgeVault", subLabel: "Include ObaWorkshop BadgeVault and custom URLs" }),
+          h(Text, { muted: true }, "Uses Discord\u2019s useBadges list plus ProfileBadge/RenderBadge JSX hooks (Rain/Bunny). Data from badges.equicord.org and plugins.obamabot.me/BadgeVault.")
         );
       }
     };
   }
-  GlobalBadges.defaults = { showPrefix: true, showCustom: true };
+  GlobalBadges.defaults = { showPrefix: true, showCustom: true, placeLeft: false };
 
   // GlobalBadges.entry.js
-  var GlobalBadges_entry_default = register({ "id": "mime.globalbadges", "name": "GlobalBadges", "description": "Profile badges from EquiBadges (all client mods) and ObaWorkshop BadgeVault.", "version": "1.0.0", "authors": [{ "name": "domi.btnr", "id": "354191516979429376" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/GlobalBadges" }, GlobalBadges);
+  var GlobalBadges_entry_default = register({ "id": "mime.globalbadges", "name": "GlobalBadges", "description": "Profile badges from EquiBadges (all client mods) and ObaWorkshop BadgeVault.", "version": "1.1.0", "authors": [{ "name": "domi.btnr", "id": "354191516979429376" }, { "name": "Wolfie", "id": "347096063569559553" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/GlobalBadges" }, GlobalBadges);
   return __toCommonJS(GlobalBadges_entry_exports);
 })();
