@@ -194,7 +194,7 @@ export default function factory(r) {
             if (typeof jsx?.onJsxCreate !== 'function' || typeof jsx?.deleteJsxCreate !== 'function') throw new Error('Snow JSX icon hooks are unavailable.');
             r.own(() => {});
             r.patch('after', React, 'createElement', (_args, result) => { if (enabled && r.active && result && result.props) probeElement(result.type || _args?.[0], result.props); });
-            for (const name of ['Icon', 'RowIcon', 'IconImage', 'ImgIcon']) {
+            for (const name of ['Icon', 'RowIcon', 'IconImage', 'ImgIcon', 'D', 'X']) {
                 if (sdkIcons.includes(name)) continue;
                 const callback = (_Component, element) => {
                     if (!enabled || !r.active || !React.isValidElement(element)) return;
