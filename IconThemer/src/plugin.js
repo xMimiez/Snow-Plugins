@@ -21,11 +21,12 @@ export default function factory(r) {
     const Button = ({ text, onPress, red, disabled }) => h(RN.Pressable, { accessibilityRole: 'button', accessibilityLabel: text, accessibilityState: { disabled: !!disabled }, disabled, onPress, style: [styles.button, red && { backgroundColor: '#b42335' }, disabled && { opacity: 0.5 }] }, h(Text, null, text));
     const Input = ({ value, onChange, placeholder, label }) => h(RN.TextInput, { value, onChangeText: onChange, placeholder, accessibilityLabel: label || placeholder, placeholderTextColor: '#858ba2', autoCapitalize: 'none', autoCorrect: false, style: styles.input });
 
-    let hits = 0;
+    let hits = 0, applied = 0;
     function IconReplacement({ element, name }) {
         useSettings();
         if (!enabled || !r.active) return element;
         const override = engine.resolveName(name);
+        if (override?.uri) applied++;
         if (!override) return element;
         const props = element.props || {};
         if (!override.uri) return React.cloneElement(element, { color: override.color, style: [props.style, { tintColor: override.color }] });
@@ -147,7 +148,7 @@ export default function factory(r) {
             store.customEnabled ? h(CustomEditor) : null,
             h(Text, { accessibilityRole: 'header', style: [styles.text, { fontSize: 24, fontWeight: '700' }] }, 'icon themer'),
             h(Text, { muted: true }, 'Named icon overrides use Snow’s JSX hook API. Reopen a screen if it kept an older icon. Legacy bitmap images and render paths outside these hooks are unchanged. Missing or failed pack images use the original icon.'),
-            h(Text, { muted: true }, rendererCount ? `${rendererCount} documented icon hooks · ${hits} matches observed · ${engine.failed.size} failed image(s)` : 'Icon hooks are unavailable. Overrides are not active.'),
+            h(Text, { muted: true }, rendererCount ? `${rendererCount} documented icon hooks · ${hits} matches observed · ${applied} overrides applied · ${engine.failed.size} failed image(s)` : 'Icon hooks are unavailable. Overrides are not active.'),
             h(Text, { accessibilityRole: 'header' }, 'Preset icon packs'),
             h(Button, { text: `${!store.pack ? '✓ ' : ''}Original / theme icons`, onPress: () => { engine.retry(); r.set('pack', ''); } }),
             ...packs.map(pack => h(RN.View, { key: pack.id, style: styles.card },
