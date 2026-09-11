@@ -15,6 +15,13 @@ const ALIASES = {
     ic_star_filled: 'StarIcon',
     img_guild_folder: 'FolderIcon',
 };
+const GROUPS = [
+    { id: 'search', label: 'Search', names: ['MagnifyingGlassIcon', 'ChannelListMagnifyingGlassIcon', 'search', 'ic_search', 'ic_search_24px', 'ic_search_line_24px'] },
+    { id: 'unread', label: 'Unread messages', names: ['ChatMarkUnreadIcon', 'InboxIcon', 'ChatDotsIcon', 'ChatIcon', 'Mentions', 'ic_chat_badge', 'ic_mentions'] },
+    { id: 'friends', label: 'Add friends', names: ['UserPlusIcon', 'FriendsIcon', 'GroupPlusIcon', 'NewUserIcon', 'NewUserSimpleIcon', 'ic_person_add', 'ic_add_friend', 'ic_user_add'] },
+    { id: 'plus', label: '+ / Add', names: ['PlusSmallIcon', 'PlusMediumIcon', 'PlusLargeIcon', 'CirclePlusIcon', 'ChatPlusIcon', 'FolderPlusIcon', 'PaperPlusIcon', 'ImagePlusIcon', 'ic_add_24px', 'ic_plus_24px'] },
+    { id: 'settings', label: 'Settings icons', names: ['SettingsIcon', 'WrenchIcon', 'MobilePhoneSettingsIcon', 'UserIcon', 'UserCircleIcon', 'ShieldIcon', 'BellIcon', 'GiftIcon', 'NitroWheelIcon', 'LanguageIcon', 'LockIcon', 'CircleInformationIcon', 'PaintPaletteIcon', 'ThemeDarkIcon', 'ThemeLightIcon', 'InventoryIcon', 'IdCardIcon', 'AppsIcon'] },
+];
 const PRESET_COLORS = ['#BB86FC', '#CDAEF3', '#5865F2', '#212121', '#EDEDED', '#81C995', '#E2C06A', '#CF6679', '#6A6A6A'];
 
 function isHex(value) {
@@ -123,6 +130,28 @@ export default function IconChanger(r) {
             } }),
             h(Button, { text: 'Reset this icon', variant: 'secondary', onPress: () => { setCustom(name, null); r.toast('Reset ' + name); close(); } }));
     }
+    function GroupEditor({ group, close }) {
+        const [color, setColor] = React.useState('');
+        return h(Page, { title: group.label, close },
+            h(Text, { muted: true }, 'Applies to: ' + group.names.join(', ')),
+            h(Input, { value: color, onChange: setColor, placeholder: '#BB86FC', autoCapitalize: 'none' }),
+            h(RN.View, { style: { flexDirection: 'row', flexWrap: 'wrap' } },
+                PRESET_COLORS.map(hex => h(RN.Pressable, {
+                    key: hex, onPress: () => setColor(hex),
+                    style: { width: 28, height: 28, borderRadius: 14, backgroundColor: hex, margin: 4, borderWidth: 1, borderColor: '#ffffff55' },
+                }))),
+            h(Button, { text: 'Apply to group', onPress: () => {
+                if (!isHex(color)) return r.toast('Enter a hex color');
+                for (const name of group.names) setCustom(name, { color: color.trim() });
+                r.toast('Updated ' + group.label);
+                close();
+            } }),
+            h(Button, { text: 'Reset group', variant: 'secondary', onPress: () => {
+                for (const name of group.names) setCustom(name, null);
+                r.toast('Reset ' + group.label);
+                close();
+            } }));
+    }
     function Settings() {
         r.useRefresh();
         const [query, setQuery] = React.useState('');
@@ -137,6 +166,14 @@ export default function IconChanger(r) {
         }));
         return h(Page, { title: 'Icon Changer' },
             h(Toggle, { setting: 'enabled', label: 'Enable icon overrides' }),
+            h(Text, null, 'Quick groups (same color on every related asset)'),
+            ...(D.TableRowGroup ? [h(D.TableRowGroup, { title: 'Common icons' }, GROUPS.map(group => h(D.TableRow, {
+                key: group.id,
+                label: group.label,
+                subLabel: group.names.filter(isCatalogIcon).slice(0, 3).join(', '),
+                icon: C.RowIcon && isCatalogIcon(group.names[0]) ? h(C.RowIcon, { name: group.names[0] }) : undefined,
+                onPress: () => { try { r.open('group-' + group.id, GroupEditor, { group }); } catch (e) { r.error('Icon group', e); } },
+            })))] : []),
             h(Text, null, 'Tint all Discord icons (unless a per-icon override exists)'),
             h(Input, { value: r.store.globalColor || '', onChange: text => r.set('globalColor', text), placeholder: '#BB86FC', autoCapitalize: 'none' }),
             h(RN.View, { style: { flexDirection: 'row', flexWrap: 'wrap' } },
@@ -167,23 +204,35 @@ export default function IconChanger(r) {
                 }
             } catch {}
             names = [...nameSet];
-            r.hook(['Image', 'RCTImageView', 'FastImage'], applyImage);
-            r.hook(['Icon', 'RowIcon'], element => {
-                if (!r.store.enabled) return;
-                return applyNamed(element, element.props?.name);
+            function mark(next) {
+                if (!next || next === true) return next;
+                if (next.props?.__mimeIcon) return next;
+                return React.cloneElement(next, { __mimeIcon: true });
+            }
+            r.patch('after', React, 'createElement', (args, result) => {
+                if (!r.store.enabled || !result?.props || result.props.__mimeIcon) return;
+                const type = args[0];
+                const Img = RN.Image;
+                const isImage = type === Img || type === Img?.render || type === 'RCTImageView'
+                    || type?.displayName === 'Image' || type?.name === 'Image' || type?.name === 'RCTImageView';
+                if (isImage) return mark(applyImage(result) || result);
+                const named = typeof result.props.name === 'string' ? result.props.name
+                    : typeof result.props.icon === 'string' ? result.props.icon : null;
+                if (named) return mark(applyNamed(result, named) || result);
+                if (result.props.source != null) return mark(applyImage(result) || result);
             });
-            r.hook(['IconButton'], element => {
-                if (!r.store.enabled) return;
-                const icon = element.props?.icon;
-                const name = typeof icon === 'string' ? icon : assetNameFromSource(icon);
-                const custom = customFor(name);
-                if (!custom) return;
-                if (custom.image) return React.cloneElement(element, { icon: { uri: custom.image } });
-                if (custom.color) return React.cloneElement(element, { style: [element.props.style, { tintColor: custom.color }] });
-            });
-            r.hook([...nameSet].filter(isCatalogIcon), (element, name) => {
-                if (!r.store.enabled) return;
-                return applyNamed(element, name);
+            if (typeof RN.Image?.prototype?.render === 'function') {
+                r.patch('after', RN.Image.prototype, 'render', function (_args, res) {
+                    if (!r.store.enabled || !this?.props || !res?.props) return res;
+                    const next = applyImage(res);
+                    return next || res;
+                });
+            }
+            r.hook(['Image', 'RCTImageView', 'FastImage', 'Icon', 'RowIcon', 'IconButton'], element => {
+                if (!r.store.enabled || element.props?.__mimeIcon) return;
+                if (element.props.source != null) return applyImage(element);
+                const name = element.props.name || (typeof element.props.icon === 'string' ? element.props.icon : null);
+                if (name) return applyNamed(element, name);
             });
         },
         Settings,
