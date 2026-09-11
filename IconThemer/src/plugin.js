@@ -22,11 +22,13 @@ export default function factory(r) {
     const Input = ({ value, onChange, placeholder, label }) => h(RN.TextInput, { value, onChangeText: onChange, placeholder, accessibilityLabel: label || placeholder, placeholderTextColor: '#858ba2', autoCapitalize: 'none', autoCorrect: false, style: styles.input });
 
     let hits = 0, applied = 0;
+    const matched = new Map(), overridden = new Map();
     function IconReplacement({ element, name }) {
         useSettings();
         if (!enabled || !r.active) return element;
+        matched.set(name, (matched.get(name) || 0) + 1);
         const override = engine.resolveName(name);
-        if (override?.uri) applied++;
+        if (override?.uri) { applied++; overridden.set(name, (overridden.get(name) || 0) + 1); }
         if (!override) return element;
         const props = element.props || {};
         if (!override.uri) return React.cloneElement(element, { color: override.color, style: [props.style, { tintColor: override.color }] });
@@ -47,6 +49,13 @@ export default function factory(r) {
                 props.onError?.(event);
             },
         });
+    }
+    function DiagnosticsShort() {
+        const missing = [...matched.entries()].filter(([name]) => !overridden.has(name)).sort((a, b) => b[1] - a[1]).slice(0, 8);
+        const distinct = matched.size, appliedNames = overridden.size;
+        return h(RN.View, null,
+            h(Text, { muted: true }, `distinct matched icon names: ${distinct} · names with pack output: ${appliedNames}`),
+            missing.length ? h(Text, { muted: true }, `no-output names (top matches): ${missing.map(([n, c]) => `${n}×${c}`).join(' · ')}`) : null);
     }
     function showWarning() {
         const key = 'custom-icons-warning';
@@ -149,6 +158,7 @@ export default function factory(r) {
             h(Text, { accessibilityRole: 'header', style: [styles.text, { fontSize: 24, fontWeight: '700' }] }, 'icon themer'),
             h(Text, { muted: true }, 'Named icon overrides use Snow’s JSX hook API. Reopen a screen if it kept an older icon. Legacy bitmap images and render paths outside these hooks are unchanged. Missing or failed pack images use the original icon.'),
             h(Text, { muted: true }, rendererCount ? `${rendererCount} documented icon hooks · ${hits} matches observed · ${applied} overrides applied · ${engine.failed.size} failed image(s)` : 'Icon hooks are unavailable. Overrides are not active.'),
+            h(DiagnosticsShort),
             h(Text, { accessibilityRole: 'header' }, 'Preset icon packs'),
             h(Button, { text: `${!store.pack ? '✓ ' : ''}Original / theme icons`, onPress: () => { engine.retry(); r.set('pack', ''); } }),
             ...packs.map(pack => h(RN.View, { key: pack.id, style: styles.card },
