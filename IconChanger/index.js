@@ -557,9 +557,12 @@ var plugin = (() => {
     });
   }
 
+  // project:src/plugins/icon-catalog.json
+  var icon_catalog_default = ["AccessibilityIcon", "AchievementsIcon", "AnalyticsIcon", "AnnouncementsIcon", "AnnouncementsLockIcon", "AnnouncementsSpoilerIcon", "AnnouncementsWarningIcon", "AppleNeutralIcon", "AppsIcon", "ArrowAngleLeftUpIcon", "ArrowAngleRightUpIcon", "ArrowLargeLeftIcon", "ArrowLargeUpIcon", "ArrowSmallDownIcon", "ArrowSmallLeftIcon", "ArrowSmallRightIcon", "ArrowSmallUpIcon", "ArrowsUpDownIcon", "AtIcon", "AttachmentIcon", "BackspaceIcon", "BattlenetNeutralIcon", "BeakerIcon", "BellIcon", "BellSlashIcon", "BellZIcon", "BicycleIcon", "BillIcon", "BlueskyNeutralIcon", "BookCheckIcon", "BookmarkIcon", "BookmarkOutlineIcon", "BoostGemIcon", "BoostGemOutlineIcon", "BoostGemSlashIcon", "BoostTier1Icon", "BoostTier2Icon", "BoostTier3Icon", "BugIcon", "BurgerIcon", "CalendarIcon", "CalendarMinusIcon", "CalendarPlusIcon", "CameraIcon", "CarIcon", "ChannelListIcon", "ChannelListMagnifyingGlassIcon", "ChannelNotificationIcon", "ChannelsFollowedIcon", "ChatArrowRightIcon", "ChatCheckIcon", "ChatDotsIcon", "ChatIcon", "ChatMarkUnreadIcon", "ChatPlusIcon", "ChatSmileIcon", "ChatWarningIcon", "ChatXIcon", "CheckmarkLargeBoldIcon", "CheckmarkLargeIcon", "CheckmarkSmallBoldIcon", "CheckmarkSmallIcon", "ChevronLargeDownIcon", "ChevronLargeLeftIcon", "ChevronLargeRightIcon", "ChevronLargeUpIcon", "ChevronSmallDownIcon", "ChevronSmallRightIcon", "ChevronSmallUpIcon", "CircleCheckIcon", "CircleErrorIcon", "CircleInformationIcon", "CircleMinusIcon", "CirclePlayIcon", "CirclePlusIcon", "CircleQuestionIcon", "CircleXIcon", "ClipboardCheckIcon", "ClipboardListIcon", "ClipsIcon", "ClockIcon", "ClockWarningIcon", "ClockXIcon", "ClosedCaptionsOutlineIcon", "CloudIcon", "ClydeIcon", "CompassIcon", "ConnectionFineIcon", "ConnectionUnknownIcon", "CopyIcon", "CreditCardIcon", "CrownIcon", "DenyIcon", "DiceIcon", "DoorEnterIcon", "DoorExitIcon", "DoubleCheckmarkIcon", "DownloadIcon", "DragIcon", "EducationIcon", "EmbedIcon", "EnvelopeIcon", "EpicGamesNeutralIcon", "ExperimentalGameControllerLinkIcon", "EyeDropperIcon", "EyeIcon", "EyeSlashIcon", "FacebookNeutralIcon", "FileIcon", "FileUpIcon", "FileWarningIcon", "FiltersHorizontalIcon", "FireIcon", "FlagIcon", "FlashIcon", "FolderIcon", "FolderPlusIcon", "FoodIcon", "ForumIcon", "ForumLockIcon", "ForumSpoilerIcon", "ForumWarningIcon", "FriendsIcon", "FullscreenEnterIcon", "GameControllerIcon", "GifIcon", "GiftIcon", "GlobeEarthIcon", "GoogleNeutralIcon", "GridSquareIcon", "GroupArrowDownIcon", "GroupIcon", "GroupPlusIcon", "HammerIcon", "HandRequestDenyIcon", "HandRequestSpeakIcon", "HandRequestSpeakListIcon", "HashmarkIcon", "HeadphonesDenyIcon", "HeadphonesIcon", "HeadphonesSlashIcon", "HeartIcon", "HeartOutlineIcon", "HomeIcon", "HourglassIcon", "HubIcon", "IdCardIcon", "IdIcon", "ImageFileIcon", "ImageIcon", "ImageLockIcon", "ImagePlusIcon", "ImageSparkleIcon", "ImageTextIcon", "ImageWarningIcon", "ImagesIcon", "InboxIcon", "InstagramNeutralIcon", "InventoryIcon", "KeyIcon", "KeyboardIcon", "LanguageIcon", "LaptopPhoneIcon", "LettersIcon", "LightbulbIcon", "LinkExternalMediumIcon", "LinkExternalSmallIcon", "LinkIcon", "ListBulletsIcon", "ListViewIcon", "LocationIcon", "LockIcon", "LockUnlockedIcon", "MagicDoorIcon", "MagicWandIcon", "MagnifyingGlassIcon", "MedalIcon", "MenuIcon", "MicrophoneArrowRightIcon", "MicrophoneDenyIcon", "MicrophoneIcon", "MicrophoneSlashIcon", "MinecraftNeutralIcon", "MobilePhoneIcon", "MobilePhoneSettingsIcon", "MobilePhoneShareIcon", "ModerationIcon", "MoreHorizontalIcon", "MoreVerticalIcon", "MusicIcon", "MusicSlashIcon", "NatureIcon", "NewUserIcon", "NewUserSimpleIcon", "NintendoSwitchNeutralIcon", "NitroWheelIcon", "ObjectIcon", "OrbsIcon", "PaintPaletteIcon", "PaintbrushThinIcon", "PaperIcon", "PaperPlusIcon", "PauseIcon", "PawPrintIcon", "PencilIcon", "PencilSparkleIcon", "PhoneCallIcon", "PhoneHangUpIcon", "PhoneIcon", "PiggyBankIcon", "PinIcon", "PlayIcon", "PlaystationNeutralIcon", "PlusLargeIcon", "PlusMediumIcon", "PlusSmallIcon", "PollsIcon", "PuzzlePieceIcon", "QrCodeIcon", "QuestsIcon", "QuoteIcon", "ReactionIcon", "RecordPlayerIcon", "RedditNeutralIcon", "RedoIcon", "RefreshIcon", "RetryIcon", "RibbonIcon", "RiotGamesNeutralIcon", "RobloxNeutralIcon", "RobotIcon", "ScienceIcon", "ScreenArrowIcon", "ScreenIcon", "ScreenStreamIcon", "ScreenXIcon", "SendMessageIcon", "ServerGridIcon", "ServerIcon", "SettingsIcon", "ShareIcon", "ShieldIcon", "ShieldLockIcon", "ShieldUserIcon", "ShopIcon", "SignPostIcon", "SlashBoxIcon", "SlashIcon", "SoundboardIcon", "SoundboardSlashIcon", "SparklesIcon", "SpeedometerIcon", "SpoilerIcon", "SpotifyNeutralIcon", "StaffBadgeIcon", "StageIcon", "StageLockIcon", "StampIcon", "StampXIcon", "StarIcon", "StarOutlineIcon", "SteamNeutralIcon", "StickerIcon", "StickerPlusIcon", "StopIcon", "SubscriptionIcon", "SuperReactionIcon", "TagIcon", "TagsIcon", "TeacupIcon", "TextControllerIcon", "TextIcon", "TextLockIcon", "TextSpoilerIcon", "TextWarningIcon", "ThemeDarkIcon", "ThemeGrayIcon", "ThemeLightIcon", "ThemeMidnightIcon", "ThreadIcon", "ThreadLockIcon", "ThreadMinusIcon", "ThreadPlusIcon", "ThumbsDownIcon", "ThumbsUpIcon", "TicketIcon", "TiktokNeutralIcon", "TimerIcon", "TopicsIcon", "TrainIcon", "TranscriptOutlineIcon", "TrashIcon", "TreehouseIcon", "TrophyIcon", "TvIcon", "TwitchNeutralIcon", "TwitterNeutralIcon", "UndoIcon", "UnknownGameIcon", "UnsendIcon", "UploadIcon", "UserCheckIcon", "UserCircleIcon", "UserClockIcon", "UserIcon", "UserMinusIcon", "UserPlatformIcon", "UserPlusIcon", "UserSquareIcon", "VideoIcon", "VideoSelfieIcon", "VideoSlashIcon", "VoiceLockIcon", "VoiceNormalIcon", "VoiceNormalSpoilerIcon", "VoiceWarningIcon", "VoiceXIcon", "VrHeadsetIcon", "WarningIcon", "WaveformIcon", "WebhookIcon", "WebhookPlusIcon", "WindowLaunchIcon", "WrenchIcon", "XLargeBoldIcon", "XLargeIcon", "XNeutralIcon", "XSmallBoldIcon", "XSmallIcon", "XboxNeutralIcon", "YoutubeNeutralIcon"];
+
   // project:src/plugins/icon-changer.js
   var THEME_URL = "https://raw.githubusercontent.com/xMimiez/Snow-Themes/refs/heads/main/DarkPlus/DarkPlus-mobile.json";
-  var FALLBACK_ICONS = [
+  var EXTRA_KEYS = [
     "ic_radio_circle_checked",
     "ic_radio_circle_checked__overlay",
     "ic_radio_square_checked_24px",
@@ -568,21 +571,23 @@ var plugin = (() => {
     "ic_selection_checked_24px__overlay",
     "ic_star_filled",
     "img_guild_folder",
+    "ic_send",
+    "ic_send__overlay",
+    "search",
     "StatusOnline",
     "StatusIdle",
     "StatusDND",
     "StatusOffline",
-    "StatusMobileOnline",
-    "ic_send",
-    "ic_send__overlay",
-    "ShopIcon",
-    "PencilIcon",
-    "SettingsIcon",
-    "MagnifyingGlassIcon",
-    "search",
-    "MoreHorizontalIcon",
-    "NitroWheelIcon"
+    "StatusMobileOnline"
   ];
+  var ALIASES = {
+    search: "MagnifyingGlassIcon",
+    ic_send: "SendMessageIcon",
+    ic_star_filled: "StarIcon",
+    img_guild_folder: "FolderIcon",
+    ic_radio_circle_checked: "CircleCheckIcon",
+    ic_selection_checked_24px: "CheckmarkLargeIcon"
+  };
   var PRESET_COLORS = ["#BB86FC", "#CDAEF3", "#5865F2", "#212121", "#EDEDED", "#81C995", "#E2C06A", "#CF6679", "#6A6A6A"];
   function isHex(value) {
     return /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(String(value || "").trim());
@@ -592,16 +597,23 @@ var plugin = (() => {
   }
   function IconChanger(r) {
     const { h, React, RN, C, D } = r, { Page, Text, Button, Input, Toggle } = ui(r);
-    let names = FALLBACK_ICONS.slice();
+    let names = [...new Set(icon_catalog_default.concat(EXTRA_KEYS))];
+    function map() {
+      return r.store.icons && typeof r.store.icons === "object" ? r.store.icons : {};
+    }
     function customFor(name) {
-      const map = r.store.icons && typeof r.store.icons === "object" ? r.store.icons : {};
-      return map[name] || null;
+      const stored = map();
+      if (stored[name]) return stored[name];
+      const alias = ALIASES[name];
+      if (alias && stored[alias]) return stored[alias];
+      if (isCatalogIcon(name) && isHex(r.store.globalColor)) return { color: r.store.globalColor };
+      return null;
     }
     function setCustom(name, next) {
-      const map = { ...r.store.icons || {} };
-      if (!next || !next.color && !next.image && !next.svg) delete map[name];
-      else map[name] = next;
-      r.set("icons", map);
+      const stored = { ...map() };
+      if (!next || !next.color && !next.image && !next.svg) delete stored[name];
+      else stored[name] = next;
+      r.set("icons", stored);
     }
     function applyToElement(element, name) {
       const custom = customFor(name);
@@ -614,27 +626,21 @@ var plugin = (() => {
         });
       }
       if (custom.svg && D.SvgXml) {
-        return h(D.SvgXml, {
-          xml: custom.svg,
-          width: 24,
-          height: 24,
-          color: custom.color || "#FFFFFF"
-        });
-      }
-      if (custom.color && isCatalogIcon(name)) {
-        return React.cloneElement(element, { color: custom.color });
+        return h(D.SvgXml, { xml: custom.svg, width: 24, height: 24, color: custom.color || "#FFFFFF" });
       }
       if (custom.color) {
-        return React.cloneElement(element, { style: [element.props.style, { tintColor: custom.color }] });
+        return React.cloneElement(element, {
+          color: custom.color,
+          style: [element.props.style, { tintColor: custom.color, color: custom.color }]
+        });
       }
     }
     function Preview({ name, size = 24 }) {
       const custom = customFor(name);
-      const box = { width: size, height: size, borderRadius: 4, backgroundColor: (custom?.color || "#5865F2") + "33" };
       if (custom?.image) return h(RN.Image, { source: { uri: custom.image }, style: { width: size, height: size, resizeMode: "contain" } });
       if (custom?.svg && D.SvgXml) return h(D.SvgXml, { xml: custom.svg, width: size, height: size, color: custom.color || "#FFFFFF" });
       if (isCatalogIcon(name) && C.Icon) return h(C.Icon, { name, size, color: custom?.color, accessible: false });
-      return h(RN.View, { style: box });
+      return h(RN.View, { style: { width: size, height: size, borderRadius: 4, backgroundColor: (custom?.color || "#5865F2") + "33" } });
     }
     function Editor({ name, close }) {
       r.useRefresh();
@@ -645,12 +651,8 @@ var plugin = (() => {
       return h(
         Page,
         { title: name, close },
-        h(Text, { muted: true }, "Plugin overrides overwrite a theme plus.icons color for this name. Snow themes recolor Discord vectors; ic_* names are Android assets and cannot use C.Icon."),
-        h(
-          RN.View,
-          { style: { flexDirection: "row", alignItems: "center", paddingVertical: 8 } },
-          h(RN.View, { style: { alignItems: "center", marginRight: 16 } }, h(Preview, { name, size: 32 }), h(Text, { muted: true }, "Current"))
-        ),
+        h(Text, { muted: true }, "This override is applied on Icon, RowIcon, IconButton, and the named vector. It overwrites theme plus.icons."),
+        h(Preview, { name, size: 32 }),
         h(Text, null, "Color"),
         h(Input, { value: color, onChange: setColor, placeholder: "#BB86FC", autoCapitalize: "none" }),
         h(
@@ -665,7 +667,7 @@ var plugin = (() => {
         h(Text, null, "Image URL (optional)"),
         h(Input, { value: image, onChange: setImage, placeholder: "https://example.com/icon.png", autoCapitalize: "none" }),
         h(Text, null, "SVG xml (optional)"),
-        h(Input, { value: svg, onChange: setSvg, placeholder: '<svg viewBox="0 0 24 24">\u2026</svg>', autoCapitalize: "none" }),
+        h(Input, { value: svg, onChange: setSvg, placeholder: '<svg viewBox="0 0 24 24"></svg>', autoCapitalize: "none" }),
         h(Button, { text: "Save override", onPress: () => {
           const next = {};
           if (isHex(color)) next.color = color.trim();
@@ -675,7 +677,7 @@ var plugin = (() => {
           r.toast("Saved " + name);
           close();
         } }),
-        h(Button, { text: "Reset to Discord / theme", variant: "secondary", onPress: () => {
+        h(Button, { text: "Reset this icon", variant: "secondary", onPress: () => {
           setCustom(name, null);
           r.toast("Reset " + name);
           close();
@@ -687,10 +689,10 @@ var plugin = (() => {
       const [query, setQuery] = React.useState("");
       const q = query.trim().toLowerCase();
       const filtered = names.filter((name) => !q || name.toLowerCase().includes(q));
-      const rows = filtered.map((name) => h(D.TableRow, {
+      const rows = filtered.slice(0, 80).map((name) => h(D.TableRow, {
         key: name,
         label: name,
-        subLabel: customFor(name) ? "Overridden (wins over theme)" : isCatalogIcon(name) ? "Discord default" : "Theme asset key",
+        subLabel: customFor(name) ? "Overridden" : isCatalogIcon(name) ? "Discord default" : "Theme asset key",
         icon: C.RowIcon && isCatalogIcon(name) ? h(C.RowIcon, { name }) : void 0,
         onPress: () => {
           try {
@@ -703,9 +705,21 @@ var plugin = (() => {
       return h(
         Page,
         { title: "Icon Changer" },
-        h(Toggle, { setting: "enabled", label: "Enable icon overrides", subLabel: "Plugin icons overwrite matching theme plus.icons colors" }),
+        h(Toggle, { setting: "enabled", label: "Enable icon overrides", subLabel: "Plugin overrides overwrite theme plus.icons on Icon, RowIcon, IconButton, and named vectors" }),
+        h(Text, null, "Tint every catalog icon (unless a per-icon override exists)"),
+        h(Input, { value: r.store.globalColor || "", onChange: (text) => r.set("globalColor", text), placeholder: "#BB86FC", autoCapitalize: "none" }),
+        h(
+          RN.View,
+          { style: { flexDirection: "row", flexWrap: "wrap" } },
+          PRESET_COLORS.map((hex) => h(RN.Pressable, {
+            key: hex,
+            onPress: () => r.set("globalColor", hex),
+            style: { width: 28, height: 28, borderRadius: 14, backgroundColor: hex, margin: 4, borderWidth: 1, borderColor: "#ffffff55" }
+          }))
+        ),
+        h(Button, { text: "Clear global tint", variant: "secondary", onPress: () => r.set("globalColor", "") }),
         h(Input, { value: query, onChange: setQuery, placeholder: "Search icons", autoCapitalize: "none" }),
-        h(Text, { muted: true }, `${filtered.length} icons from Dark+ plus.icons. Catalog names (*Icon) preview as Discord vectors.`),
+        h(Text, { muted: true }, `${filtered.length} icons (Snow catalog + Dark+ keys). Showing ${Math.min(80, filtered.length)}. Search to find others.`),
         D.TableRowGroup ? h(D.TableRowGroup, { title: "Icons" }, rows) : h(RN.View, null, rows)
       );
     }
@@ -714,29 +728,36 @@ var plugin = (() => {
         try {
           const theme = (await r.request(THEME_URL, {}, 15e3, 2e5)).json();
           const fromTheme = theme?.plus?.icons && typeof theme.plus.icons === "object" ? Object.keys(theme.plus.icons) : [];
-          if (fromTheme.length) names = [...new Set(fromTheme.concat(FALLBACK_ICONS))];
+          names = [...new Set(icon_catalog_default.concat(EXTRA_KEYS, fromTheme))];
         } catch {
+          names = [...new Set(icon_catalog_default.concat(EXTRA_KEYS))];
         }
         r.hook(["Icon", "RowIcon"], (element) => {
           if (!r.store.enabled) return;
           const name = element.props?.name;
-          if (!name || !customFor(name)) return;
+          if (!name) return;
           return applyToElement(element, name);
         });
-        const catalog = names.filter(isCatalogIcon);
-        if (catalog.length) {
-          r.hook(catalog, (element, name) => {
-            if (!r.store.enabled) return;
-            return applyToElement(element, name);
-          });
-        }
+        r.hook(["IconButton"], (element) => {
+          if (!r.store.enabled) return;
+          const name = typeof element.props?.icon === "string" ? element.props.icon : null;
+          if (!name) return;
+          const custom = customFor(name);
+          if (!custom) return;
+          if (custom.image) return React.cloneElement(element, { icon: { uri: custom.image } });
+          if (custom.color) return React.cloneElement(element, { style: [element.props.style, { tintColor: custom.color }] });
+        });
+        r.hook(names.filter(isCatalogIcon), (element, name) => {
+          if (!r.store.enabled) return;
+          return applyToElement(element, name);
+        });
       },
       Settings
     };
   }
-  IconChanger.defaults = { enabled: true, icons: {} };
+  IconChanger.defaults = { enabled: true, icons: {}, globalColor: "" };
 
   // IconChanger.entry.js
-  var IconChanger_entry_default = register({ "id": "mime.iconchanger", "name": "IconChanger", "description": "Recolor or replace Discord icons. Plugin overrides win over theme plus.icons.", "version": "1.0.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/IconChanger" }, IconChanger);
+  var IconChanger_entry_default = register({ "id": "mime.iconchanger", "name": "IconChanger", "description": "Recolor or replace Discord icons. Plugin overrides win over theme plus.icons.", "version": "1.0.2", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/IconChanger" }, IconChanger);
   return __toCommonJS(IconChanger_entry_exports);
 })();
