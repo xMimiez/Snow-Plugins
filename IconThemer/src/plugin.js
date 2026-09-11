@@ -193,7 +193,20 @@ export default function factory(r) {
             const jsx = B.api?.react?.jsx;
             if (typeof jsx?.onJsxCreate !== 'function' || typeof jsx?.deleteJsxCreate !== 'function') throw new Error('Snow JSX icon hooks are unavailable.');
             r.own(() => {});
-            r.patch('after', React, 'createElement', (_args, result) => { if (enabled && r.active && result && result.props) probeElement(result.type || _args?.[0], result.props); });
+            r.patch('after', React, 'createElement', (_args, result) => {
+                if (!enabled || !r.active || !React.isValidElement(result)) return result;
+                if (result.type === IconReplacement) return result;
+                const props = result.props;
+                if (!props || typeof props !== 'object' || !('name' in props)) return result;
+                if (enabled && r.active) probeElement(result.type || _args?.[0], props);
+                const typeName = typeof result.type === 'string' ? result.type : (result.type?.displayName || result.type?.name || result.type?.type?.name || '');
+                if (sdkIcons.includes(typeName)) return result;
+                const propName = typeof props.name === 'string' ? props.name : '';
+                if (!propName || !iconNames.has(propName)) return result;
+                genericHits.set('createElement', (genericHits.get('createElement') || 0) + 1);
+                hits++;
+                return h(IconReplacement, { element: result, name: propName, key: result.key });
+            });
             for (const name of ['Icon', 'RowIcon', 'IconImage', 'ImgIcon', 'D', 'X']) {
                 if (sdkIcons.includes(name)) continue;
                 const callback = (_Component, element) => {
