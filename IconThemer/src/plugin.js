@@ -24,6 +24,13 @@ export default function factory(r) {
     let hits = 0, applied = 0;
     const matched = new Map(), overridden = new Map();
     const genericHits = new Map();
+    const seenTypes = new Map(), seenPropsNames = new Map();
+    function probeElement(type, props) {
+        if (!props || typeof props !== 'object' || !('name' in props)) return;
+        const typeName = typeof type === 'string' ? type : (type?.displayName || type?.name || type?.type?.name || '?');
+        seenTypes.set(typeName, (seenTypes.get(typeName) || 0) + 1);
+        if (typeof props.name === 'string') seenPropsNames.set(props.name, (seenPropsNames.get(props.name) || 0) + 1);
+    }
     function IconReplacement({ element, name }) {
         useSettings();
         if (!enabled || !r.active) return element;
@@ -153,6 +160,7 @@ export default function factory(r) {
             h(Text, { muted: true }, 'Named icon overrides use Snow’s JSX hook API. Reopen a screen if it kept an older icon. Legacy bitmap images and render paths outside these hooks are unchanged. Missing or failed pack images use the original icon.'),
             h(Text, { muted: true }, rendererCount ? `${rendererCount} documented icon hooks · ${hits} matches observed · ${applied} overrides applied · ${engine.failed.size} failed image(s)` : 'Icon hooks are unavailable. Overrides are not active.'),
             h(Text, { muted: true }, `pack now: ${store.pack || 'original'} · matched names: ${[...matched.entries()].map(([n, c]) => `${n}×${c}`).join(', ') || 'none'} · generic hooks: ${[...genericHits.entries()].map(([n, c]) => `${n}×${c}`).join(', ') || 'none'} · names with pack output: ${overridden.size}`),
+            h(Text, { muted: true }, `elements with a name prop (top): ${[...seenTypes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, c]) => `${n}×${c}`).join(', ') || 'none'} · name prop values: ${[...seenPropsNames.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, c]) => `${n}×${c}`).join(', ') || 'none'}`),
             h(Text, { accessibilityRole: 'header' }, 'Preset icon packs'),
             h(Button, { text: `${!store.pack ? '✓ ' : ''}Original / theme icons`, onPress: () => { engine.retry(); r.set('pack', ''); } }),
             ...packs.map(pack => h(RN.View, { key: pack.id, style: styles.card },
@@ -184,6 +192,8 @@ export default function factory(r) {
         start() {
             const jsx = B.api?.react?.jsx;
             if (typeof jsx?.onJsxCreate !== 'function' || typeof jsx?.deleteJsxCreate !== 'function') throw new Error('Snow JSX icon hooks are unavailable.');
+            r.own(() => {});
+            r.patch('after', React, 'createElement', (_args, result) => { if (enabled && r.active && result && result.props) probeElement(result.type || _args?.[0], result.props); });
             for (const name of ['Icon', 'RowIcon', 'IconImage', 'ImgIcon']) {
                 if (sdkIcons.includes(name)) continue;
                 const callback = (_Component, element) => {
