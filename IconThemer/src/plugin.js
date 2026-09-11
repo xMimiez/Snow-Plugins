@@ -51,7 +51,7 @@ export default function factory(r) {
         const key = 'custom-icons-warning';
         B.ui.openAlert(key, h(D.AlertModal, {
             title: 'Custom icon setup',
-            content: 'Use direct public HTTPS PNG, WebP or JPEG links (GitHub Raw, not file pages). Match the original proportions; 72â€“96 pixels is a useful starting size for a 24â€“32 point icon. Images must be 16â€“1024 pixels per side. SVG links are unsupported. The image host receives image requests. Custom images override presets; disabling this toggle keeps your saved links.',
+            content: 'Use direct public HTTPS PNG, WebP or JPEG links (GitHub Raw, not file pages). Match the original proportions; 72–96 pixels is a useful starting size for a 24–32 point icon. Images must be 16–1024 pixels per side. SVG links are unsupported. The image host receives image requests. Custom images override presets; disabling this toggle keeps your saved links.',
             actions: h(D.AlertActions, null,
                 h(D.AlertActionButton, { text: "i know what i'm doing", variant: 'destructive', onPress: async () => {
                     if (!enabled || !r.active) return;
@@ -117,9 +117,9 @@ export default function factory(r) {
             h(Text, { accessibilityRole: 'header' }, 'Custom icons'),
             h(Text, { muted: true }, 'Use a documented icon name from the browser below. Older saved asset mappings are retained; this SDK version hooks named vector icons only.'),
             h(Input, { value: name, onChange: setName, placeholder: 'SettingsIcon', label: 'Custom icon asset name' }),
-            h(Input, { value: url, onChange: setUrl, placeholder: 'https://â€¦/icon.png', label: 'Custom icon direct image URL' }),
+            h(Input, { value: url, onChange: setUrl, placeholder: 'https://…/icon.png', label: 'Custom icon direct image URL' }),
             error ? h(Text, null, error) : null,
-            h(Button, { text: busy ? 'Checking imageâ€¦' : 'Validate and save icon', disabled: busy, onPress: save }),
+            h(Button, { text: busy ? 'Checking image…' : 'Validate and save icon', disabled: busy, onPress: save }),
             ...entries.slice(currentPage * 10, currentPage * 10 + 10).map(([key, uri]) => h(RN.View, { key, style: { gap: 8 } },
                 h(Text, null, key), h(Text, { muted: true, numberOfLines: 2 }, uri),
                 h(Button, { text: `Edit ${key}`, onPress: () => { setName(key); setUrl(uri); } }),
@@ -143,20 +143,20 @@ export default function factory(r) {
                         if (!value) r.set('customEnabled', false);
                         else { try { showWarning(); } catch (e) { r.error('Custom icon warning', e); } }
                     } })),
-                h(Text, { muted: true }, 'Advanced Â· replace individual icons with your own images')),
+                h(Text, { muted: true }, 'Advanced · replace individual icons with your own images')),
             store.customEnabled ? h(CustomEditor) : null,
             h(Text, { accessibilityRole: 'header', style: [styles.text, { fontSize: 24, fontWeight: '700' }] }, 'icon themer'),
             h(Text, { muted: true }, 'Named icon overrides use Snow’s JSX hook API. Reopen a screen if it kept an older icon. Legacy bitmap images and render paths outside these hooks are unchanged. Missing or failed pack images use the original icon.'),
-            h(Text, { muted: true }, rendererCount ? `${rendererCount} documented icon hooks Â· ${hits} matches observed Â· ${engine.failed.size} failed image(s)` : 'Icon hooks are unavailable. Overrides are not active.'),
+            h(Text, { muted: true }, rendererCount ? `${rendererCount} documented icon hooks · ${hits} matches observed · ${engine.failed.size} failed image(s)` : 'Icon hooks are unavailable. Overrides are not active.'),
             h(Text, { accessibilityRole: 'header' }, 'Preset icon packs'),
-            h(Button, { text: `${!store.pack ? 'âœ“ ' : ''}Original / theme icons`, onPress: () => { engine.retry(); r.set('pack', ''); } }),
+            h(Button, { text: `${!store.pack ? '✓ ' : ''}Original / theme icons`, onPress: () => { engine.retry(); r.set('pack', ''); } }),
             ...packs.map(pack => h(RN.View, { key: pack.id, style: styles.card },
-                h(Button, { text: `${store.pack === pack.id ? 'âœ“ ' : ''}${pack.name}`, onPress: () => { engine.retry(); r.set('pack', pack.id); } }),
+                h(Button, { text: `${store.pack === pack.id ? '✓ ' : ''}${pack.name}`, onPress: () => { engine.retry(); r.set('pack', pack.id); } }),
                 h(RN.View, { style: { flexDirection: 'row', gap: 18 } }, ...['SettingsIcon', 'MagnifyingGlassIcon', 'BellIcon'].map(name => {
                     const uri = previewUrl(pack.id, name);
                     return uri ? h(RN.Image, { key: name, source: { uri }, accessibilityLabel: `${pack.name} ${name} preview`, resizeMode: 'contain', style: { width: 28, height: 28 } }) : null;
                 })),
-                h(Text, { muted: true }, `${pack.count} asset replacements Â· merged duplicate folders`),
+                h(Text, { muted: true }, `${pack.count} asset replacements · merged duplicate folders`),
                 h(Button, { text: `${pack.name} source / credits`, onPress: () => RN.Linking.openURL(pack.groups[0].source) }))),
             h(RN.View, { style: styles.card },
                 h(Text, { accessibilityRole: 'header' }, 'Default icon color'),
@@ -167,7 +167,7 @@ export default function factory(r) {
                 h(Button, { text: 'Retry failed images', onPress: () => { engine.retry(); r.changed(); } })),
             h(Text, { accessibilityRole: 'header' }, 'Individual icon colors'),
             h(Input, { value: search, onChange: value => { setSearch(value); setPage(0); }, placeholder: 'Search icons, e.g. Settings or Search', label: 'Search individual icons' }),
-            h(Text, { muted: true }, `${names.length} icons Â· page ${currentPage + 1} of ${Math.max(1, Math.ceil(names.length / 12))}`),
+            h(Text, { muted: true }, `${names.length} icons · page ${currentPage + 1} of ${Math.max(1, Math.ceil(names.length / 12))}`),
             ...names.slice(currentPage * 12, currentPage * 12 + 12).map(name => h(ColorEditor, { key: name, name })),
             names.length === 0 && /^[\w.-]{1,160}$/.test(search.trim()) && !['__proto__', 'constructor', 'prototype'].includes(search.trim()) ? h(ColorEditor, { key: search.trim(), name: search.trim() }) : null,
             h(Button, { text: 'Previous icons', disabled: currentPage === 0, onPress: () => setPage(currentPage - 1) }),
