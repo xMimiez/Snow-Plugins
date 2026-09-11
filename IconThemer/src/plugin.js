@@ -151,7 +151,7 @@ export default function factory(r) {
             h(Text, { accessibilityRole: 'header', style: [styles.text, { fontSize: 24, fontWeight: '700' }] }, 'icon themer'),
             h(Text, { muted: true }, 'Named icon overrides use Snow’s JSX hook API. Reopen a screen if it kept an older icon. Legacy bitmap images and render paths outside these hooks are unchanged. Missing or failed pack images use the original icon.'),
             h(Text, { muted: true }, rendererCount ? `${rendererCount} documented icon hooks · ${hits} matches observed · ${applied} overrides applied · ${engine.failed.size} failed image(s)` : 'Icon hooks are unavailable. Overrides are not active.'),
-            h(Text, { muted: true }, `pack now: ${store.pack || 'original'} · distinct matched names: ${matched.size} · names with pack output: ${overridden.size}`),
+            h(Text, { muted: true }, `pack now: ${store.pack || 'original'} · matched names: ${[...matched.entries()].map(([n, c]) => `${n}×${c}`).join(', ') || 'none'} · names with pack output: ${overridden.size}`),
             h(Text, { accessibilityRole: 'header' }, 'Preset icon packs'),
             h(Button, { text: `${!store.pack ? '✓ ' : ''}Original / theme icons`, onPress: () => { engine.retry(); r.set('pack', ''); } }),
             ...packs.map(pack => h(RN.View, { key: pack.id, style: styles.card },
