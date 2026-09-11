@@ -337,21 +337,5 @@
     ],
     "license": "MIT",
     "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/GlobalBadges"
-  },
-  {
-    "folder": "IconChanger",
-    "module": "icon-changer",
-    "id": "mime.iconchanger",
-    "name": "IconChanger",
-    "description": "Recolor or replace Discord icons. Plugin overrides win over theme plus.icons.",
-    "version": "1.0.6",
-    "authors": [
-      {
-        "name": "Mime | N0_.q3",
-        "id": "957164619061932045"
-      }
-    ],
-    "license": "MIT",
-    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/IconChanger"
   }
 ]
