@@ -1,5 +1,5 @@
 import sdkIcons from './sdk-icons.json' with { type: 'json' };
-import { packs, iconNames, createEngine, colorValue, imageUrl, validateDimensions, previewUrl } from './core.js';
+import { packs, iconNames, createEngine, colorValue, imageUrl, validateDimensions, previewUrl, originalSource } from './core.js';
 
 export default function factory(r) {
     const { React, RN, h, store } = r;
@@ -25,27 +25,29 @@ export default function factory(r) {
     const matched = new Map(), overridden = new Map();
     const genericHits = new Map();
     const seenTypes = new Map(), seenPropsNames = new Map();
+    const samples = new Map();
     function probeElement(type, props) {
         if (!props || typeof props !== 'object' || !('name' in props)) return;
         const typeName = typeof type === 'string' ? type : (type?.displayName || type?.name || type?.type?.name || '?');
         seenTypes.set(typeName, (seenTypes.get(typeName) || 0) + 1);
         if (typeof props.name === 'string') seenPropsNames.set(props.name, (seenPropsNames.get(props.name) || 0) + 1);
     }
-    function IconReplacement({ element, name }) {
+    function IconReplacement({ element, name, override }) {
         useSettings();
         if (!enabled || !r.active) return element;
         matched.set(name, (matched.get(name) || 0) + 1);
-        const override = engine.resolveName(name);
-        if (override?.uri) { applied++; overridden.set(name, (overridden.get(name) || 0) + 1); }
-        if (!override) return element;
+        const resolved = override || engine.resolveName(name);
+        if (resolved?.uri) { applied++; overridden.set(name, (overridden.get(name) || 0) + 1); }
+        if (!resolved) return element;
         const props = element.props || {};
-        if (!override.uri) return React.cloneElement(element, { color: override.color, style: [props.style, { tintColor: override.color }] });
+        if (!resolved.uri) return React.cloneElement(element, { color: resolved.color, style: [props.style, { tintColor: resolved.color }] });
+        if (samples.size < 6) samples.set(name, { type: element.type?.displayName || element.type?.name || '', keys: Object.keys(props).slice(0, 10).join(','), style: JSON.stringify(props.style), size: props.size, uri: resolved.uri.slice(0, 110) });
         // The original native style remains intact, including explicit width/height.
         // Numeric layout dimensions are preserved. Named size tokens are not image dimensions.
         const size = typeof props.size === 'number' ? props.size : 24;
         return h(RN.Image, {
-            source: { uri: override.uri },
-            style: [{ width: size, height: size }, props.style, { tintColor: override.color }],
+            source: { uri: resolved.uri },
+            style: [{ width: size, height: size }, props.style, { tintColor: resolved.color }],
             resizeMode: props.resizeMode || 'contain',
             accessible: props.accessible,
             accessibilityLabel: props.accessibilityLabel,
@@ -53,10 +55,22 @@ export default function factory(r) {
             onLayout: props.onLayout,
             onError: event => {
                 if (!enabled || !r.active) return;
-                engine.failed.add(override.uri); r.changed();
+                engine.failed.add(resolved.uri); r.changed();
                 props.onError?.(event);
             },
         });
+    }
+    function assetNameFrom(props) {
+        for (const key of ['source', 'asset', 'iconAsset', 'image']) {
+            const source = props?.[key];
+            if (!source) continue;
+            const original = originalSource(source);
+            if (!original || typeof original !== 'object' || !original.allowIconTheming) continue;
+            const file = typeof original.file === 'string' ? original.file.split('/').pop() : '';
+            const name = file.replace(/\.[^.]+$/, '') || '';
+            if (name) return { name, source };
+        }
+        return null;
     }
     function showWarning() {
         const key = 'custom-icons-warning';
@@ -161,6 +175,7 @@ export default function factory(r) {
             h(Text, { muted: true }, rendererCount ? `${rendererCount} documented icon hooks · ${hits} matches observed · ${applied} overrides applied · ${engine.failed.size} failed image(s)` : 'Icon hooks are unavailable. Overrides are not active.'),
             h(Text, { muted: true }, `pack now: ${store.pack || 'original'} · matched names: ${[...matched.entries()].map(([n, c]) => `${n}×${c}`).join(', ') || 'none'} · generic hooks: ${[...genericHits.entries()].map(([n, c]) => `${n}×${c}`).join(', ') || 'none'} · names with pack output: ${overridden.size}`),
             h(Text, { muted: true }, `elements with a name prop (top): ${[...seenTypes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, c]) => `${n}×${c}`).join(', ') || 'none'} · name prop values: ${[...seenPropsNames.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, c]) => `${n}×${c}`).join(', ') || 'none'}`),
+            h(Text, { muted: true }, [...samples.entries()].map(([n, s]) => `${n} [type=${s.type || '?'}] keys=${s.keys || '∅'} style=${s.style || '∅'} size=${s.size} uri=${s.uri}`).join(' ;; ') || ''),
             h(Text, { accessibilityRole: 'header' }, 'Preset icon packs'),
             h(Button, { text: `${!store.pack ? '✓ ' : ''}Original / theme icons`, onPress: () => { engine.retry(); r.set('pack', ''); } }),
             ...packs.map(pack => h(RN.View, { key: pack.id, style: styles.card },
@@ -197,15 +212,27 @@ export default function factory(r) {
                 if (!enabled || !r.active || !React.isValidElement(result)) return result;
                 if (result.type === IconReplacement) return result;
                 const props = result.props;
-                if (!props || typeof props !== 'object' || !('name' in props)) return result;
-                if (enabled && r.active) probeElement(result.type || _args?.[0], props);
+                if (!props || typeof props !== 'object') return result;
+                const hitsName = typeof props.name === 'string' ? props.name : '';
+                const named = hitsName && iconNames.has(hitsName);
+                const asset = named ? null : assetNameFrom(props);
+                if (!named && !asset) {
+                    if ('name' in props) probeElement(result.type || _args?.[0], props);
+                    return result;
+                }
+                if ('name' in props) probeElement(result.type || _args?.[0], props);
                 const typeName = typeof result.type === 'string' ? result.type : (result.type?.displayName || result.type?.name || result.type?.type?.name || '');
-                if (sdkIcons.includes(typeName)) return result;
-                const propName = typeof props.name === 'string' ? props.name : '';
-                if (!propName || !iconNames.has(propName)) return result;
-                genericHits.set('createElement', (genericHits.get('createElement') || 0) + 1);
+                if (sdkIcons.includes(typeName) && !asset) return result;
+                if (named) {
+                    genericHits.set('createElement', (genericHits.get('createElement') || 0) + 1);
+                    hits++;
+                    return h(IconReplacement, { element: result, name: hitsName, key: result.key });
+                }
+                const resolved = engine.resolve(asset.source);
+                if (!resolved) return result;
+                genericHits.set('asset', (genericHits.get('asset') || 0) + 1);
                 hits++;
-                return h(IconReplacement, { element: result, name: propName, key: result.key });
+                return h(IconReplacement, { element: result, name: resolved.name, override: resolved, key: result.key });
             });
             for (const name of ['Icon', 'RowIcon', 'IconImage', 'ImgIcon', 'D', 'X']) {
                 if (sdkIcons.includes(name)) continue;
