@@ -646,12 +646,13 @@ var plugin = (() => {
       const custom = customFor(name);
       if (!custom) return;
       if (custom.image) {
-        return React.cloneElement(element, { source: { uri: custom.image } });
+        return React.cloneElement(element, { source: { uri: custom.image }, __mimeIcon: true });
       }
       if (custom.color) {
         return React.cloneElement(element, {
           style: [{ tintColor: custom.color }, element.props.style],
-          tintColor: custom.color
+          tintColor: custom.color,
+          __mimeIcon: true
         });
       }
     }
@@ -814,33 +815,29 @@ var plugin = (() => {
         } catch {
         }
         names = [...nameSet];
-        function mark(next) {
-          if (!next || next === true) return next;
-          if (next.props?.__mimeIcon) return next;
-          return React.cloneElement(next, { __mimeIcon: true });
-        }
         r.patch("after", React, "createElement", (args, result) => {
           if (!r.store.enabled || !result?.props || result.props.__mimeIcon) return;
           const type = args[0];
           const Img = RN.Image;
           const isImage = type === Img || type === Img?.render || type === "RCTImageView" || type?.displayName === "Image" || type?.name === "Image" || type?.name === "RCTImageView";
-          if (isImage) return mark(applyImage(result) || result);
-          const named = typeof result.props.name === "string" ? result.props.name : typeof result.props.icon === "string" ? result.props.icon : null;
-          if (named) return mark(applyNamed(result, named) || result);
-          if (result.props.source != null) return mark(applyImage(result) || result);
+          if (!isImage) return;
+          return applyImage(result);
         });
         if (typeof RN.Image?.prototype?.render === "function") {
           r.patch("after", RN.Image.prototype, "render", function(_args, res) {
-            if (!r.store.enabled || !this?.props || !res?.props) return res;
-            const next = applyImage(res);
-            return next || res;
+            if (!r.store.enabled || !res?.props || res.props.__mimeIcon) return res;
+            return applyImage(res) || res;
           });
         }
-        r.hook(["Image", "RCTImageView", "FastImage", "Icon", "RowIcon", "IconButton"], (element) => {
-          if (!r.store.enabled || element.props?.__mimeIcon) return;
-          if (element.props.source != null) return applyImage(element);
-          const name = element.props.name || (typeof element.props.icon === "string" ? element.props.icon : null);
-          if (name) return applyNamed(element, name);
+        r.hook(["Icon", "RowIcon"], (element) => {
+          if (!r.store.enabled) return;
+          return applyNamed(element, element.props?.name);
+        });
+        r.hook(["IconButton"], (element) => {
+          if (!r.store.enabled) return;
+          const icon = element.props?.icon;
+          const name = typeof icon === "string" ? icon : assetNameFromSource(icon);
+          return applyNamed(element, name);
         });
       },
       Settings
@@ -849,6 +846,6 @@ var plugin = (() => {
   IconChanger.defaults = { enabled: true, icons: {}, globalColor: "" };
 
   // IconChanger.entry.js
-  var IconChanger_entry_default = register({ "id": "mime.iconchanger", "name": "IconChanger", "description": "Recolor or replace Discord icons. Plugin overrides win over theme plus.icons.", "version": "1.0.4", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/IconChanger" }, IconChanger);
+  var IconChanger_entry_default = register({ "id": "mime.iconchanger", "name": "IconChanger", "description": "Recolor or replace Discord icons. Plugin overrides win over theme plus.icons.", "version": "1.0.5", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/IconChanger" }, IconChanger);
   return __toCommonJS(IconChanger_entry_exports);
 })();
