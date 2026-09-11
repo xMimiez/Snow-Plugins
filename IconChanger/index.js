@@ -562,7 +562,7 @@ var plugin = (() => {
 
   // project:src/plugins/icon-changer.js
   var THEME_URL = "https://raw.githubusercontent.com/xMimiez/Snow-Themes/refs/heads/main/DarkPlus/DarkPlus-mobile.json";
-  var EXTRA_KEYS = [
+  var THEME_ICON_KEYS = [
     "ic_radio_circle_checked",
     "ic_radio_circle_checked__overlay",
     "ic_radio_square_checked_24px",
@@ -571,27 +571,29 @@ var plugin = (() => {
     "ic_selection_checked_24px__overlay",
     "ic_star_filled",
     "img_guild_folder",
-    "ic_send",
-    "ic_send__overlay",
-    "search",
     "StatusOnline",
     "StatusIdle",
     "StatusDND",
     "StatusOffline",
-    "StatusMobileOnline"
+    "StatusMobileOnline",
+    "ic_send",
+    "ic_send__overlay",
+    "ShopIcon",
+    "PencilIcon",
+    "SettingsIcon",
+    "MagnifyingGlassIcon",
+    "search",
+    "MoreHorizontalIcon",
+    "NitroWheelIcon"
   ];
-  var ALIASES = {
-    search: "MagnifyingGlassIcon",
-    ic_send: "SendMessageIcon",
-    ic_star_filled: "StarIcon",
-    img_guild_folder: "FolderIcon"
-  };
   var GROUPS = [
-    { id: "search", label: "Search", names: ["MagnifyingGlassIcon", "ChannelListMagnifyingGlassIcon", "search", "ic_search", "ic_search_24px", "ic_search_line_24px"] },
-    { id: "unread", label: "Unread messages", names: ["ChatMarkUnreadIcon", "InboxIcon", "ChatDotsIcon", "ChatIcon", "Mentions", "ic_chat_badge", "ic_mentions"] },
-    { id: "friends", label: "Add friends", names: ["UserPlusIcon", "FriendsIcon", "GroupPlusIcon", "NewUserIcon", "NewUserSimpleIcon", "ic_person_add", "ic_add_friend", "ic_user_add"] },
-    { id: "plus", label: "+ / Add", names: ["PlusSmallIcon", "PlusMediumIcon", "PlusLargeIcon", "CirclePlusIcon", "ChatPlusIcon", "FolderPlusIcon", "PaperPlusIcon", "ImagePlusIcon", "ic_add_24px", "ic_plus_24px"] },
-    { id: "settings", label: "Settings icons", names: ["SettingsIcon", "WrenchIcon", "MobilePhoneSettingsIcon", "UserIcon", "UserCircleIcon", "ShieldIcon", "BellIcon", "GiftIcon", "NitroWheelIcon", "LanguageIcon", "LockIcon", "CircleInformationIcon", "PaintPaletteIcon", "ThemeDarkIcon", "ThemeLightIcon", "InventoryIcon", "IdCardIcon", "AppsIcon"] }
+    { id: "search", label: "Search", names: ["search", "MagnifyingGlassIcon", "ChannelListMagnifyingGlassIcon"] },
+    { id: "unread", label: "Unread messages", names: ["ChatMarkUnreadIcon", "InboxIcon", "ChatDotsIcon", "ChatIcon"] },
+    { id: "friends", label: "Add friends", names: ["UserPlusIcon", "FriendsIcon", "GroupPlusIcon", "NewUserIcon"] },
+    { id: "plus", label: "+ / Add", names: ["PlusSmallIcon", "PlusMediumIcon", "PlusLargeIcon", "CirclePlusIcon", "ChatPlusIcon"] },
+    { id: "settings", label: "Settings icons", names: ["SettingsIcon", "WrenchIcon", "UserIcon", "ShieldIcon", "BellIcon", "GiftIcon", "NitroWheelIcon", "LanguageIcon", "LockIcon", "CircleInformationIcon"] },
+    { id: "send", label: "Send", names: ["ic_send", "ic_send__overlay", "SendMessageIcon"] },
+    { id: "status", label: "Status dots", names: ["StatusOnline", "StatusIdle", "StatusDND", "StatusOffline", "StatusMobileOnline"] }
   ];
   var PRESET_COLORS = ["#BB86FC", "#CDAEF3", "#5865F2", "#212121", "#EDEDED", "#81C995", "#E2C06A", "#CF6679", "#6A6A6A"];
   function isHex(value) {
@@ -600,19 +602,37 @@ var plugin = (() => {
   function isCatalogIcon(name) {
     return typeof name === "string" && /Icon$/.test(name) && !name.includes("__");
   }
-  function sourceId(source) {
-    if (typeof source === "number" && Number.isFinite(source)) return source;
-    if (Array.isArray(source) && typeof source[0] === "number") return source[0];
-    if (source && typeof source === "object") {
-      if (typeof source.uri === "string") return null;
-      if (typeof source.default === "number") return source.default;
+  function findPlusIcons(r) {
+    const seen = /* @__PURE__ */ new Set();
+    const bags = [];
+    const add = (value) => {
+      if (value && typeof value === "object" && !seen.has(value)) {
+        seen.add(value);
+        bags.push(value);
+      }
+    };
+    add(r.B?.themes);
+    add(r.B?.managers?.themes);
+    add(r.host?.themes);
+    add(r.B?.api?.themes);
+    add(typeof globalThis !== "undefined" && globalThis.snow?.themes);
+    add(r.find("getCurrentTheme"));
+    add(r.find("iconpack"));
+    add(r.find("plus", "semanticColors"));
+    add(r.find("icons", "iconpack"));
+    for (const bag of bags) {
+      const theme = typeof bag.getCurrentTheme === "function" ? bag.getCurrentTheme() : bag.currentTheme || bag.theme || bag.data || bag;
+      const plus = theme?.plus || theme?.data?.plus || theme?.icons && theme;
+      if (plus?.icons && typeof plus.icons === "object") return plus.icons;
+      if (bag.icons && typeof bag.icons === "object" && (bag.iconpack != null || bag.version != null)) return bag.icons;
     }
     return null;
   }
   function IconChanger(r) {
-    const { h, React, RN, C, D, B } = r, { Page, Text, Button, Input, Toggle } = ui(r);
-    const nameSet = new Set(icon_catalog_default.concat(EXTRA_KEYS));
+    const { h, React, RN, C, D } = r, { Page, Text, Button, Input, Toggle } = ui(r);
+    const nameSet = new Set(THEME_ICON_KEYS.concat(icon_catalog_default));
     let names = [...nameSet];
+    let plusIcons = null;
     const idToName = /* @__PURE__ */ new Map();
     function stored() {
       return r.store.icons && typeof r.store.icons === "object" ? r.store.icons : {};
@@ -620,105 +640,76 @@ var plugin = (() => {
     function customFor(name) {
       if (!name) return null;
       const map = stored();
-      if (map[name]) return map[name];
-      if (ALIASES[name] && map[ALIASES[name]]) return map[ALIASES[name]];
-      if ((isCatalogIcon(name) || nameSet.has(name) || /^ic_/.test(name)) && isHex(r.store.globalColor)) return { color: r.store.globalColor };
+      if (map[name]?.color || map[name]?.image) return map[name];
+      if (isHex(r.store.globalColor) && (THEME_ICON_KEYS.includes(name) || isCatalogIcon(name))) return { color: r.store.globalColor };
       return null;
+    }
+    function writeTheme(name, color) {
+      if (!plusIcons) plusIcons = findPlusIcons(r);
+      if (!plusIcons || typeof plusIcons !== "object") return false;
+      try {
+        if (color) plusIcons[name] = color;
+        else delete plusIcons[name];
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    function applyAllToTheme() {
+      plusIcons = findPlusIcons(r) || plusIcons;
+      if (!plusIcons) return 0;
+      let n = 0;
+      if (isHex(r.store.globalColor)) {
+        for (const name of nameSet) {
+          if (stored()[name]?.color) continue;
+          if (writeTheme(name, r.store.globalColor)) n++;
+        }
+      }
+      for (const [name, custom] of Object.entries(stored())) {
+        if (custom?.color && writeTheme(name, custom.color)) n++;
+      }
+      return n;
     }
     function setCustom(name, next) {
       const map = { ...stored() };
-      if (!next || !next.color && !next.image && !next.svg) delete map[name];
+      if (!next || !next.color && !next.image) delete map[name];
       else map[name] = next;
       r.set("icons", map);
+      writeTheme(name, next?.color || null);
+      applyAllToTheme();
     }
-    function assetNameFromSource(source) {
-      const id = sourceId(source);
-      if (id == null) return null;
-      if (idToName.has(id)) return idToName.get(id);
-      const asset = B.assets?.findAsset?.(id) || B.assets?.getAssetByID?.(id);
-      const name = asset?.name || null;
-      if (name) idToName.set(id, name);
-      return name;
+    function sourceId(source) {
+      if (typeof source === "number" && Number.isFinite(source)) return source;
+      if (Array.isArray(source) && typeof source[0] === "number") return source[0];
+      return null;
     }
     function applyImage(element) {
-      if (!r.store.enabled || !element?.props) return;
-      const name = assetNameFromSource(element.props.source);
+      if (!r.store.enabled || !element?.props || element.props.__mimeIcon) return;
+      const id = sourceId(element.props.source);
+      if (id == null) return;
+      let name = idToName.get(id);
+      if (!name) {
+        const asset = r.B.assets?.findAsset?.(id) || r.B.assets?.getAssetByID?.(id);
+        name = asset?.name;
+        if (name) idToName.set(id, name);
+      }
       const custom = customFor(name);
-      if (!custom) return;
-      if (custom.image) {
-        return React.cloneElement(element, { source: { uri: custom.image }, __mimeIcon: true });
-      }
-      if (custom.color) {
-        return React.cloneElement(element, {
-          style: [{ tintColor: custom.color }, element.props.style],
-          tintColor: custom.color,
-          __mimeIcon: true
-        });
-      }
-    }
-    function applyNamed(element, name) {
-      const custom = customFor(name);
-      if (!custom || !element?.props) return;
-      if (custom.image) {
-        return h(RN.Image, {
-          source: { uri: custom.image },
-          style: [{ width: 24, height: 24, resizeMode: "contain", tintColor: custom.color }, element.props.style],
-          accessibilityLabel: name
-        });
-      }
-      if (custom.svg && D.SvgXml) return h(D.SvgXml, { xml: custom.svg, width: 24, height: 24, color: custom.color || "#FFFFFF" });
-      if (custom.color) return React.cloneElement(element, { color: custom.color, style: [element.props.style, { tintColor: custom.color, color: custom.color }] });
+      if (!custom?.color && !custom?.image) return;
+      if (custom.image) return React.cloneElement(element, { source: { uri: custom.image }, __mimeIcon: true });
+      return React.cloneElement(element, { style: [{ tintColor: custom.color }, element.props.style], tintColor: custom.color, __mimeIcon: true });
     }
     function Preview({ name, size = 24 }) {
       const custom = customFor(name);
-      if (custom?.image) return h(RN.Image, { source: { uri: custom.image }, style: { width: size, height: size, resizeMode: "contain", tintColor: custom.color } });
       if (isCatalogIcon(name) && C.Icon) return h(C.Icon, { name, size, color: custom?.color, accessible: false });
       return h(RN.View, { style: { width: size, height: size, borderRadius: 4, backgroundColor: (custom?.color || "#5865F2") + "33" } });
     }
-    function Editor({ name, close }) {
-      r.useRefresh();
-      const current = customFor(name) || {};
-      const [color, setColor] = React.useState(current.color || "");
-      const [image, setImage] = React.useState(current.image || "");
-      return h(
-        Page,
-        { title: name, close },
-        h(Text, { muted: true }, "Applied on Discord Images (asset IDs), Icon, RowIcon, and IconButton. Overwrites theme plus.icons."),
-        h(Preview, { name, size: 32 }),
-        h(Text, null, "Color"),
-        h(Input, { value: color, onChange: setColor, placeholder: "#BB86FC", autoCapitalize: "none" }),
-        h(
-          RN.View,
-          { style: { flexDirection: "row", flexWrap: "wrap" } },
-          PRESET_COLORS.map((hex) => h(RN.Pressable, {
-            key: hex,
-            onPress: () => setColor(hex),
-            style: { width: 28, height: 28, borderRadius: 14, backgroundColor: hex, margin: 4, borderWidth: 1, borderColor: "#ffffff55" }
-          }))
-        ),
-        h(Text, null, "Replacement image URL (optional)"),
-        h(Input, { value: image, onChange: setImage, placeholder: "https://example.com/icon.png", autoCapitalize: "none" }),
-        h(Button, { text: "Save override", onPress: () => {
-          const next = {};
-          if (isHex(color)) next.color = color.trim();
-          if (/^https:\/\//i.test(image.trim())) next.image = image.trim();
-          setCustom(name, next);
-          r.toast("Saved " + name);
-          close();
-        } }),
-        h(Button, { text: "Reset this icon", variant: "secondary", onPress: () => {
-          setCustom(name, null);
-          r.toast("Reset " + name);
-          close();
-        } })
-      );
-    }
-    function GroupEditor({ group, close }) {
+    function ColorEditor({ title, names: keys, close }) {
       const [color, setColor] = React.useState("");
       return h(
         Page,
-        { title: group.label, close },
-        h(Text, { muted: true }, "Applies to: " + group.names.join(", ")),
+        { title, close },
+        h(Text, { muted: true }, "Writes into the active theme plus.icons map (same keys Dark+ uses)."),
+        h(Text, { muted: true }, keys.join(", ")),
         h(Input, { value: color, onChange: setColor, placeholder: "#BB86FC", autoCapitalize: "none" }),
         h(
           RN.View,
@@ -729,15 +720,14 @@ var plugin = (() => {
             style: { width: 28, height: 28, borderRadius: 14, backgroundColor: hex, margin: 4, borderWidth: 1, borderColor: "#ffffff55" }
           }))
         ),
-        h(Button, { text: "Apply to group", onPress: () => {
+        h(Button, { text: "Apply", onPress: () => {
           if (!isHex(color)) return r.toast("Enter a hex color");
-          for (const name of group.names) setCustom(name, { color: color.trim() });
-          r.toast("Updated " + group.label);
+          for (const name of keys) setCustom(name, { color: color.trim() });
+          r.toast("Applied " + title);
           close();
         } }),
-        h(Button, { text: "Reset group", variant: "secondary", onPress: () => {
-          for (const name of group.names) setCustom(name, null);
-          r.toast("Reset " + group.label);
+        h(Button, { text: "Reset", variant: "secondary", onPress: () => {
+          for (const name of keys) setCustom(name, null);
           close();
         } })
       );
@@ -747,52 +737,57 @@ var plugin = (() => {
       const [query, setQuery] = React.useState("");
       const q = query.trim().toLowerCase();
       const filtered = names.filter((name) => !q || name.toLowerCase().includes(q));
-      const rows = filtered.slice(0, 80).map((name) => h(D.TableRow, {
-        key: name,
-        label: name,
-        subLabel: customFor(name) ? "Overridden" : isCatalogIcon(name) ? "Discord default" : "Asset key",
-        icon: C.RowIcon && isCatalogIcon(name) ? h(C.RowIcon, { name }) : void 0,
-        onPress: () => {
-          try {
-            r.open("edit-" + name, Editor, { name });
-          } catch (e) {
-            r.error("Icon editor", e);
-          }
-        }
-      }));
+      const themeKeys = THEME_ICON_KEYS.filter((name) => !q || name.toLowerCase().includes(q));
       return h(
         Page,
         { title: "Icon Changer" },
-        h(Toggle, { setting: "enabled", label: "Enable icon overrides" }),
-        h(Text, null, "Quick groups (same color on every related asset)"),
-        ...D.TableRowGroup ? [h(D.TableRowGroup, { title: "Common icons" }, GROUPS.map((group) => h(D.TableRow, {
-          key: group.id,
-          label: group.label,
-          subLabel: group.names.filter(isCatalogIcon).slice(0, 3).join(", "),
-          icon: C.RowIcon && isCatalogIcon(group.names[0]) ? h(C.RowIcon, { name: group.names[0] }) : void 0,
-          onPress: () => {
-            try {
-              r.open("group-" + group.id, GroupEditor, { group });
-            } catch (e) {
-              r.error("Icon group", e);
-            }
-          }
-        })))] : [],
-        h(Text, null, "Tint all Discord icons (unless a per-icon override exists)"),
-        h(Input, { value: r.store.globalColor || "", onChange: (text) => r.set("globalColor", text), placeholder: "#BB86FC", autoCapitalize: "none" }),
+        h(Toggle, { setting: "enabled", label: "Enable icon overrides", subLabel: "Writes colors into theme plus.icons so Snow\u2019s recolorer applies them" }),
+        h(Button, { text: "Re-apply onto current theme", variant: "secondary", onPress: () => {
+          plusIcons = findPlusIcons(r);
+          const n = applyAllToTheme();
+          r.toast(plusIcons ? `Wrote ${n} keys into plus.icons` : "Could not find the live plus.icons map");
+        } }),
+        h(Text, null, "Tint all listed icons"),
+        h(Input, { value: r.store.globalColor || "", onChange: (text) => {
+          r.set("globalColor", text);
+          applyAllToTheme();
+        }, placeholder: "#BB86FC", autoCapitalize: "none" }),
         h(
           RN.View,
           { style: { flexDirection: "row", flexWrap: "wrap" } },
           PRESET_COLORS.map((hex) => h(RN.Pressable, {
             key: hex,
-            onPress: () => r.set("globalColor", hex),
+            onPress: () => {
+              r.set("globalColor", hex);
+              applyAllToTheme();
+            },
             style: { width: 28, height: 28, borderRadius: 14, backgroundColor: hex, margin: 4, borderWidth: 1, borderColor: "#ffffff55" }
           }))
         ),
-        h(Button, { text: "Clear global tint", variant: "secondary", onPress: () => r.set("globalColor", "") }),
-        h(Input, { value: query, onChange: setQuery, placeholder: "Search icons", autoCapitalize: "none" }),
-        h(Text, { muted: true }, `${filtered.length} icons. Showing ${Math.min(80, filtered.length)}. Set a global tint to recolor the whole app.`),
-        D.TableRowGroup ? h(D.TableRowGroup, { title: "Icons" }, rows) : h(RN.View, null, rows)
+        D.TableRowGroup ? h(
+          D.TableRowGroup,
+          { title: "Dark+ plus.icons keys" },
+          GROUPS.map((group) => h(D.TableRow, {
+            key: group.id,
+            label: group.label,
+            subLabel: group.names.join(", "),
+            icon: C.RowIcon && isCatalogIcon(group.names.find(isCatalogIcon) || "") ? h(C.RowIcon, { name: group.names.find(isCatalogIcon) }) : void 0,
+            onPress: () => r.open("group-" + group.id, ColorEditor, { title: group.label, names: group.names })
+          }))
+        ) : null,
+        h(Input, { value: query, onChange: setQuery, placeholder: "Search icon keys", autoCapitalize: "none" }),
+        D.TableRowGroup ? h(
+          D.TableRowGroup,
+          { title: `Theme keys (${themeKeys.length})` },
+          themeKeys.map((name) => h(D.TableRow, {
+            key: name,
+            label: name,
+            subLabel: customFor(name)?.color || "theme / default",
+            icon: C.RowIcon && isCatalogIcon(name) ? h(C.RowIcon, { name }) : void 0,
+            onPress: () => r.open("edit-" + name, ColorEditor, { title: name, names: [name] })
+          }))
+        ) : null,
+        h(Text, { muted: true }, `${filtered.length} total keys. Dark+ recolors: ${THEME_ICON_KEYS.join(", ")}.`)
       );
     }
     return {
@@ -804,40 +799,26 @@ var plugin = (() => {
         } catch {
         }
         try {
-          if (typeof B.assets?.iterateAssets === "function") {
-            for (const asset of B.assets.iterateAssets()) {
+          if (typeof r.B.assets?.iterateAssets === "function") {
+            for (const asset of r.B.assets.iterateAssets()) {
               if (asset?.name && asset.id != null) {
                 idToName.set(Number(asset.id), asset.name);
-                if (isCatalogIcon(asset.name) || /^ic_/.test(asset.name) || asset.name.startsWith("img_")) nameSet.add(asset.name);
+                if (isCatalogIcon(asset.name) || /^ic_/.test(asset.name)) nameSet.add(asset.name);
               }
             }
           }
         } catch {
         }
         names = [...nameSet];
+        plusIcons = findPlusIcons(r);
+        applyAllToTheme();
         r.patch("after", React, "createElement", (args, result) => {
           if (!r.store.enabled || !result?.props || result.props.__mimeIcon) return;
           const type = args[0];
           const Img = RN.Image;
-          const isImage = type === Img || type === Img?.render || type === "RCTImageView" || type?.displayName === "Image" || type?.name === "Image" || type?.name === "RCTImageView";
+          const isImage = type === Img || type === "RCTImageView" || type?.displayName === "Image" || type?.name === "Image";
           if (!isImage) return;
           return applyImage(result);
-        });
-        if (typeof RN.Image?.prototype?.render === "function") {
-          r.patch("after", RN.Image.prototype, "render", function(_args, res) {
-            if (!r.store.enabled || !res?.props || res.props.__mimeIcon) return res;
-            return applyImage(res) || res;
-          });
-        }
-        r.hook(["Icon", "RowIcon"], (element) => {
-          if (!r.store.enabled) return;
-          return applyNamed(element, element.props?.name);
-        });
-        r.hook(["IconButton"], (element) => {
-          if (!r.store.enabled) return;
-          const icon = element.props?.icon;
-          const name = typeof icon === "string" ? icon : assetNameFromSource(icon);
-          return applyNamed(element, name);
         });
       },
       Settings
@@ -846,6 +827,6 @@ var plugin = (() => {
   IconChanger.defaults = { enabled: true, icons: {}, globalColor: "" };
 
   // IconChanger.entry.js
-  var IconChanger_entry_default = register({ "id": "mime.iconchanger", "name": "IconChanger", "description": "Recolor or replace Discord icons. Plugin overrides win over theme plus.icons.", "version": "1.0.5", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/IconChanger" }, IconChanger);
+  var IconChanger_entry_default = register({ "id": "mime.iconchanger", "name": "IconChanger", "description": "Recolor or replace Discord icons. Plugin overrides win over theme plus.icons.", "version": "1.0.6", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/IconChanger" }, IconChanger);
   return __toCommonJS(IconChanger_entry_exports);
 })();

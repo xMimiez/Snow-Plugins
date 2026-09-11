@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.iconchanger",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "display": {
     "name": "IconChanger",
     "description": "Recolor or replace Discord icons. Plugin overrides win over theme plus.icons.",
