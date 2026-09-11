@@ -587,6 +587,9 @@ var plugin = (() => {
   function isHex(value) {
     return /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(String(value || "").trim());
   }
+  function isCatalogIcon(name) {
+    return typeof name === "string" && /Icon$/.test(name) && !name.includes("__");
+  }
   function IconChanger(r) {
     const { h, React, RN, C, D } = r, { Page, Text, Button, Input, Toggle } = ui(r);
     let names = FALLBACK_ICONS.slice();
@@ -604,32 +607,34 @@ var plugin = (() => {
       const custom = customFor(name);
       if (!custom || !element?.props) return;
       if (custom.image) {
-        return React.cloneElement(element, {
+        return h(RN.Image, {
           source: { uri: custom.image },
-          src: custom.image,
-          color: custom.color || element.props.color
+          style: [{ width: 24, height: 24, resizeMode: "contain" }, element.props.style],
+          accessibilityLabel: name
         });
       }
       if (custom.svg && D.SvgXml) {
         return h(D.SvgXml, {
           xml: custom.svg,
-          width: element.props.size === "sm" ? 16 : 24,
-          height: element.props.size === "sm" ? 16 : 24,
+          width: 24,
+          height: 24,
           color: custom.color || "#FFFFFF"
         });
       }
+      if (custom.color && isCatalogIcon(name)) {
+        return React.cloneElement(element, { color: custom.color });
+      }
       if (custom.color) {
-        return React.cloneElement(element, {
-          color: custom.color,
-          style: [element.props.style, { tintColor: custom.color, color: custom.color }]
-        });
+        return React.cloneElement(element, { style: [element.props.style, { tintColor: custom.color }] });
       }
     }
     function Preview({ name, size = 24 }) {
       const custom = customFor(name);
+      const box = { width: size, height: size, borderRadius: 4, backgroundColor: (custom?.color || "#5865F2") + "33" };
       if (custom?.image) return h(RN.Image, { source: { uri: custom.image }, style: { width: size, height: size, resizeMode: "contain" } });
       if (custom?.svg && D.SvgXml) return h(D.SvgXml, { xml: custom.svg, width: size, height: size, color: custom.color || "#FFFFFF" });
-      return h(C.Icon, { name, size, color: custom?.color, accessible: false });
+      if (isCatalogIcon(name) && C.Icon) return h(C.Icon, { name, size, color: custom?.color, accessible: false });
+      return h(RN.View, { style: box });
     }
     function Editor({ name, close }) {
       r.useRefresh();
@@ -640,28 +645,27 @@ var plugin = (() => {
       return h(
         Page,
         { title: name, close },
-        h(Text, { muted: true }, "Discord default vs plugin override. Plugin values overwrite a theme\u2019s plus.icons entry for this name."),
+        h(Text, { muted: true }, "Plugin overrides overwrite a theme plus.icons color for this name. Snow themes recolor Discord vectors; ic_* names are Android assets and cannot use C.Icon."),
         h(
           RN.View,
-          { style: { flexDirection: "row", alignItems: "center", gap: 16, paddingVertical: 8 } },
-          h(RN.View, { style: { alignItems: "center" } }, h(C.Icon, { name, size: 32, accessible: false }), h(Text, { muted: true }, "Default")),
-          h(RN.View, { style: { alignItems: "center" } }, h(Preview, { name, size: 32 }), h(Text, { muted: true }, "Override"))
+          { style: { flexDirection: "row", alignItems: "center", paddingVertical: 8 } },
+          h(RN.View, { style: { alignItems: "center", marginRight: 16 } }, h(Preview, { name, size: 32 }), h(Text, { muted: true }, "Current"))
         ),
-        h(Text, null, "Color (Snow themes recolor vectors this way)"),
+        h(Text, null, "Color"),
         h(Input, { value: color, onChange: setColor, placeholder: "#BB86FC", autoCapitalize: "none" }),
         h(
           RN.View,
-          { style: { flexDirection: "row", flexWrap: "wrap", gap: 8 } },
+          { style: { flexDirection: "row", flexWrap: "wrap" } },
           PRESET_COLORS.map((hex) => h(RN.Pressable, {
             key: hex,
             onPress: () => setColor(hex),
-            style: { width: 28, height: 28, borderRadius: 14, backgroundColor: hex, borderWidth: 1, borderColor: "#ffffff55" }
+            style: { width: 28, height: 28, borderRadius: 14, backgroundColor: hex, margin: 4, borderWidth: 1, borderColor: "#ffffff55" }
           }))
         ),
-        h(Text, null, "Custom image URL (optional; icons are normally recolored SVGs, not PNGs)"),
-        h(Input, { value: image, onChange: setImage, placeholder: "https://\u2026png", autoCapitalize: "none" }),
-        h(Text, null, "Custom SVG xml (optional; rendered with Discord SvgXml)"),
-        h(Input, { value: svg, onChange: setSvg, placeholder: "<svg \u2026>", autoCapitalize: "none", multiline: true }),
+        h(Text, null, "Image URL (optional)"),
+        h(Input, { value: image, onChange: setImage, placeholder: "https://example.com/icon.png", autoCapitalize: "none" }),
+        h(Text, null, "SVG xml (optional)"),
+        h(Input, { value: svg, onChange: setSvg, placeholder: '<svg viewBox="0 0 24 24">\u2026</svg>', autoCapitalize: "none" }),
         h(Button, { text: "Save override", onPress: () => {
           const next = {};
           if (isHex(color)) next.color = color.trim();
@@ -681,26 +685,28 @@ var plugin = (() => {
     function Settings() {
       r.useRefresh();
       const [query, setQuery] = React.useState("");
-      const filtered = names.filter((name) => name.toLowerCase().includes(query.trim().toLowerCase()));
+      const q = query.trim().toLowerCase();
+      const filtered = names.filter((name) => !q || name.toLowerCase().includes(q));
+      const rows = filtered.map((name) => h(D.TableRow, {
+        key: name,
+        label: name,
+        subLabel: customFor(name) ? "Overridden (wins over theme)" : isCatalogIcon(name) ? "Discord default" : "Theme asset key",
+        icon: C.RowIcon && isCatalogIcon(name) ? h(C.RowIcon, { name }) : void 0,
+        onPress: () => {
+          try {
+            r.open("edit-" + name, Editor, { name });
+          } catch (e) {
+            r.error("Icon editor", e);
+          }
+        }
+      }));
       return h(
         Page,
         { title: "Icon Changer" },
         h(Toggle, { setting: "enabled", label: "Enable icon overrides", subLabel: "Plugin icons overwrite matching theme plus.icons colors" }),
         h(Input, { value: query, onChange: setQuery, placeholder: "Search icons", autoCapitalize: "none" }),
-        h(Text, { muted: true }, `${filtered.length} icons. List loaded from Dark+ plus.icons. Snow themes recolor named Discord icons; custom images/SVG are optional replacements.`),
-        ...filtered.map((name) => h(D.TableRow, {
-          key: name,
-          label: name,
-          subLabel: customFor(name) ? "Overridden (wins over theme)" : "Discord default",
-          icon: h(RN.View, { style: { width: 24, height: 24 } }, h(Preview, { name, size: 24 })),
-          onPress: () => {
-            try {
-              r.open("edit-" + name, Editor, { name });
-            } catch (e) {
-              r.error("Icon editor", e);
-            }
-          }
-        }))
+        h(Text, { muted: true }, `${filtered.length} icons from Dark+ plus.icons. Catalog names (*Icon) preview as Discord vectors.`),
+        D.TableRowGroup ? h(D.TableRowGroup, { title: "Icons" }, rows) : h(RN.View, null, rows)
       );
     }
     return {
@@ -714,13 +720,16 @@ var plugin = (() => {
         r.hook(["Icon", "RowIcon"], (element) => {
           if (!r.store.enabled) return;
           const name = element.props?.name;
-          if (!name) return;
+          if (!name || !customFor(name)) return;
           return applyToElement(element, name);
         });
-        r.hook(names, (element, name) => {
-          if (!r.store.enabled) return;
-          return applyToElement(element, name);
-        });
+        const catalog = names.filter(isCatalogIcon);
+        if (catalog.length) {
+          r.hook(catalog, (element, name) => {
+            if (!r.store.enabled) return;
+            return applyToElement(element, name);
+          });
+        }
       },
       Settings
     };
@@ -728,6 +737,6 @@ var plugin = (() => {
   IconChanger.defaults = { enabled: true, icons: {} };
 
   // IconChanger.entry.js
-  var IconChanger_entry_default = register({ "id": "mime.iconchanger", "name": "IconChanger", "description": "Recolor or replace Discord icons. Plugin overrides win over theme plus.icons.", "version": "1.0.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/IconChanger" }, IconChanger);
+  var IconChanger_entry_default = register({ "id": "mime.iconchanger", "name": "IconChanger", "description": "Recolor or replace Discord icons. Plugin overrides win over theme plus.icons.", "version": "1.0.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/IconChanger" }, IconChanger);
   return __toCommonJS(IconChanger_entry_exports);
 })();
