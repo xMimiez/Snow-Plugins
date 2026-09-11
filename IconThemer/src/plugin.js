@@ -26,6 +26,29 @@ export default function factory(r) {
     const genericHits = new Map();
     const seenTypes = new Map(), seenPropsNames = new Map();
     const samples = new Map();
+    const assetSightings = new Map();
+    let createSeen = 0;
+    function introspectSource(source) {
+        if (source == null) return 'none';
+        if (typeof source !== 'object') return String(source).slice(0, 24);
+        const peek = {};
+        for (const key of ['allowIconTheming', 'moduleId', 'file', 'name', 'uri', 'id', 'width', 'height']) {
+            if (key in source) peek[key] = typeof source[key] === 'object' ? '[obj]' : String(source[key]).slice(0, 40);
+        }
+        return `${JSON.stringify(peek)}${typeof source === 'object' && !Array.isArray(source) ? '' : ` (${Array.isArray(source) ? 'array' : 'other'})`}`;
+    }
+    function probeAssetProps(props) {
+        if (!props || typeof props !== 'object') return;
+        for (const key of ['source', 'asset', 'iconAsset', 'image']) {
+            if (!(key in props)) continue;
+            const value = props[key];
+            const desc = introspectSource(Array.isArray(value) ? value[0] : value);
+            const prev = assetSightings.get(key);
+            const count = (prev?.count || 0) + 1;
+            if (!prev) assetSightings.set(key, { count, sample: desc });
+            else { prev.count = count; if (prev.sample.length < 200 && assetSightings.size < 24) prev.sample += ` | ${desc}`; }
+        }
+    }
     function probeElement(type, props) {
         if (!props || typeof props !== 'object' || !('name' in props)) return;
         const typeName = typeof type === 'string' ? type : (type?.displayName || type?.name || type?.type?.name || '?');
@@ -185,6 +208,7 @@ export default function factory(r) {
             h(Text, { muted: true }, rendererCount ? `${rendererCount} documented icon hooks · ${hits} matches observed · ${applied} overrides applied · ${engine.failed.size} failed image(s)` : 'Icon hooks are unavailable. Overrides are not active.'),
             h(Text, { muted: true }, `pack now: ${store.pack || 'original'} · matched names: ${[...matched.entries()].map(([n, c]) => `${n}×${c}`).join(', ') || 'none'} · generic hooks: ${[...genericHits.entries()].map(([n, c]) => `${n}×${c}`).join(', ') || 'none'} · names with pack output: ${overridden.size}`),
             h(Text, { muted: true }, `elements with a name prop (top): ${[...seenTypes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, c]) => `${n}×${c}`).join(', ') || 'none'} · name prop values: ${[...seenPropsNames.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, c]) => `${n}×${c}`).join(', ') || 'none'}`),
+            h(Text, { muted: true }, `elements seen: ${createSeen} · asset props (key×count / sample): ${[...assetSightings.entries()].map(([k, v]) => `${k}×${v.count}: ${v.sample}`).join('  ;;  ') || 'none'}`),
             h(Text, { muted: true }, [...samples.entries()].map(([n, s]) => `${n} [type=${s.type || '?'}] via=${s.via || '?'} keys=${s.keys || '∅'} style=${s.style || '∅'} size=${s.size} uri=${s.uri}`).join(' ;; ') || ''),
             h(Text, { muted: true }, `resolution per matched name (first 10): ${[...resolutions.entries()].map(([n, r]) => `${n}=${r}`).join(' , ') || 'none'}`),
             h(Text, { accessibilityRole: 'header' }, 'Preset icon packs'),
@@ -224,6 +248,8 @@ export default function factory(r) {
                 if (result.type === IconReplacement) return result;
                 const props = result.props;
                 if (!props || typeof props !== 'object') return result;
+                createSeen++;
+                probeAssetProps(props);
                 const hitsName = typeof props.name === 'string' ? props.name : '';
                 const named = hitsName && iconNames.has(hitsName);
                 const asset = named ? null : assetNameFrom(props);
