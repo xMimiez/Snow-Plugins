@@ -1,9 +1,10 @@
+import sdkIcons from './sdk-icons.json' with { type: 'json' };
 import catalog from './catalog.json' with { type: 'json' };
 
 export const packs = catalog;
 export const normalizePath = path => path.replace(/@[123]x(?=\.)/g, '').replace(/^\.\.\//, '_/');
 const byPack = new Map();
-export const iconNames = new Set();
+export const iconNames = new Set(sdkIcons);
 for (const pack of packs) {
     const paths = new Map(), names = new Map();
     for (const group of pack.groups) for (const path of group.files) {
@@ -72,8 +73,7 @@ export function createEngine(store, getAsset) {
             return { name: file.replace(/\.[^.]+$/, ''), type: file.split('.').pop(), httpServerLocation: '//_/external/' + path.join('/'), width: original.width, height: original.height };
         }
     }
-    function resolve(source) {
-        const asset = identify(source);
+    function resolveAsset(asset, source) {
         if (!asset?.name) return null;
         const name = asset.name, pack = byPack.get(store.pack);
         const entry = pack && (pack.paths.get(assetPath(asset)) || pack.names.get(name));
@@ -86,25 +86,6 @@ export function createEngine(store, getAsset) {
         if (!uri && !color) return null;
         return { name, uri, color: color || null, width: asset.width, height: asset.height, original: originalSource(source) };
     }
-    return { identify, resolve, failed, retry() { failed.clear(); } };
+    return { identify, resolve: source => resolveAsset(identify(source), source), resolveName: name => resolveAsset({ name, type: 'png' }, undefined), failed, retry() { failed.clear(); } };
 }
 
-// Work on the native render result, after theme plugins have set their source/tint.
-// Never mutate an existing element, a registered asset, or a theme's stored data.
-export function replaceTree(React, tree, override, onError) {
-    if (Array.isArray(tree)) return tree.map(child => replaceTree(React, child, override, onError));
-    if (!React.isValidElement(tree)) return tree;
-    const props = tree.props || {};
-    if (props.source != null || props.src != null) {
-        const next = { style: [props.style, { tintColor: override.color }], tintColor: override.color };
-        if (override.uri) {
-            const source = { uri: override.uri, width: override.width, height: override.height };
-            if (props.source != null) next.source = Array.isArray(props.source) ? [source] : source;
-            if (props.src != null) next.src = Array.isArray(props.src) ? [source] : source;
-            next.onError = event => { onError(override.uri); props.onError?.(event); };
-        }
-        return React.cloneElement(tree, next);
-    }
-    if (props.children) return React.cloneElement(tree, undefined, React.Children.map(props.children, child => replaceTree(React, child, override, onError)));
-    return tree;
-}
