@@ -392,7 +392,7 @@ test('settings use the Rain navigation route and keep the second plugin function
 
 test('Nighty profile toggle replaces the Settings button beside Quests or Shop and restores it',async()=>{
     const {default:factory}=await import('../src/plugins/nighty-tab.js');
-    const {r,sheets}=await harness({...factory.defaults,profileButton:true,url:'https://example.com'});
+    const {r,sheets}=await harness({...factory.defaults,showNightyButton:true,url:'https://example.com'});
     const plugin=factory(r);plugin.start();assert.equal(r.status.profileButton,'patched');
     const pressable=(key,label)=>React.createElement('Pressable',{key,accessibilityLabel:label,onPress(){}});
     const row=()=>React.createElement('View',{testID:'profile-toolbar'},[
@@ -419,17 +419,52 @@ test('Nighty profile toggle replaces the Settings button beside Quests or Shop a
     await Renderer.act(async()=>{tree=Renderer.create(unrelated());});
     assert.deepEqual(tree.toJSON().children.map(child=>child.props.accessibilityLabel),['Settings','Edit profile']);
     await Renderer.act(async()=>tree.unmount());
-    r.set('profileButton',false);
+    r.set('showNightyButton',false);
     await Renderer.act(async()=>{tree=Renderer.create(row());});
     assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Settings');
     await Renderer.act(async()=>tree.unmount());
-    r.set('profileButton',true);
+    r.set('showNightyButton',true);
+    const i18nRow=()=>React.createElement('View',{testID:'i18n-toolbar'},[
+        React.createElement('Pressable',{key:'quests',accessibilityLabel:{id:'QUESTS',message:'Misiones'},onPress(){}}),
+        React.createElement('Pressable',{key:'settings',accessibilityLabel:{id:'USER_SETTINGS',message:'Ajustes'},onPress(){}}),
+    ]);
+    await Renderer.act(async()=>{tree=Renderer.create(i18nRow());});
+    assert.equal(tree.toJSON().children[0].props.accessibilityLabel.message,'Misiones');
+    assert.equal(tree.toJSON().children[1].props.accessibilityLabel,'Nighty');
+    await Renderer.act(async()=>tree.unmount());
+    const actionRow=()=>React.createElement('View',{actions:[
+        {key:'shop',label:'Shop',onPress(){}},{key:'settings',label:'Settings',onPress(){}},
+    ]});
+    await Renderer.act(async()=>{tree=Renderer.create(actionRow());});
+    assert.equal(tree.toJSON().props.actions[1].label,'Nighty');
+    assert.equal(tree.toJSON().props.actions[1].accessibilityLabel,'Nighty');
+    await Renderer.act(async()=>tree.unmount());
     await Renderer.act(async()=>{tree=Renderer.create(React.createElement(plugin.Settings));});
-    assert(tree.root.findAllByType('Switch').some(row=>row.props.label==='Profile bar button'&&row.props.value===true));
+    assert(tree.root.findAllByType('Switch').some(row=>row.props.label==='Nighty instead of Settings'&&row.props.value===true));
     await Renderer.act(async()=>tree.unmount());
     await r.dispose();
     await Renderer.act(async()=>{tree=Renderer.create(row());});
     assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Settings');
+    await Renderer.act(async()=>tree.unmount());
+});
+
+test('Nighty replaces Settings inside the You screen render',async()=>{
+    const {default:factory}=await import('../src/plugins/nighty-tab.js');
+    function YouScreen(){return React.createElement('View',{testID:'you-screen'},[
+        React.createElement('Pressable',{key:'quests',accessibilityLabel:'Quests',onPress(){}}),
+        React.createElement('Pressable',{key:'settings',accessibilityLabel:'Settings',onPress(){}}),
+    ]);}
+    const screen={name:'YouScreen',default:YouScreen};
+    const {r,hooks}=await harness({...factory.defaults,showNightyButton:true},[screen]);
+    const plugin=factory(r);plugin.start();
+    assert(hooks.has('YouScreen'));
+    let tree;await Renderer.act(async()=>{tree=Renderer.create(React.createElement(screen.default));});
+    assert.deepEqual(tree.toJSON().children.map(child=>child.props.accessibilityLabel),['Quests','Nighty']);
+    await Renderer.act(async()=>tree.unmount());
+    await r.dispose();
+    assert.equal(hooks.size,0);
+    await Renderer.act(async()=>{tree=Renderer.create(React.createElement(YouScreen));});
+    assert.equal(tree.toJSON().children[1].props.accessibilityLabel,'Settings');
     await Renderer.act(async()=>tree.unmount());
 });
 

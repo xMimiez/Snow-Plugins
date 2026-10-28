@@ -694,11 +694,6 @@ var plugin = (() => {
     return message?.getChannelId?.() || message?.channel_id || message?.channelId;
   }
   var TOOLBAR_NAMES = ["ProfileHeaderActions", "UserProfileHeaderActions", "ProfileActionBar", "ProfileToolbar", "ProfileButtons", "UserProfileActions", "YouProfileHeaderActions", "HeaderActionButtons", "ProfileQuickAccessBar"];
-  function controlText(node) {
-    const props = node?.props;
-    if (!props) return "";
-    return [props.accessibilityLabel, props.accessibilityHint, props["aria-label"], props.testID, props.nativeID].filter((value) => typeof value === "string").join(" ");
-  }
   function iconHint(node) {
     const props = node?.props || {};
     const bits = [props.name, typeof props.icon === "string" ? props.icon : ""];
@@ -710,21 +705,87 @@ var plugin = (() => {
     }
     return bits.filter(Boolean).join(" ");
   }
-  function isIconControl(node) {
+  var ACTION_KEYS = ["actions", "buttons", "items", "headerActions", "trailingActions", "toolbarItems"];
+  var COMPONENT_NAMES = [...TOOLBAR_NAMES, "YouScreen", "YouHeader", "YouHeaderActions", "YouProfileHeader", "ProfileHeaderActions", "UserProfileHeader", "UserProfileHeaderActions", "UserProfileActions"];
+  var FILE_PATHS = [
+    "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx",
+    "modules/main_tabs_v2/native/tabs/you/YouHeader.tsx",
+    "modules/main_tabs_v2/native/tabs/you/YouHeaderActions.tsx",
+    "modules/main_tabs_v2/native/tabs/you/ProfileHeaderActions.tsx",
+    "modules/user_profile/native/ProfileHeaderActions.tsx",
+    "modules/user_profile/native/UserProfileHeader.tsx",
+    "modules/user_profile/native/UserProfileHeaderActions.tsx"
+  ];
+  var SETTINGS_MESSAGE_KEYS = ["SETTINGS", "USER_SETTINGS", "SETTINGS_TITLE", "OPEN_SETTINGS", "USER_SETTINGS_BUTTON"];
+  var OTHER_MESSAGE_KEYS = ["QUESTS", "SHOP", "NITRO", "COLLECTIBLES", "COLLECTIBLES_SHOP", "QUEST_HOME"];
+  function textOf(value, depth = 0) {
+    if (value == null || depth > 2) return "";
+    if (typeof value === "string" || typeof value === "number") return String(value);
+    if (typeof value === "function") return value.displayName || value.name || "";
+    if (typeof value === "object") return ["message", "defaultMessage", "id", "displayName", "name"].map((key) => textOf(value[key], depth + 1)).filter(Boolean).join(" ");
+    return "";
+  }
+  function toolbarSource(fn) {
+    let src = "";
+    try {
+      src = Function.prototype.toString.call(fn);
+    } catch {
+      return false;
+    }
+    return src.length > 80 && src.length < 2e4 && /USER_SETTINGS|SettingsIcon/.test(src) && /QUEST|COLLECTIBLES|ShopIcon|NitroIcon/.test(src);
+  }
+  function recordText(record) {
+    if (!record || typeof record !== "object") return "";
+    return ["label", "accessibilityLabel", "accessibilityHint", "aria-label", "testID", "nativeID", "id", "key", "name", "route", "screen", "icon", "Icon", "IconComponent"].map((key) => textOf(record[key])).filter(Boolean).join(" ");
+  }
+  var settingsNeedles = [];
+  var otherNeedles = [];
+  function rememberMessages(messages) {
+    if (!messages || typeof messages !== "object") return;
+    const take = (keys, bucket) => {
+      for (const key of keys) {
+        const value = messages[key];
+        if (typeof value === "string" && value.length >= 2 && value.length <= 32 && !bucket.includes(value)) bucket.push(value);
+      }
+    };
+    take(SETTINGS_MESSAGE_KEYS, settingsNeedles);
+    take(OTHER_MESSAGE_KEYS, otherNeedles);
+  }
+  function isSettingsText(text) {
+    if (!text || /notification/i.test(text)) return false;
+    if (/settings?|SettingsIcon|GearIcon|CogIcon|USER_SETTINGS|\b(gear|cog)\b/i.test(text)) return true;
+    return settingsNeedles.some((word) => text.includes(word));
+  }
+  function isOtherText(text) {
+    if (!text) return false;
+    if (/quest|shop|collectible|nitro|QuestIcon|ShopIcon|NitroIcon|CollectiblesIcon/i.test(text)) return true;
+    return otherNeedles.some((word) => text.includes(word));
+  }
+  function pressProps(record) {
+    if (!record || typeof record !== "object" || record.subLabel || record.trailing) return false;
+    if (typeof record.label === "string" && record.label.length > 40) return false;
+    return typeof record.onPress === "function" || typeof record.onPressOut === "function";
+  }
+  function nodeText(node) {
     const props = node?.props;
-    if (!props || typeof props.onPress !== "function") return false;
-    if (typeof props.label === "string" && props.label && !props.accessibilityLabel) return false;
-    return controlText(node).length <= 48;
+    if (!props) return "";
+    return ["accessibilityLabel", "accessibilityHint", "aria-label", "testID", "nativeID", "label", "name", "route", "screen", "id"].map((key) => textOf(props[key])).concat(iconHint(node)).filter(Boolean).join(" ");
+  }
+  function isIconControl(node) {
+    return pressProps(node?.props);
   }
   function isSettingsControl(node) {
-    if (!isIconControl(node)) return false;
-    const text = `${controlText(node)} ${iconHint(node)}`;
-    return /\bsettings?\b|SettingsIcon|GearIcon|CogIcon/i.test(text) && !/notification/i.test(text);
+    return isIconControl(node) && isSettingsText(nodeText(node));
   }
   function isQuestOrShopControl(node) {
-    if (!isIconControl(node)) return false;
-    const text = `${controlText(node)} ${iconHint(node)}`;
-    return /quest|shop|collectible|nitro|QuestIcon|ShopIcon|NitroIcon/i.test(text);
+    return isIconControl(node) && isOtherText(nodeText(node));
+  }
+  function plainKind(item) {
+    if (!pressProps(item) || item.props) return "";
+    const text = recordText(item);
+    if (isSettingsText(text)) return "settings";
+    if (isOtherText(text)) return "other";
+    return "";
   }
   function controlKind(node) {
     if (isSettingsControl(node)) return "settings";
@@ -736,10 +797,21 @@ var plugin = (() => {
     if (isQuestOrShopControl(list[0])) return "other-wrap";
     return "";
   }
+  function replacePlainActions(list, makeButton) {
+    if (!Array.isArray(list) || list.length < 2 || list.length > 8) return list;
+    const kinds = list.map(plainKind);
+    if (!kinds.includes("settings") || !kinds.includes("other")) return list;
+    let replaced = false;
+    return list.map((item, index) => {
+      if (replaced || kinds[index] !== "settings") return item;
+      replaced = true;
+      return makeButton(item);
+    });
+  }
   function replaceSettingsSlot(React, element, makeButton) {
     const children = element?.props?.children;
     const list = Array.isArray(children) ? children.filter(Boolean) : null;
-    if (!list || list.length < 2 || list.length > 6) return element;
+    if (!list || list.length < 2 || list.length > 8) return element;
     const kinds = list.map(controlKind);
     if (!kinds.includes("settings") && !kinds.includes("settings-wrap")) return element;
     if (!kinds.some((kind) => kind === "other" || kind === "other-wrap")) return element;
@@ -825,14 +897,14 @@ var plugin = (() => {
         h(Input, { value: store.url, placeholder: "https://", autoCapitalize: "none", onChange: (v) => r.set("url", v) }),
         store.url && !pageUrl(store.url) ? h(Text, null, "Enter an HTTP or HTTPS URL without embedded credentials.") : null,
         h(Button, { text: "Open Nighty", onPress: () => r.open("nighty", NightyPage, {}, { scrollable: false }) }),
-        h(Toggle, { setting: "profileButton", label: "Profile bar button", subLabel: "Replaces the Settings button next to Quests and Shop with Nighty. Turn this off to restore Settings, then reopen your profile." }),
+        h(Toggle, { setting: "showNightyButton", label: "Nighty instead of Settings", subLabel: "Shows Nighty in place of the Settings button next to Quests and Shop. Turn this off and reopen your profile to get Settings back." }),
         h(Toggle, { setting: "scriptUtils", label: "Script Utils functions", subLabel: "Download Script replies to an attachment with your prefix followed by dls." }),
         h(Text, null, "Nighty prefix (one character)"),
         h(Input, { value: store.nightyPrefix, onChange: (v) => r.set("nightyPrefix", v), autoCapitalize: "none", placeholder: "." }),
         ...["blue", "grayscale", "custom"].map((style) => h(Button, { key: style, text: `${store.iconType === style ? "\u2713 " : ""}${style} icon`, onPress: () => r.set("iconType", style) })),
         store.iconType === "custom" ? h(Input, { value: store.customIconUrl, placeholder: "https:// image URL", autoCapitalize: "none", onChange: (v) => r.set("customIconUrl", v) }) : null,
         h(Icon),
-        h(Text, { muted: true }, `Settings entry: ${r.status.settingsEntry ? "registered" : "unavailable"} \xB7 Message menu: ${r.status.messageMenu ? "registered" : "unavailable"} \xB7 Profile button: ${store.profileButton ? r.status.profileButton === "replaced" ? "replaced Settings" : "watching" : "off"}`)
+        h(Text, { muted: true }, `Settings entry: ${r.status.settingsEntry ? "registered" : "unavailable"} \xB7 Message menu: ${r.status.messageMenu ? "registered" : "unavailable"} \xB7 Profile button: ${store.showNightyButton ? r.status.profileButton === "replaced" ? "replaced Settings" : "watching" : "off"}`)
       );
     }
     function ToolbarIcon() {
@@ -862,60 +934,167 @@ var plugin = (() => {
         accessibilityHint: "Open Nighty",
         testID: "mime-nighty-profile-button",
         onPress: () => {
-          if (r.active && store.profileButton) openNighty();
+          if (r.active && store.showNightyButton) openNighty();
         }
       }, h(ToolbarIcon));
     }
-    function applyToolbar(element) {
-      if (!r.active || !store.profileButton || !element) return element;
-      const next = replaceSettingsSlot(r.React, element, nightyControl);
-      if (next !== element) r.status.profileButton = "replaced";
+    function nightyRecord(sample) {
+      const next = { ...sample, key: "mime-nighty-profile-button", id: "mime-nighty-profile-button", accessibilityLabel: "Nighty", onPress: () => {
+        if (r.active && store.showNightyButton) openNighty();
+      } };
+      if (typeof sample.label === "string") next.label = "Nighty";
+      if ("icon" in sample) next.icon = ToolbarIcon;
+      if ("Icon" in sample) next.Icon = ToolbarIcon;
+      if ("IconComponent" in sample) next.IconComponent = ToolbarIcon;
       return next;
     }
-    function patchRender(parent, key) {
-      if (typeof parent?.[key] !== "function") return false;
+    function applyToolbar(element) {
+      if (!r.active || !store.showNightyButton || !element?.props) return element;
+      const slotted = replaceSettingsSlot(r.React, element, nightyControl);
+      if (slotted !== element) {
+        r.status.profileButton = "replaced";
+        return slotted;
+      }
+      let changed = false;
+      const props = {};
+      for (const key of ACTION_KEYS) {
+        const next = replacePlainActions(element.props[key], nightyRecord);
+        if (next !== element.props[key]) {
+          props[key] = next;
+          changed = true;
+        }
+      }
+      if (!changed) return element;
+      r.status.profileButton = "replaced";
+      return r.React.cloneElement(element, props);
+    }
+    function applyDeep(node, depth = 0) {
+      if (node == null || depth > 10) return node;
+      if (Array.isArray(node)) {
+        if (node.length > 40) return node;
+        let changed = false;
+        const mapped = node.map((child) => {
+          const next2 = applyDeep(child, depth + 1);
+          if (next2 !== child) changed = true;
+          return next2;
+        });
+        return changed ? mapped : node;
+      }
+      const next = applyToolbar(node);
+      if (next !== node || !r.React.isValidElement(node)) return next;
+      const children = next.props?.children;
+      const nextChildren = applyDeep(children, depth + 1);
+      if (nextChildren === children) return node;
+      return r.React.cloneElement(node, {}, nextChildren);
+    }
+    const watched = /* @__PURE__ */ new Set();
+    const proxies = /* @__PURE__ */ new Map();
+    const proxiedNames = /* @__PURE__ */ new Set();
+    function watch(parent, key, deep) {
+      const fn = parent?.[key];
+      if (typeof fn !== "function" || watched.has(fn)) return false;
+      watched.add(fn);
       return r.patch("after", parent, key, (_args, result) => {
-        const next = applyToolbar(result);
+        const next = deep ? applyDeep(result) : applyToolbar(result);
         return next === result ? void 0 : next;
       });
+    }
+    function wrapRender(type) {
+      if (proxies.has(type)) return proxies.get(type);
+      function Proxy2(props) {
+        const rendered = type(props);
+        const next = applyDeep(rendered);
+        return next === void 0 ? rendered : next;
+      }
+      const label = type.displayName || type.name || "row";
+      Proxy2.displayName = `NightyProxy(${label})`;
+      proxies.set(type, Proxy2);
+      return Proxy2;
+    }
+    function installRenderProxy(name) {
+      const jsx = r.B.api?.react?.jsx;
+      if (!name || proxiedNames.has(name) || typeof jsx?.onJsxCreate !== "function") return false;
+      proxiedNames.add(name);
+      const callback = (Component, element) => {
+        if (!r.active || !store.showNightyButton || typeof Component !== "function" || !element) return;
+        const type = wrapRender(Component);
+        const next = r.React.createElement(type, element.props);
+        next.key = element.key;
+        next.ref = element.ref;
+        return next;
+      };
+      jsx.onJsxCreate(name, callback);
+      r.own(() => {
+        try {
+          jsx.deleteJsxCreate(name, callback);
+        } catch {
+        }
+      });
+      return true;
     }
     function considerModule(mod) {
       if (!mod || typeof mod !== "object") return;
       for (const key of Object.keys(mod)) {
         const value = mod[key];
-        if (typeof value === "function" && (TOOLBAR_NAMES.includes(value.displayName) || TOOLBAR_NAMES.includes(value.name))) patchRender(mod, key);
-        else if (value && typeof value.render === "function" && (TOOLBAR_NAMES.includes(value.displayName) || TOOLBAR_NAMES.includes(value.render.name))) patchRender(value, "render");
+        const fn = typeof value === "function" ? value : value?.render || value?.type;
+        if (typeof fn !== "function") continue;
+        const name = fn.displayName || fn.name || "";
+        if (!COMPONENT_NAMES.includes(name) && !toolbarSource(fn)) continue;
+        if (typeof value === "function") watch(mod, key, true);
+        else if (typeof value.render === "function") watch(value, "render", true);
+        else if (typeof value.type === "function") watch(value, "type", true);
+        if (name) installRenderProxy(name);
       }
     }
     return { Settings, NightyPage, download, start() {
       r.status.settingsEntry = registerSection(r, { name: "Nighty", items: [{ key: "MIME_NIGHTY", title: () => "Nighty", headerShown: false, IconComponent: Icon, render: async () => ({ default: NightyPage }) }] });
       r.status.messageMenu = patchLazySheet(r, (key, props) => key === "MessageLongPressActionSheet" && canDownload(store, props?.message) ? { key: "mime-nighty-download", label: "Download Script", icon: h(Icon), onPress: () => download(props.message) } : null);
-      r.hook(TOOLBAR_NAMES, (element) => applyToolbar(element));
-      const patched = r.patch("after", React, "createElement", (_args, result) => {
-        const next = applyToolbar(result);
-        return next === result ? void 0 : next;
-      });
+      rememberMessages(r.common?.i18n?.Messages || r.find("Messages")?.Messages);
+      let proxied = false;
+      for (const name of COMPONENT_NAMES) if (installRenderProxy(name)) proxied = true;
+      const patched = watch(React, "createElement", false);
+      for (const key of ["jsx", "jsxs"]) watch(React, key, false);
       const metro = r.B.metro;
-      for (const name of TOOLBAR_NAMES) {
-        considerModule(metro?.findByName?.(name, false));
-        considerModule(metro?.findByDisplayName?.(name, false));
-        considerModule(metro?.findByTypeName?.(name, false));
+      const factories = [r.B._jsx, r.host?._jsx];
+      try {
+        const found = metro?.findByPropsAll?.("jsx", "jsxs") || [];
+        factories.push(...found, metro?.findByProps?.("jsx", "jsxs"));
+      } catch {
+      }
+      for (const factory of factories) {
+        watch(factory, "jsx", false);
+        watch(factory, "jsxs", false);
+      }
+      for (const name of COMPONENT_NAMES) {
+        try {
+          considerModule(metro?.findByName?.(name, false));
+          considerModule(metro?.findByDisplayName?.(name, false));
+          considerModule(metro?.findByTypeName?.(name, false));
+        } catch {
+        }
+      }
+      for (const filePath of FILE_PATHS) {
+        try {
+          considerModule(metro?.findByFilePath?.(filePath, false));
+        } catch {
+        }
       }
       try {
         const matches = metro?.findAll?.((mod) => {
           const fn = mod?.default || mod?.render || mod;
           const label = fn?.displayName || fn?.name;
-          return typeof label === "string" && TOOLBAR_NAMES.includes(label);
+          return typeof label === "string" && COMPONENT_NAMES.includes(label);
         }) || [];
         for (const mod of matches) considerModule(mod?.default ? mod : { default: mod });
       } catch {
       }
-      r.status.profileButton = patched === false ? "unavailable" : r.status.profileButton === "replaced" ? "replaced" : "patched";
+      const armed = patched !== false || proxied;
+      r.status.profileButton = armed ? r.status.profileButton === "replaced" ? "replaced" : "patched" : "unavailable";
     } };
   }
-  NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "blue", customIconUrl: "", profileButton: false };
+  NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "blue", customIconUrl: "", showNightyButton: true };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "version": "1.0.2", "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.0.3", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();
