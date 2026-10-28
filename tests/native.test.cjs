@@ -390,6 +390,49 @@ test('settings use the Rain navigation route and keep the second plugin function
     await b.r.dispose();assert.equal(backs,2);assert.equal(constants.SETTING_RENDERER_CONFIG.MIME_PLUGIN_SETTINGS_PAGE,undefined);
 });
 
+test('Nighty profile toggle replaces the Settings button beside Quests or Shop and restores it',async()=>{
+    const {default:factory}=await import('../src/plugins/nighty-tab.js');
+    const {r,sheets}=await harness({...factory.defaults,profileButton:true,url:'https://example.com'});
+    const plugin=factory(r);plugin.start();assert.equal(r.status.profileButton,'patched');
+    const pressable=(key,label)=>React.createElement('Pressable',{key,accessibilityLabel:label,onPress(){}});
+    const row=()=>React.createElement('View',{testID:'profile-toolbar'},[
+        pressable('quests','Quests'),pressable('shop','Shop'),pressable('settings','Settings'),
+    ]);
+    let tree;await Renderer.act(async()=>{tree=Renderer.create(row());});
+    const bar=tree.toJSON();
+    assert.equal(bar.children[0].props.accessibilityLabel,'Quests');
+    assert.equal(bar.children[1].props.accessibilityLabel,'Shop');
+    assert.equal(bar.children[2].props.accessibilityLabel,'Nighty');
+    assert.equal(bar.children[2].props.testID,'mime-nighty-profile-button');
+    assert.equal(r.status.profileButton,'replaced');
+    await Renderer.act(async()=>tree.root.findByProps({testID:'mime-nighty-profile-button'}).props.onPress());
+    assert.equal(sheets.size,1);
+    await Renderer.act(async()=>tree.unmount());sheets.clear();
+    const wrapped=()=>React.createElement('View',{testID:'wrapped-toolbar'},[
+        React.createElement('View',{key:'quests'},pressable('quests','Quests')),
+        React.createElement('View',{key:'settings'},pressable('settings','Settings')),
+    ]);
+    await Renderer.act(async()=>{tree=Renderer.create(wrapped());});
+    assert.equal(tree.toJSON().children[1].children[0].props.accessibilityLabel,'Nighty');
+    await Renderer.act(async()=>tree.unmount());
+    const unrelated=()=>React.createElement('View',null,[pressable('settings','Settings'),pressable('edit','Edit profile')]);
+    await Renderer.act(async()=>{tree=Renderer.create(unrelated());});
+    assert.deepEqual(tree.toJSON().children.map(child=>child.props.accessibilityLabel),['Settings','Edit profile']);
+    await Renderer.act(async()=>tree.unmount());
+    r.set('profileButton',false);
+    await Renderer.act(async()=>{tree=Renderer.create(row());});
+    assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Settings');
+    await Renderer.act(async()=>tree.unmount());
+    r.set('profileButton',true);
+    await Renderer.act(async()=>{tree=Renderer.create(React.createElement(plugin.Settings));});
+    assert(tree.root.findAllByType('Switch').some(row=>row.props.label==='Profile bar button'&&row.props.value===true));
+    await Renderer.act(async()=>tree.unmount());
+    await r.dispose();
+    await Renderer.act(async()=>{tree=Renderer.create(row());});
+    assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Settings');
+    await Renderer.act(async()=>tree.unmount());
+});
+
 test('Nighty accepts native message models and nested HTTP exports without reading credentials',async()=>{
     const {default:factory,canDownload}=await import('../src/plugins/nighty-tab.js');
     const message={id:'message',getChannelId:()=> 'native-channel',attachments:[{}]};let sent;

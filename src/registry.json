@@ -343,7 +343,7 @@
     "module": "nighty-tab",
     "id": "mime.nightytab",
     "name": "Nighty Tab",
-    "description": "Nighty in mobile settings, with optional Download Script replies.",
+    "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.",
     "authors": [
       {
         "name": "Mime | N0_.q3",
@@ -354,7 +354,7 @@
         "id": "1361736124858630274"
       }
     ],
-    "version": "1.0.1",
+    "version": "1.0.2",
     "license": "GPL-3.0-or-later",
     "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab"
   },
