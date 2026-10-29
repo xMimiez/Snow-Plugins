@@ -903,6 +903,8 @@ var plugin = (() => {
       const navigation = r.common.navigation || r.find("push", "pushLazy", "pop");
       if (typeof navigation?.push !== "function") return false;
       const Navigator = screenNavigator();
+      const close = () => navigation.pop?.();
+      const headerLeft = discordClose(close) || (() => closeMark(close));
       function Screen() {
         if (Navigator) return h(Navigator, {
           initialRouteName: "Nighty",
@@ -910,11 +912,13 @@ var plugin = (() => {
           screens: {
             Nighty: {
               title: "Nighty",
-              render: () => r.active ? h(NightyPage, { close: () => navigation.pop?.() }) : null
+              headerBackVisible: false,
+              headerLeft,
+              render: () => r.active ? h(NightyPage, { close }) : null
             }
           }
         });
-        return h(RN.View, { style: { flex: 1, width: "100%", height: settingsHeight() } }, h(NightyPage, { close: () => navigation.pop?.() }));
+        return h(RN.View, { style: { flex: 1, width: "100%", height: settingsHeight() } }, renderClose(close), h(NightyPage, { close }));
       }
       Screen.displayName = "Nighty";
       try {
@@ -963,9 +967,51 @@ var plugin = (() => {
       return h(RN.Image, {
         source: { uri },
         resizeMode: "contain",
+        tintColor: "#FFFFFF",
         accessibilityIgnoresInvertColors: true,
         style: { width: size, height: size }
       });
+    }
+    function profileMark() {
+      const uri = iconUrl();
+      if (!uri) return null;
+      return h(RN.Image, {
+        source: { uri },
+        resizeMode: "contain",
+        tintColor: "#FFFFFF",
+        accessibilityIgnoresInvertColors: true,
+        style: { width: 26, height: 26 }
+      });
+    }
+    function profileLabel() {
+      return h(RN.Text, {
+        style: { color: "#FFFFFF", fontSize: 13, fontWeight: "700", marginTop: 6, textAlign: "center" }
+      }, "Nighty");
+    }
+    function discordClose(onClose) {
+      const module = r.find("getRenderCloseButton") || r.find("getHeaderCloseButton");
+      const render = module?.getRenderCloseButton || module?.getHeaderCloseButton;
+      if (typeof render !== "function") return null;
+      try {
+        return render(onClose) || null;
+      } catch (error) {
+        if (r.active) r.error("Nighty close button", error);
+        return null;
+      }
+    }
+    function closeMark(onClose) {
+      return h(RN.Pressable || RN.TouchableOpacity, {
+        accessibilityLabel: "Close",
+        accessibilityRole: "button",
+        onPress: onClose,
+        hitSlop: { top: 12, bottom: 12, left: 12, right: 12 },
+        style: { width: 44, height: 44, alignItems: "center", justifyContent: "center" }
+      }, h(RN.Text, { style: { color: "#FFFFFF", fontSize: 22, lineHeight: 24 } }, "\u2715"));
+    }
+    function renderClose(onClose) {
+      const control = discordClose(onClose);
+      if (typeof control === "function") return h(control);
+      return control || closeMark(onClose);
     }
     function NightyProfileButton() {
       const [open, setOpen] = React.useState(false);
@@ -983,10 +1029,10 @@ var plugin = (() => {
             if (!r.active || !store.showNightyButton) return;
             if (!openNighty()) setOpen(true);
           },
-          style: { flexDirection: "row", alignItems: "center", justifyContent: "center", minHeight: 40, paddingHorizontal: 8 }
+          style: { flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 56, paddingVertical: 8 }
         },
-        h(Icon),
-        h(Text, { style: { marginLeft: 6 } }, "Nighty"),
+        profileMark(),
+        profileLabel(),
         open && Modal ? h(Modal, {
           visible: true,
           animationType: "slide",
@@ -996,7 +1042,7 @@ var plugin = (() => {
         }, h(
           RN.View,
           { style: { flex: 1, width: "100%", height: settingsHeight() } },
-          h(Button, { text: "Close", onPress: close }),
+          renderClose(close),
           h(NightyPage, { close })
         )) : null
       );
@@ -1070,6 +1116,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "blue", customIconUrl: "", showNightyButton: true };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.0.9", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.0.10", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();

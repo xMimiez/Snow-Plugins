@@ -212,6 +212,8 @@ export default function NightyTab(r) {
         const navigation = r.common.navigation || r.find('push', 'pushLazy', 'pop');
         if (typeof navigation?.push !== 'function') return false;
         const Navigator = screenNavigator();
+        const close = () => navigation.pop?.();
+        const headerLeft = discordClose(close) || (() => closeMark(close));
         function Screen() {
             if (Navigator) return h(Navigator, {
                 initialRouteName: 'Nighty',
@@ -219,11 +221,13 @@ export default function NightyTab(r) {
                 screens: {
                     Nighty: {
                         title: 'Nighty',
-                        render: () => r.active ? h(NightyPage, { close: () => navigation.pop?.() }) : null,
+                        headerBackVisible: false,
+                        headerLeft,
+                        render: () => r.active ? h(NightyPage, { close }) : null,
                     },
                 },
             });
-            return h(RN.View, { style: { flex: 1, width: '100%', height: settingsHeight() } }, h(NightyPage, { close: () => navigation.pop?.() }));
+            return h(RN.View, { style: { flex: 1, width: '100%', height: settingsHeight() } }, renderClose(close), h(NightyPage, { close }));
         }
         Screen.displayName = 'Nighty';
         try { navigation.push(Screen); return true; }
@@ -263,9 +267,49 @@ export default function NightyTab(r) {
         return h(RN.Image, {
             source: { uri },
             resizeMode: 'contain',
+            tintColor: '#FFFFFF',
             accessibilityIgnoresInvertColors: true,
             style: { width: size, height: size },
         });
+    }
+    // Quests, Shop, and Settings are a white glyph stacked over a bold white label.
+    function profileMark() {
+        const uri = iconUrl();
+        if (!uri) return null;
+        return h(RN.Image, {
+            source: { uri },
+            resizeMode: 'contain',
+            tintColor: '#FFFFFF',
+            accessibilityIgnoresInvertColors: true,
+            style: { width: 26, height: 26 },
+        });
+    }
+    function profileLabel() {
+        return h(RN.Text, {
+            style: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', marginTop: 6, textAlign: 'center' },
+        }, 'Nighty');
+    }
+    // Discord's header close control is the X. It replaces the back chevron.
+    function discordClose(onClose) {
+        const module = r.find('getRenderCloseButton') || r.find('getHeaderCloseButton');
+        const render = module?.getRenderCloseButton || module?.getHeaderCloseButton;
+        if (typeof render !== 'function') return null;
+        try { return render(onClose) || null; }
+        catch (error) { if (r.active) r.error('Nighty close button', error); return null; }
+    }
+    function closeMark(onClose) {
+        return h(RN.Pressable || RN.TouchableOpacity, {
+            accessibilityLabel: 'Close',
+            accessibilityRole: 'button',
+            onPress: onClose,
+            hitSlop: { top: 12, bottom: 12, left: 12, right: 12 },
+            style: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+        }, h(RN.Text, { style: { color: '#FFFFFF', fontSize: 22, lineHeight: 24 } }, '✕'));
+    }
+    function renderClose(onClose) {
+        const control = discordClose(onClose);
+        if (typeof control === 'function') return h(control);
+        return control || closeMark(onClose);
     }
     // Own pressable so the toolbar cannot drop the label. Settings' onPress is left untouched.
     function NightyProfileButton() {
@@ -282,10 +326,10 @@ export default function NightyTab(r) {
                 if (!r.active || !store.showNightyButton) return;
                 if (!openNighty()) setOpen(true);
             },
-            style: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', minHeight: 40, paddingHorizontal: 8 },
+            style: { flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 56, paddingVertical: 8 },
         },
-        h(Icon),
-        h(Text, { style: { marginLeft: 6 } }, 'Nighty'),
+        profileMark(),
+        profileLabel(),
         open && Modal ? h(Modal, {
             visible: true,
             animationType: 'slide',
@@ -293,7 +337,7 @@ export default function NightyTab(r) {
             statusBarTranslucent: true,
             onRequestClose: close,
         }, h(RN.View, { style: { flex: 1, width: '100%', height: settingsHeight() } },
-            h(Button, { text: 'Close', onPress: close }),
+            renderClose(close),
             h(NightyPage, { close }))) : null);
     }
     function nightyControl() {
