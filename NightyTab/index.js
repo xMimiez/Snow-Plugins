@@ -834,17 +834,17 @@ var plugin = (() => {
         sending.delete(message.id);
       }
     }
-    function nightyFrame() {
+    function settingsHeight() {
       const windowHeight = RN.Dimensions?.get?.("window")?.height;
-      const height = Math.round((typeof windowHeight === "number" && windowHeight > 0 ? windowHeight : 700) * 0.82);
-      return { flex: 1, height, minHeight: height, width: "100%" };
+      return typeof windowHeight === "number" && windowHeight > 0 ? Math.round(windowHeight) : 700;
     }
     function NightyPage() {
       r.useRefresh();
       const src = pageUrl(store.url);
       const WebView = r.find("WebView")?.WebView || r.byName("WebView");
       const [error, setError] = React.useState("");
-      const frame = nightyFrame();
+      const height = settingsHeight();
+      const frame = { flex: 1, width: "100%", height, minHeight: height };
       const allow = (req) => {
         const url = req?.url || "";
         return !url || url === "about:blank" || url === src || !!pageUrl(url);
@@ -855,7 +855,7 @@ var plugin = (() => {
         !src ? h(Text, null, "Set a valid HTTP or HTTPS URL in Nighty Tab settings.") : !WebView ? h(Text, null, "WebView is unavailable in this Snow build.") : h(WebView, {
           key: src,
           source: { uri: src },
-          style: { flex: 1, height: frame.height, width: "100%" },
+          style: { flex: 1, height, width: "100%" },
           originWhitelist: ["http://*", "https://*"],
           javaScriptEnabled: true,
           domStorageEnabled: true,
@@ -889,10 +889,33 @@ var plugin = (() => {
         h(Text, { muted: true }, `Settings entry: ${r.status.settingsEntry ? "registered" : "unavailable"} \xB7 Message menu: ${r.status.messageMenu ? "registered" : "unavailable"} \xB7 Profile button: ${store.showNightyButton ? r.status.profileButton === "added" ? "added beside Settings" : "watching" : "off"}`)
       );
     }
+    function routeNames(state, found = []) {
+      if (!state) return found;
+      if (Array.isArray(state.routeNames)) found.push(...state.routeNames);
+      for (const route of state.routes || []) routeNames(route.state, found);
+      return found;
+    }
     function openNighty() {
       if (!r.active) return;
       try {
-        r.open("nighty", NightyPage, {}, { scrollable: true });
+        const navigationRef = r.find("getRootNavigationRef");
+        const raw = navigationRef?.getRootNavigationRef?.();
+        const nav = raw?.navigate ? raw : raw?.current;
+        const state = nav?.getRootState?.() || nav?.getState?.();
+        if (typeof nav?.navigate === "function" && routeNames(state).includes("MIME_PLUGIN_SETTINGS_PAGE")) {
+          nav.navigate("MIME_PLUGIN_SETTINGS_PAGE", {
+            title: "Nighty",
+            headerShown: false,
+            owner: r.meta.id,
+            render: () => r.active ? h(NightyPage, { close: () => nav.goBack?.() }) : null
+          });
+          return;
+        }
+      } catch (error) {
+        if (r.active) r.error("Open Nighty", error);
+      }
+      try {
+        r.open("nighty", NightyPage, {}, { scrollable: false });
       } catch (error) {
         if (r.active) r.error("Open Nighty", error);
       }
@@ -902,20 +925,55 @@ var plugin = (() => {
         if (r.active && store.showNightyButton) openNighty();
       };
     }
+    function flatStyle(style) {
+      const list = Array.isArray(style) ? style : [style];
+      const next = {};
+      for (const item of list) if (item && typeof item === "object") Object.assign(next, item);
+      return next;
+    }
+    function iconSize(node, depth = 0) {
+      if (!node || depth > 5) return null;
+      const props = node.props || {};
+      const style = flatStyle(props.style);
+      if (typeof style.width === "number" && typeof style.height === "number") return { width: style.width, height: style.height };
+      if (typeof props.size === "number") return { width: props.size, height: props.size };
+      const kids = Array.isArray(props.children) ? props.children : props.children ? [props.children] : [];
+      for (const kid of kids) {
+        const found = iconSize(kid, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    function toolbarIcon(sample) {
+      const uri = iconUrl();
+      if (!uri) return null;
+      return h(RN.Image, {
+        source: { uri },
+        resizeMode: "contain",
+        accessibilityIgnoresInvertColors: true,
+        style: iconSize(sample) || { width: 24, height: 24 }
+      });
+    }
     function nightyControl(sample) {
       const props = sample?.props || {};
-      return h(sample.type, {
+      const image = toolbarIcon(sample);
+      const next = {
         key: "mime-nighty-profile-button",
         accessibilityLabel: "Nighty",
         accessibilityHint: "Open Nighty",
         accessibilityRole: props.accessibilityRole || "button",
         testID: "mime-nighty-profile-button",
-        style: props.style,
+        style: props.style || { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
         hitSlop: props.hitSlop,
         onPress: press()
-      }, h(Icon));
+      };
+      if (props.source != null) next.source = { uri: iconUrl() };
+      if (typeof props.icon === "function") next.icon = Icon;
+      else if (props.icon != null && typeof props.icon === "object") next.icon = image;
+      return h(sample.type, next, image);
     }
-    function nightyRecord() {
+    function nightyRecord(sample) {
+      const image = toolbarIcon(sample);
       return {
         key: "mime-nighty-profile-button",
         id: "mime-nighty-profile-button",
@@ -923,6 +981,7 @@ var plugin = (() => {
         accessibilityLabel: "Nighty",
         accessibilityHint: "Open Nighty",
         IconComponent: Icon,
+        icon: typeof sample?.icon === "function" ? Icon : image,
         onPress: press()
       };
     }
@@ -979,6 +1038,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "blue", customIconUrl: "", showNightyButton: true };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.0.6", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.0.7", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();

@@ -408,7 +408,9 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     assert.equal(bar.children[2].props.accessibilityLabel,'Settings');
     assert.equal(bar.children[3].props.accessibilityLabel,'Nighty');
     assert.equal(bar.children[3].props.testID,'mime-nighty-profile-button');
-    assert.deepEqual(bar.children[3].children[0].children[0].props.style,{width:18,height:18});
+    assert.equal(bar.children[3].children[0].type,'Image');
+    assert.match(bar.children[3].children[0].props.source.uri,/icon\.png$/);
+    assert.deepEqual(bar.children[3].children[0].props.style,{width:24,height:24});
     assert.equal(r.status.profileButton,'added');
     await Renderer.act(async()=>tree.root.findByProps({accessibilityLabel:'Settings'}).props.onPress());
     assert.equal(sheets.size,0);
@@ -452,7 +454,8 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     assert.equal(actions[1].icon,'gear');
     assert.equal(actions[2].label,'Nighty');
     assert.equal(actions[2].id,'mime-nighty-profile-button');
-    assert.equal(actions[2].icon,undefined);
+    assert.equal(actions[2].icon.type,'Image');
+    assert.match(actions[2].icon.props.source.uri,/icon\.png$/);
     await Renderer.act(async()=>actions[1].onPress());
     assert.equal(sheets.size,0);
     await Renderer.act(async()=>actions[2].onPress());
@@ -481,7 +484,8 @@ test('Nighty adds its button inside the You screen without wrapping the screen',
     let tree;await Renderer.act(async()=>{tree=Renderer.create(React.createElement(YouScreen));});
     assert.equal(tree.toJSON().children[1].props.accessibilityLabel,'Settings');
     assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Nighty');
-    assert.deepEqual(tree.toJSON().children[2].children[0].children[0].props.style,{width:18,height:18});
+    assert.equal(tree.toJSON().children[2].children[0].type,'Image');
+    assert.match(tree.toJSON().children[2].children[0].props.source.uri,/icon\.png$/);
     await Renderer.act(async()=>tree.unmount());
     await r.dispose();
     assert.equal(hooks.size,0);
