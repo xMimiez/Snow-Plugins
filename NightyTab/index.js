@@ -907,45 +907,72 @@ var plugin = (() => {
         h(Text, { muted: true }, `Settings entry: ${r.status.settingsEntry ? "registered" : "unavailable"} \xB7 Message menu: ${r.status.messageMenu ? "registered" : "unavailable"} \xB7 Profile button: ${store.showNightyButton ? r.status.profileButton === "replaced" ? "replaced Settings" : "watching" : "off"}`)
       );
     }
-    function ToolbarIcon() {
+    function toolbarGraphic() {
       const uri = iconUrl();
-      return uri ? h(RN.Image, { source: { uri }, resizeMode: "contain", style: { width: 24, height: 24 }, accessibilityIgnoresInvertColors: true }) : null;
+      return h(
+        RN.View,
+        { style: { width: 32, height: 32, alignItems: "center", justifyContent: "center" } },
+        uri ? h(RN.Image, { source: { uri }, resizeMode: "contain", style: { width: 24, height: 24 }, accessibilityIgnoresInvertColors: true }) : null
+      );
     }
     function openNighty() {
       if (!r.active) return;
-      const constants = r.find("SETTING_RENDERER_CONFIG");
-      const row = constants?.SETTING_RENDERER_CONFIG?.MIME_NIGHTY;
-      if (typeof row?.onPress === "function") {
-        Promise.resolve(row.onPress()).catch((error) => {
-          if (r.active) r.error("Open Nighty", error);
-        });
-        return;
-      }
       try {
         r.open("nighty", NightyPage, {}, { scrollable: false });
       } catch (error) {
         if (r.active) r.error("Open Nighty", error);
       }
     }
+    function press() {
+      return () => {
+        if (r.active && store.showNightyButton) openNighty();
+      };
+    }
+    const PRESS_KEYS = ["onPress", "onPressOut", "onPressIn", "action", "onClick"];
+    function applyPress(sample, next) {
+      let bound = false;
+      for (const key of PRESS_KEYS) {
+        if (typeof sample[key] === "function") {
+          next[key] = press();
+          bound = true;
+        }
+      }
+      if (!bound) next.onPress = press();
+      return next;
+    }
+    function applyIcon(sample, next, graphic) {
+      let bound = false;
+      for (const key of ["icon", "Icon", "IconComponent", "iconComponent", "leading"]) {
+        if (!(key in sample)) continue;
+        next[key] = graphic;
+        bound = true;
+      }
+      if (!bound) next.icon = graphic;
+      if (sample.source && typeof sample.source === "object") next.source = graphic.props?.children?.props?.source || sample.source;
+      return next;
+    }
     function nightyControl(sample) {
-      return r.React.cloneElement(sample, {
-        key: "mime-nighty-profile-button",
+      const graphic = toolbarGraphic();
+      const props = applyPress(sample.props, {
         accessibilityLabel: "Nighty",
         accessibilityHint: "Open Nighty",
-        testID: "mime-nighty-profile-button",
-        onPress: () => {
-          if (r.active && store.showNightyButton) openNighty();
-        }
-      }, h(ToolbarIcon));
+        testID: "mime-nighty-profile-button"
+      });
+      if (typeof sample.props.label === "string" || sample.props.label && typeof sample.props.label === "object") props.label = "Nighty";
+      if (typeof sample.props.text === "string") props.text = "Nighty";
+      applyIcon(sample.props, props, graphic);
+      return r.React.cloneElement(sample, props, toolbarGraphic());
     }
     function nightyRecord(sample) {
-      const next = { ...sample, key: "mime-nighty-profile-button", id: "mime-nighty-profile-button", accessibilityLabel: "Nighty", onPress: () => {
-        if (r.active && store.showNightyButton) openNighty();
-      } };
-      if (typeof sample.label === "string") next.label = "Nighty";
-      if ("icon" in sample) next.icon = ToolbarIcon;
-      if ("Icon" in sample) next.Icon = ToolbarIcon;
-      if ("IconComponent" in sample) next.IconComponent = ToolbarIcon;
+      const graphic = toolbarGraphic();
+      const next = applyPress(sample, applyIcon(sample, {
+        ...sample,
+        accessibilityLabel: "Nighty",
+        accessibilityHint: "Open Nighty"
+      }, graphic));
+      if ("label" in sample) next.label = "Nighty";
+      if ("text" in sample) next.text = "Nighty";
+      if ("title" in sample && typeof sample.title === "string") next.title = "Nighty";
       return next;
     }
     function applyToolbar(element) {
@@ -1095,6 +1122,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "blue", customIconUrl: "", showNightyButton: true };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.0.3", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.0.4", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();

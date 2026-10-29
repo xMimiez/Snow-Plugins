@@ -433,12 +433,17 @@ test('Nighty profile toggle replaces the Settings button beside Quests or Shop a
     assert.equal(tree.toJSON().children[1].props.accessibilityLabel,'Nighty');
     await Renderer.act(async()=>tree.unmount());
     const actionRow=()=>React.createElement('View',{actions:[
-        {key:'shop',label:'Shop',onPress(){}},{key:'settings',label:'Settings',onPress(){}},
+        {key:'shop',id:'shop',label:'Shop',icon:'shop',onPress(){}},{key:'settings',id:'settings',label:'Settings',icon:'gear',onPress(){}},
     ]});
     await Renderer.act(async()=>{tree=Renderer.create(actionRow());});
-    assert.equal(tree.toJSON().props.actions[1].label,'Nighty');
-    assert.equal(tree.toJSON().props.actions[1].accessibilityLabel,'Nighty');
-    await Renderer.act(async()=>tree.unmount());
+    const taken=tree.toJSON().props.actions[1];
+    assert.equal(taken.label,'Nighty');
+    assert.equal(taken.id,'settings');
+    assert.equal(taken.icon.type,'View');
+    assert.equal(taken.icon.props.style.width,32);
+    await Renderer.act(async()=>taken.onPress());
+    assert.equal(sheets.size,1);
+    await Renderer.act(async()=>tree.unmount());sheets.clear();
     await Renderer.act(async()=>{tree=Renderer.create(React.createElement(plugin.Settings));});
     assert(tree.root.findAllByType('Switch').some(row=>row.props.label==='Nighty instead of Settings'&&row.props.value===true));
     await Renderer.act(async()=>tree.unmount());
