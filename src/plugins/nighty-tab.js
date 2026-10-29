@@ -324,24 +324,24 @@ export default function NightyTab(r) {
         if (Array.isArray(style)) return Object.assign({}, ...style.map(flatStyle));
         return typeof style === 'object' ? style : {};
     }
-    // Native text. Cloning the sibling caption drops the string on device, and a design-system color prop is not a native color.
+    // The name is pinned inside the button. A second in-flow line is what the pill clips off.
+    // A guessed font plus a tight line height also draws nothing, so the font is copied or left unset.
     function profileLabel(sample) {
         const flat = flatStyle(findCaption(sample)?.props?.style);
-        const fontSize = typeof flat.fontSize === 'number' && flat.fontSize >= 9 && flat.fontSize <= 13 ? flat.fontSize : 11;
-        const lineHeight = typeof flat.lineHeight === 'number' && flat.lineHeight >= fontSize && flat.lineHeight <= 16 ? flat.lineHeight : fontSize + 2;
-        return h(RN.Text, {
-            numberOfLines: 1,
-            allowFontScaling: false,
-            style: {
-                fontFamily: typeof flat.fontFamily === 'string' ? flat.fontFamily : 'gg sans',
-                fontSize,
-                lineHeight,
-                fontWeight: flat.fontWeight || '700',
-                color: typeof flat.color === 'string' ? flat.color : '#FFFFFF',
-                textAlign: 'center',
-                marginTop: 1,
-            },
-        }, 'Nighty');
+        const fontSize = typeof flat.fontSize === 'number' && flat.fontSize >= 9 && flat.fontSize <= 14 ? flat.fontSize : 12;
+        const style = {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: 3,
+            textAlign: 'center',
+            fontSize,
+            fontWeight: flat.fontWeight || '700',
+            color: typeof flat.color === 'string' ? flat.color : '#FFFFFF',
+        };
+        if (typeof flat.fontFamily === 'string') style.fontFamily = flat.fontFamily;
+        if (typeof flat.lineHeight === 'number' && flat.lineHeight >= fontSize && flat.lineHeight <= fontSize + 6) style.lineHeight = flat.lineHeight;
+        return h(RN.Text, { numberOfLines: 1, allowFontScaling: false, style }, 'Nighty');
     }
     function captionText(node) {
         const kids = node?.props?.children;
@@ -387,7 +387,18 @@ export default function NightyTab(r) {
                 if (!r.active || !store.showNightyButton) return;
                 if (!openNighty()) setOpen(true);
             },
-            style: { flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
+            style: {
+                flex: 1,
+                flexDirection: 'column',
+                alignItems: 'center',
+                alignSelf: 'stretch',
+                justifyContent: 'flex-start',
+                height: '100%',
+                minHeight: 44,
+                paddingTop: 6,
+                position: 'relative',
+                overflow: 'visible',
+            },
         },
         profileMark(),
         profileLabel(sample),
