@@ -291,61 +291,21 @@ export default function NightyTab(r) {
             resizeMode: 'contain',
             fadeDuration: 0,
             accessibilityIgnoresInvertColors: true,
-            style: { width: 30, height: 20 },
+            style: { width: 48, height: 32 },
         });
     }
+    // Taller than the mark, with contain, so the pill can clip the frame without cutting the logo.
     function profileImage() {
         const uri = iconUrl();
         if (!uri) return null;
-        return h(RN.Image, {
-            source: { uri },
-            resizeMode: 'contain',
-            fadeDuration: 0,
-            accessibilityIgnoresInvertColors: true,
-            style: { width: 30, height: 20 },
-        });
-    }
-    function findCaption(node, depth = 0) {
-        if (!node || depth > 8 || typeof node !== 'object') return null;
-        const content = captionText(node);
-        if (content && content !== 'Nighty' && content.length <= 24 && (isSettingsText(content) || isOtherText(content))) return node;
-        const kids = node.props?.children;
-        const list = Array.isArray(kids) ? kids : kids && typeof kids === 'object' ? [kids] : [];
-        for (const kid of list) {
-            const found = findCaption(kid, depth + 1);
-            if (found) return found;
-        }
-        return null;
-    }
-    function flatStyle(style) {
-        if (!style) return {};
-        if (Array.isArray(style)) return Object.assign({}, ...style.map(flatStyle));
-        return typeof style === 'object' ? style : {};
-    }
-    // Discord's own text. The row layout that showed this word used the same component.
-    // The name sits in the same view as the logo so the pill draws them together.
-    function profileLabel(sample) {
-        const flat = flatStyle(findCaption(sample)?.props?.style);
-        const fontSize = typeof flat.fontSize === 'number' && flat.fontSize >= 9 && flat.fontSize <= 14 ? flat.fontSize : 12;
-        const style = {
-            textAlign: 'center',
-            marginTop: 2,
-            fontSize,
-            fontWeight: flat.fontWeight || '700',
-            color: typeof flat.color === 'string' ? flat.color : '#FFFFFF',
-        };
-        if (typeof flat.fontFamily === 'string') style.fontFamily = flat.fontFamily;
-        if (typeof flat.lineHeight === 'number' && flat.lineHeight >= fontSize && flat.lineHeight <= fontSize + 6) style.lineHeight = flat.lineHeight;
-        return h(Text, { variant: 'text-xs/semibold', color: 'text-normal', numberOfLines: 1, style }, 'Nighty');
-    }
-    function profileStack(sample) {
-        return h(RN.View, { style: { alignItems: 'center', justifyContent: 'center' } }, profileImage(), profileLabel(sample));
-    }
-    function captionText(node) {
-        const kids = node?.props?.children;
-        if (typeof kids === 'string' || typeof kids === 'number') return String(kids);
-        if (!Array.isArray(kids)) return '';
-        return kids.filter(kid => typeof kid === 'string' || typeof kid === 'number').join('');
+        return h(RN.View, { style: { width: 52, height: 40, alignItems: 'center', justifyContent: 'center', overflow: 'visible' } },
+            h(RN.Image, {
+                source: { uri },
+                resizeMode: 'contain',
+                fadeDuration: 0,
+                accessibilityIgnoresInvertColors: true,
+                style: { width: 48, height: 32 },
+            }));
     }
     // Discord's header close control is the X. It replaces the back chevron.
     function discordClose(onClose) {
@@ -385,9 +345,9 @@ export default function NightyTab(r) {
                 if (!r.active || !store.showNightyButton) return;
                 if (!openNighty()) setOpen(true);
             },
-            style: { flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
+            style: { flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', overflow: 'visible' },
         },
-        profileStack(sample),
+        profileImage(),
         open && Modal ? h(Modal, {
             visible: true,
             animationType: 'slide',
