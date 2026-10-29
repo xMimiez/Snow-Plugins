@@ -130,7 +130,7 @@ export default function NightyTab(r) {
     const { h, React, RN, store } = r;
     const { Page, Text, Button, Input, Toggle } = ui(r);
     const iconUrl = () => store.iconType === 'custom' ? pageUrl(store.customIconUrl)
-        : `https://raw.githubusercontent.com/aboveproof/Equicord-Nighty-Tab/main/asset/icon${store.iconType === 'grayscale' ? '-grayscale' : ''}.png`;
+        : `https://raw.githubusercontent.com/xMimiez/Nighty-Tab-Plugin/main/asset/icon${store.iconType === 'grayscale' ? '-grayscale' : ''}.png`;
     function Icon() {
         r.useRefresh();
         const uri = iconUrl();
@@ -152,6 +152,40 @@ export default function NightyTab(r) {
                 allowed_mentions: { parse: [], replied_user: false },
             } });
         } finally { sending.delete(message.id); }
+    }
+    function pageHost() {
+        const src = pageUrl(store.url);
+        if (!src) return '';
+        try { return new URL(src).host; } catch { return ''; }
+    }
+    function cleanToken(value) {
+        if (typeof value !== 'string') return '';
+        const token = value.trim();
+        if (token.length < 8 || token.length > 4096 || !/^[\w.~+/-]+=*$/.test(token)) return '';
+        return token;
+    }
+    function sessionToken() {
+        const host = pageHost();
+        const saved = store.sessions?.[host];
+        return host && cleanToken(saved) ? cleanToken(saved) : '';
+    }
+    // The Nighty page keeps its own access_token. Discord cookies stay out of this WebView.
+    function sessionScript(token) {
+        const saved = JSON.stringify(cleanToken(token) || '');
+        return `(() => { try { var saved = ${saved}; if (saved) { var secure = location.protocol === 'https:' ? '; Secure' : ''; document.cookie = 'access_token=' + saved + '; Path=/; Max-Age=2592000; SameSite=Lax' + secure; try { localStorage.setItem('access_token', saved); } catch (e) {} } if (window.__mimeNightySession) return true; window.__mimeNightySession = true; var send = function (value) { if (typeof value !== 'string' || !value || !window.ReactNativeWebView) return; window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'NIGHTY_TOKEN', token: value })); }; var orig = window.fetch; if (typeof orig === 'function') { window.fetch = function () { var args = arguments; return Promise.resolve(orig.apply(this, args)).then(function (res) { try { var first = args[0]; var url = typeof first === 'string' ? first : (first && first.url) || ''; if (String(url).indexOf('/api/login') !== -1 && res && res.clone) res.clone().json().then(function (data) { if (data && typeof data.access_token === 'string') send(data.access_token); }).catch(function () {}); } catch (e) {} return res; }); }; } } catch (e) {} return true; })();`;
+    }
+    function onSessionMessage(event) {
+        if (!r.active) return;
+        const host = pageHost();
+        if (!host) return;
+        let data;
+        try { data = JSON.parse(event?.nativeEvent?.data || ''); } catch { return; }
+        if (data?.type !== 'NIGHTY_TOKEN') return;
+        const token = cleanToken(data.token);
+        if (!token) return;
+        const current = store.sessions && typeof store.sessions === 'object' ? store.sessions : {};
+        if (current[host] === token) return;
+        r.set('sessions', { ...current, [host]: token });
     }
     function settingsHeight() {
         // The settings screen fills the app window. Match that, not a shorter sheet.
@@ -175,9 +209,13 @@ export default function NightyTab(r) {
             !src ? h(Text, null, 'Set a valid HTTP or HTTPS URL in Nighty Tab settings.')
                 : !WebView ? h(Text, null, 'WebView is unavailable in this Snow build.')
                     : h(WebView, {
-                        key: src, source: { uri: src }, style: { flex: 1, height, width: '100%' },
+                        key: src, source: { uri: src, ...(sessionToken() ? { headers: { Cookie: `access_token=${sessionToken()}` } } : {}) },
+                        style: { flex: 1, height, width: '100%' },
                         originWhitelist: ['http://*', 'https://*'], javaScriptEnabled: true, domStorageEnabled: true,
-                        sharedCookiesEnabled: false, thirdPartyCookiesEnabled: false, startInLoadingState: true,
+                        sharedCookiesEnabled: false, thirdPartyCookiesEnabled: false, incognito: false, startInLoadingState: true,
+                        injectedJavaScriptBeforeContentLoaded: sessionScript(sessionToken()),
+                        injectedJavaScript: sessionScript(sessionToken()),
+                        onMessage: onSessionMessage,
                         onShouldStartLoadWithRequest: allow,
                         onError: event => setError(event.nativeEvent?.description || 'Could not load Nighty.'),
                         onHttpError: event => setError(`Nighty returned HTTP ${event.nativeEvent?.statusCode}.`),
@@ -271,16 +309,18 @@ export default function NightyTab(r) {
             style: { width: size, height: size },
         });
     }
-    // The chosen settings icon is a 24×16 mark. Leave its colors alone. A tint turns it into a white box.
+    // Native 24×16 asset, centered in the same 24 slot as the other glyphs. Scaling it up makes it blurry.
     function profileMark() {
         const uri = iconUrl();
         if (!uri) return null;
-        return h(RN.Image, {
-            source: { uri },
-            resizeMode: 'contain',
-            accessibilityIgnoresInvertColors: true,
-            style: { width: 32, height: 22 },
-        });
+        return h(RN.View, { style: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' } },
+            h(RN.Image, {
+                source: { uri },
+                resizeMode: 'contain',
+                fadeDuration: 0,
+                accessibilityIgnoresInvertColors: true,
+                style: { width: 24, height: 16 },
+            }));
     }
     let seenLabel = null;
     function captionText(node) {
@@ -306,21 +346,27 @@ export default function NightyTab(r) {
         const list = Array.isArray(kids) ? kids : kids && typeof kids === 'object' ? [kids] : [];
         for (const kid of list) rememberLabels(kid, depth + 1);
     }
-    function profileLabel(labelProps) {
-        if (labelProps?.type && (labelProps.style || labelProps.variant)) {
-            return h(labelProps.type, {
-                style: labelProps.style,
-                variant: labelProps.variant,
-                color: labelProps.color,
-                numberOfLines: labelProps.numberOfLines || 1,
-            }, 'Nighty');
-        }
+    function copiedFont(style) {
+        const flat = flatStyle(style);
         const fonts = r.find('PRIMARY_SEMIBOLD') || r.find('PRIMARY_MEDIUM', 'PRIMARY_NORMAL') || r.find('PRIMARY_BOLD');
-        const fontFamily = fonts?.PRIMARY_SEMIBOLD || fonts?.PRIMARY_MEDIUM || fonts?.PRIMARY_BOLD;
-        return h(RN.Text, {
-            numberOfLines: 1,
-            style: { fontFamily, fontSize: 12, lineHeight: 16, textAlign: 'center', marginTop: 4, color: '#FFFFFF' },
-        }, 'Nighty');
+        const next = {
+            fontFamily: fonts?.PRIMARY_SEMIBOLD || fonts?.PRIMARY_MEDIUM || fonts?.PRIMARY_BOLD,
+            fontSize: 12,
+            lineHeight: 16,
+            textAlign: 'center',
+            marginTop: 2,
+            color: '#FFFFFF',
+        };
+        for (const key of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing']) {
+            const value = flat[key];
+            if (typeof value === 'string' || typeof value === 'number') next[key] = value;
+        }
+        if (typeof flat.color === 'string' && flat.color) next.color = flat.color;
+        if (typeof next.fontSize === 'number' && (next.fontSize < 10 || next.fontSize > 20)) next.fontSize = 12;
+        return next;
+    }
+    function profileLabel(labelProps) {
+        return h(RN.Text, { numberOfLines: 1, allowFontScaling: false, style: copiedFont(labelProps?.style) }, 'Nighty');
     }
     // Discord's header close control is the X. It replaces the back chevron.
     function discordClose(onClose) {
@@ -360,7 +406,7 @@ export default function NightyTab(r) {
                 if (!r.active || !store.showNightyButton) return;
                 if (!openNighty()) setOpen(true);
             },
-            style: { flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 56, paddingVertical: 8 },
+            style: { flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 4, paddingBottom: 4 },
         },
         profileMark(),
         profileLabel(labelProps),
@@ -436,4 +482,4 @@ export default function NightyTab(r) {
         r.status.profileButton = patched === false ? 'unavailable' : (r.status.profileButton === 'replaced' ? 'replaced' : 'patched');
     } };
 }
-NightyTab.defaults = { url: '', scriptUtils: false, nightyPrefix: '.', iconType: 'blue', customIconUrl: '', showNightyButton: true };
+NightyTab.defaults = { url: '', scriptUtils: false, nightyPrefix: '.', iconType: 'blue', customIconUrl: '', showNightyButton: true, sessions: {} };
