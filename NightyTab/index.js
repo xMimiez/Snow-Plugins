@@ -1003,23 +1003,19 @@ var plugin = (() => {
         resizeMode: "contain",
         fadeDuration: 0,
         accessibilityIgnoresInvertColors: true,
-        style: { width: 22, height: 16 }
+        style: { width: 30, height: 20 }
       });
     }
-    function profileMark() {
+    function profileImage() {
       const uri = iconUrl();
       if (!uri) return null;
-      return h(
-        RN.View,
-        { style: { width: 24, height: 18, alignItems: "center", justifyContent: "center" } },
-        h(RN.Image, {
-          source: { uri },
-          resizeMode: "contain",
-          fadeDuration: 0,
-          accessibilityIgnoresInvertColors: true,
-          style: { width: 22, height: 16 }
-        })
-      );
+      return h(RN.Image, {
+        source: { uri },
+        resizeMode: "contain",
+        fadeDuration: 0,
+        accessibilityIgnoresInvertColors: true,
+        style: { width: 30, height: 20 }
+      });
     }
     function findCaption(node, depth = 0) {
       if (!node || depth > 8 || typeof node !== "object") return null;
@@ -1042,18 +1038,18 @@ var plugin = (() => {
       const flat = flatStyle(findCaption(sample)?.props?.style);
       const fontSize = typeof flat.fontSize === "number" && flat.fontSize >= 9 && flat.fontSize <= 14 ? flat.fontSize : 12;
       const style = {
-        position: "absolute",
-        left: 0,
-        right: 0,
-        bottom: 3,
         textAlign: "center",
+        marginTop: 2,
         fontSize,
         fontWeight: flat.fontWeight || "700",
         color: typeof flat.color === "string" ? flat.color : "#FFFFFF"
       };
       if (typeof flat.fontFamily === "string") style.fontFamily = flat.fontFamily;
       if (typeof flat.lineHeight === "number" && flat.lineHeight >= fontSize && flat.lineHeight <= fontSize + 6) style.lineHeight = flat.lineHeight;
-      return h(RN.Text, { numberOfLines: 1, allowFontScaling: false, style }, "Nighty");
+      return h(Text, { variant: "text-xs/semibold", color: "text-normal", numberOfLines: 1, style }, "Nighty");
+    }
+    function profileStack(sample) {
+      return h(RN.View, { style: { alignItems: "center", justifyContent: "center" } }, profileImage(), profileLabel(sample));
     }
     function captionText(node) {
       const kids = node?.props?.children;
@@ -1103,21 +1099,9 @@ var plugin = (() => {
             if (!r.active || !store.showNightyButton) return;
             if (!openNighty()) setOpen(true);
           },
-          style: {
-            flex: 1,
-            flexDirection: "column",
-            alignItems: "center",
-            alignSelf: "stretch",
-            justifyContent: "flex-start",
-            height: "100%",
-            minHeight: 44,
-            paddingTop: 6,
-            position: "relative",
-            overflow: "visible"
-          }
+          style: { flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center" }
         },
-        profileMark(),
-        profileLabel(sample),
+        profileStack(sample),
         open && Modal ? h(Modal, {
           visible: true,
           animationType: "slide",
@@ -1205,6 +1189,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "blue", customIconUrl: "", showNightyButton: true, sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.5.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.6.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();

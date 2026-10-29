@@ -291,21 +291,19 @@ export default function NightyTab(r) {
             resizeMode: 'contain',
             fadeDuration: 0,
             accessibilityIgnoresInvertColors: true,
-            style: { width: 22, height: 16 },
+            style: { width: 30, height: 20 },
         });
     }
-    // The artwork is a wide transparent mark. Keep the slot short so the name still fits in the pill.
-    function profileMark() {
+    function profileImage() {
         const uri = iconUrl();
         if (!uri) return null;
-        return h(RN.View, { style: { width: 24, height: 18, alignItems: 'center', justifyContent: 'center' } },
-            h(RN.Image, {
-                source: { uri },
-                resizeMode: 'contain',
-                fadeDuration: 0,
-                accessibilityIgnoresInvertColors: true,
-                style: { width: 22, height: 16 },
-            }));
+        return h(RN.Image, {
+            source: { uri },
+            resizeMode: 'contain',
+            fadeDuration: 0,
+            accessibilityIgnoresInvertColors: true,
+            style: { width: 30, height: 20 },
+        });
     }
     function findCaption(node, depth = 0) {
         if (!node || depth > 8 || typeof node !== 'object') return null;
@@ -324,24 +322,24 @@ export default function NightyTab(r) {
         if (Array.isArray(style)) return Object.assign({}, ...style.map(flatStyle));
         return typeof style === 'object' ? style : {};
     }
-    // The name is pinned inside the button. A second in-flow line is what the pill clips off.
-    // A guessed font plus a tight line height also draws nothing, so the font is copied or left unset.
+    // Discord's own text. The row layout that showed this word used the same component.
+    // The name sits in the same view as the logo so the pill draws them together.
     function profileLabel(sample) {
         const flat = flatStyle(findCaption(sample)?.props?.style);
         const fontSize = typeof flat.fontSize === 'number' && flat.fontSize >= 9 && flat.fontSize <= 14 ? flat.fontSize : 12;
         const style = {
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: 3,
             textAlign: 'center',
+            marginTop: 2,
             fontSize,
             fontWeight: flat.fontWeight || '700',
             color: typeof flat.color === 'string' ? flat.color : '#FFFFFF',
         };
         if (typeof flat.fontFamily === 'string') style.fontFamily = flat.fontFamily;
         if (typeof flat.lineHeight === 'number' && flat.lineHeight >= fontSize && flat.lineHeight <= fontSize + 6) style.lineHeight = flat.lineHeight;
-        return h(RN.Text, { numberOfLines: 1, allowFontScaling: false, style }, 'Nighty');
+        return h(Text, { variant: 'text-xs/semibold', color: 'text-normal', numberOfLines: 1, style }, 'Nighty');
+    }
+    function profileStack(sample) {
+        return h(RN.View, { style: { alignItems: 'center', justifyContent: 'center' } }, profileImage(), profileLabel(sample));
     }
     function captionText(node) {
         const kids = node?.props?.children;
@@ -387,21 +385,9 @@ export default function NightyTab(r) {
                 if (!r.active || !store.showNightyButton) return;
                 if (!openNighty()) setOpen(true);
             },
-            style: {
-                flex: 1,
-                flexDirection: 'column',
-                alignItems: 'center',
-                alignSelf: 'stretch',
-                justifyContent: 'flex-start',
-                height: '100%',
-                minHeight: 44,
-                paddingTop: 6,
-                position: 'relative',
-                overflow: 'visible',
-            },
+            style: { flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
         },
-        profileMark(),
-        profileLabel(sample),
+        profileStack(sample),
         open && Modal ? h(Modal, {
             visible: true,
             animationType: 'slide',

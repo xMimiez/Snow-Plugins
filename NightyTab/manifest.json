@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.nightytab",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "display": {
     "name": "Nighty Tab",
     "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.",
