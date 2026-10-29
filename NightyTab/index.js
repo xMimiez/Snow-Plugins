@@ -678,6 +678,10 @@ var plugin = (() => {
     });
   }
 
+  // project:src/plugins/nighty-icon.js
+  var blueIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEgAAAAwCAYAAACynDzrAAAE/ElEQVR42u3a/1OTdQDAcf8G2cZg44sgKpoKusmXNmBjg01EA9O6k8y66yrtsssvKfmFVOzwstNIUhwgCmSeUlCmVl5Jmtel55crT8/TFJRUAjR2GyHydBR777MfdtENf+rzw+uXzz33fJ69n+Ozz/OMUWHqCOXfjBaI40kFz+H5xh/x0pkeFF0YwLzLfjOvuJF74gomz30B4lwqTSSGc80B16/yU+likXH4Iszl1VBHRmOUDCQDPZ5AqnAdxPFo0yLk7vYitcLPuLMT80498rugwPlzH/KvKX7Hb0KfmIyADzmMWCqtHuJ44sKVmHNeQdE1P+NrJZCBZKARDDQ6iPCYBBiWnIOpWMHUVdehW3EGlgY3Zrc8Qs7JbthOdmF2ywAmzHoFqsEPPUQdrkfAuEYHcVybMAU5tTeQ3zyA2Ye9eOrTVshAMtAIBlINnniIOB6X+TIcZV7kl3TAuvEepq25BOPKJjgPPYDtSCfsn7fjme8UJC8qQUAIbRQCw+kgjj9RtBX2OgXOOi8Km7rwdPN1yEAyUIiBgu2S1bo4pK68CMe2AeRvvovC9/sw48V6xKcXIHd/N+yNncg+1Arb972YvHQbgq1BYYPbkCHiMVFTzbDWdiC95qFflRs5n/UjbU0dZCAZKMRAwXbMiblLMXOXAsfOfjgrPbBWuBFtLIR+fBKy6n6Hrf4usvfehPnrPkxevQ8qlRbiWhNs3TEsq4X5UA9SKztgqXIjs/I29NOyIQPJQKEGEh78tNETkFdyFgU1/bDvuo+s/f1I3twCtS4W2thJSPnoEmwNXXC62v0OPoRxdRM02iiBHmKUmLS5MFW3Iqv6FuyVbZhb04WUojKI55SBZKBQA6kjFZ9ps5ZhwT4FeZV/wOHqgb3Wg/iMIojn1GhjkLbhW9ga3LBX3YPzkz6kbTgB8eaJ51drY2Fc9w1s9W44Ku4iv+o+HNvPQx+XjDBVBGQgGSjEQGpdguJjf+8iCg4oyHV1Y2aDgrTVxxA2+IA7RHwvI06Wurgetvo+mPd0wl7XC1PZOUQkTIcYaKzzdWS5PLDs7oKt4j4cVf1IKFiGgOjhUZCBZKAQA419tljxsRxWYD3wJ3I+9nPs7UV8+nwErgsxCFjj5r8La30/DNWdyNjjhXn7TUSMM0ATNR4zNp2F2eWFqbwDll29MKw9BXVkHMJUkRCvWQaSgUIMNNH1i+JjPKYg9aAHOU0KUt/6AuJXeJg6EuLfsDhZYu4SWBoUTK/thrm6B1aXB/qJT2JM3nKk7HTDsOUWLDvccFT0IM60AAE3VaOHDCQDjWCgjJZ+xcd4pBvmr7ywNnoQmzkPgeuO/5eGsL9fhf5DPCbOWAirqxfpLjesOx7AUe6X6FyBpBWnkVJ6G4b1V2Ev92DG4kaINzXg1a2wHZGBZKARDJR/vF3xsf/ghfMnBaYtRxGwYw4ygXiMOFnUuHRklt2B+QMv7Fs6kVN6B5a1l5FefANpq67CVPwrbJvboZ+Sh+GsOzKQDDSCgQxvlio+C9sUzDrlQXzmHAROIP67iX9c/MoXY2kix2DKq80wfaggc1M7bBsEG39D1vo2WN7xs5V6MClvK/5rFBlIBhrBQBr9GMUnu6YZ1uqjGE6UYIKtRxETM5C85EuY3r6OjLWtyFp3G5lr2pD+xmkkWpZDHR4D8RqCPZTKQDLQYwo0nIP+z2QgGSg0fwGmdpYWb+0FoAAAAABJRU5ErkJggg==";
+  var grayIcon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEgAAAAwCAYAAACynDzrAAADzklEQVR42u3bR0ssQRiFYX+EOYJ5IQiKGHAhGMAAgii6caNiQDE75ow5ixkzCiqiiBsDIoIbf9Xc1RzeC1PQ3tbVrcWzcBi7q07bX31TPQYEBQV5/1VpaamcnJzI8/OzvL6+yvv7u7y9vcn19bWUlZUJzxUcHCzfHWdgYKCEh4fL8fGxTE1NSVhYmATYgGxAvxNQSEiI8PWsrCxZX1+XhYUFvx4eHuTl5UUY4sfHh1xdXUlSUpJwkk7CMo2/srJSnp6e5PPzU+rq6sQGZAP6pYAoOjpampqaxOPxSGdnpzQ3N8vOzo7c3d3J7e2tX3xPUVGROJm8Kbi4uDjZ3NyU8/Nzubi4ENYmG5AN6AcDMp0gNzdXpqenZXR01K+enh5pa2uTo6Mj4eDYIjCgmpoa4XhCQ0PFSXBVVVXCC7a7uytnZ2d+2YBsQD8YELHj7OjoEC7hk5OTwtdra2slMzNT9vf35fDwUA4ODoT1qL6+XkxBmC5qSkqKsO6wNVldXRVepK6uLrEB2YBcBmS6bwsKCsR00LW1NVlaWpK0tDRJSEiQra0t2d7eFk7g8vJSWL/YSXPMpvG3tLQILwDHyXktLy9Lamqq2IBsQC4D4j0cFRUlQ0NDwsmsrKzI3t6eDAwMCOtXTEyMzM3NCZdbDpStAGsfl3bTMp+RkSGmC8nxc17V1dXCY9qAbEAuA+IPxcXFwvuWEyDWlJycHDF1vf39/cIulsfkefl+XjzT8dnB8wKw7rDezc7OSmxsrLDe2YBsQC4DYr3gzj5rASfAbph7QKxlxJM1NDQIA9rY2BBObGxsTLinY2pHWGtYg0wBlZSUiKlTtwHZgFwGVF5e7vXhHg1rAZdzLo38IOpkv6aiokIYBJdehjUzMyPx8fESGRkpg4ODwlDYUvD4rFP84+CF/GuZtwHZgNwFND8/7/VhQKw1p6en0t7eLt/d+szPzxfWINYO1ju+npycLIWFhbK4uCisWXydH0Szs7PFyXazDcgG5DKgm5sbrw+3HfkgjdujTjpmU0Dp6eli2mPixIihcJ9oeHhY+CCTv8v2wjROYw2yAdmA3AXEr5vwod3j46PwoSDvVdMJTPdzYmKiTExMCJdkdvPj4+PCD669vb3S3d0tfJ2/yycc3/3Wmg3IBuQyoMbGRq/P19eX3N/fi6nuODkB38POld/i4kPHkZERv3iR2D1za5ihcG/LzZdBbUA2IJcBRUREeH34oY7dp5sTmN7PzpjLcF9fn7Du8KkJl/PW1lbJy8sT0/N703JuA7IB/VJAbv4V4X9gA7IBufMH8PHGrVkYWVcAAAAASUVORK5CYII=";
+
   // project:src/plugins/nighty-tab.js
   function pageUrl(value) {
     try {
@@ -806,7 +810,7 @@ var plugin = (() => {
   function NightyTab(r) {
     const { h, React, RN, store } = r;
     const { Page, Text, Button, Input, Toggle } = ui(r);
-    const iconUrl = () => store.iconType === "custom" ? pageUrl(store.customIconUrl) : `https://raw.githubusercontent.com/xMimiez/Nighty-Tab-Plugin/main/asset/icon${store.iconType === "grayscale" ? "-grayscale" : ""}.png`;
+    const iconUrl = () => store.iconType === "custom" ? pageUrl(store.customIconUrl) : store.iconType === "grayscale" ? grayIcon : blueIcon;
     function Icon() {
       r.useRefresh();
       const uri = iconUrl();
@@ -986,34 +990,15 @@ var plugin = (() => {
         if (r.active && store.showNightyButton && !openNighty()) openSheet();
       };
     }
-    function flatStyle(style) {
-      const list = Array.isArray(style) ? style : [style];
-      const next = {};
-      for (const item of list) if (item && typeof item === "object") Object.assign(next, item);
-      return next;
-    }
-    function iconSize(node, depth = 0) {
-      if (!node || depth > 5) return null;
-      const props = node.props || {};
-      const style = flatStyle(props.style);
-      if (typeof style.width === "number" && typeof style.height === "number") return { width: style.width, height: style.height };
-      if (typeof props.size === "number") return { width: props.size, height: props.size };
-      const kids = Array.isArray(props.children) ? props.children : props.children ? [props.children] : [];
-      for (const kid of kids) {
-        const found = iconSize(kid, depth + 1);
-        if (found) return found;
-      }
-      return null;
-    }
-    function toolbarIcon(sample) {
+    function toolbarIcon() {
       const uri = iconUrl();
-      const size = iconSize(sample)?.width || 32;
       if (!uri) return null;
       return h(RN.Image, {
         source: { uri },
         resizeMode: "contain",
+        fadeDuration: 0,
         accessibilityIgnoresInvertColors: true,
-        style: { width: size, height: size }
+        style: { width: 24, height: 16 }
       });
     }
     function profileMark() {
@@ -1030,6 +1015,26 @@ var plugin = (() => {
           style: { width: 24, height: 16 }
         })
       );
+    }
+    function findCaption(node, depth = 0) {
+      if (!node || depth > 8 || typeof node !== "object") return null;
+      const content = captionText(node);
+      if (content && content !== "Nighty" && content.length <= 24 && (isSettingsText(content) || isOtherText(content)) && node.type) return node;
+      const kids = node.props?.children;
+      const list = Array.isArray(kids) ? kids : kids && typeof kids === "object" ? [kids] : [];
+      for (const kid of list) {
+        const found = findCaption(kid, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    function profileLabel(sample) {
+      const found = findCaption(sample);
+      if (found?.type && found.props) {
+        const { children, ...rest } = found.props;
+        return h(found.type, rest, "Nighty");
+      }
+      return h(Text, { variant: "text-xs/semibold", color: "text-normal", style: { textAlign: "center", marginTop: 2 } }, "Nighty");
     }
     let seenLabel = null;
     function captionText(node) {
@@ -1054,28 +1059,6 @@ var plugin = (() => {
       const kids = node.props?.children;
       const list = Array.isArray(kids) ? kids : kids && typeof kids === "object" ? [kids] : [];
       for (const kid of list) rememberLabels(kid, depth + 1);
-    }
-    function copiedFont(style) {
-      const flat = flatStyle(style);
-      const fonts = r.find("PRIMARY_SEMIBOLD") || r.find("PRIMARY_MEDIUM", "PRIMARY_NORMAL") || r.find("PRIMARY_BOLD");
-      const next = {
-        fontFamily: fonts?.PRIMARY_SEMIBOLD || fonts?.PRIMARY_MEDIUM || fonts?.PRIMARY_BOLD,
-        fontSize: 12,
-        lineHeight: 16,
-        textAlign: "center",
-        marginTop: 2,
-        color: "#FFFFFF"
-      };
-      for (const key of ["fontFamily", "fontSize", "fontWeight", "fontStyle", "lineHeight", "letterSpacing"]) {
-        const value = flat[key];
-        if (typeof value === "string" || typeof value === "number") next[key] = value;
-      }
-      if (typeof flat.color === "string" && flat.color) next.color = flat.color;
-      if (typeof next.fontSize === "number" && (next.fontSize < 10 || next.fontSize > 20)) next.fontSize = 12;
-      return next;
-    }
-    function profileLabel(labelProps) {
-      return h(RN.Text, { numberOfLines: 1, allowFontScaling: false, style: copiedFont(labelProps?.style) }, "Nighty");
     }
     function discordClose(onClose) {
       const module = r.find("getRenderCloseButton") || r.find("getHeaderCloseButton");
@@ -1102,7 +1085,7 @@ var plugin = (() => {
       if (typeof control === "function") return h(control);
       return control || closeMark(onClose);
     }
-    function NightyProfileButton({ labelProps }) {
+    function NightyProfileButton({ sample }) {
       r.useRefresh();
       const [open, setOpen] = React.useState(false);
       const Modal = RN.Modal;
@@ -1119,10 +1102,10 @@ var plugin = (() => {
             if (!r.active || !store.showNightyButton) return;
             if (!openNighty()) setOpen(true);
           },
-          style: { flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center", paddingTop: 4, paddingBottom: 4 }
+          style: { flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center" }
         },
         profileMark(),
-        profileLabel(labelProps),
+        profileLabel(sample),
         open && Modal ? h(Modal, {
           visible: true,
           animationType: "slide",
@@ -1137,21 +1120,25 @@ var plugin = (() => {
         )) : null
       );
     }
-    function nightyControl() {
-      return h(NightyProfileButton, { key: "mime-nighty-profile-button", labelProps: seenLabel });
+    function nightyControl(sample) {
+      return h(NightyProfileButton, { key: "mime-nighty-profile-button", sample });
     }
     function nightyRecord(sample) {
-      const image = toolbarIcon(sample);
-      return {
-        key: "mime-nighty-profile-button",
-        id: "mime-nighty-profile-button",
-        label: "Nighty",
-        accessibilityLabel: "Nighty",
-        accessibilityHint: "Open Nighty",
-        IconComponent: Icon,
-        icon: typeof sample?.icon === "function" ? Icon : image,
-        onPress: press()
-      };
+      const image = toolbarIcon();
+      const record = sample && typeof sample === "object" ? { ...sample } : {};
+      for (const key of Object.keys(record)) {
+        if (typeof record[key] === "string" && isSettingsText(record[key])) record[key] = "Nighty";
+      }
+      record.key = "mime-nighty-profile-button";
+      record.id = "mime-nighty-profile-button";
+      record.label = "Nighty";
+      record.text = "Nighty";
+      record.accessibilityLabel = "Nighty";
+      record.accessibilityHint = "Open Nighty";
+      record.IconComponent = Icon;
+      record.icon = typeof sample?.icon === "function" ? Icon : image;
+      record.onPress = press();
+      return record;
     }
     function applyToolbar(element) {
       if (!r.active || !store.showNightyButton || !element?.props) return element;
@@ -1207,6 +1194,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "blue", customIconUrl: "", showNightyButton: true, sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.2.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.3.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();

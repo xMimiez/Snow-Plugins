@@ -424,7 +424,7 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     assert.deepEqual(slot.props.style,{width:24,height:24,alignItems:'center',justifyContent:'center'});
     const glyph=slot.children[0];
     assert.equal(glyph.type,'Image');
-    assert.match(glyph.props.source.uri,/xMimiez\/Nighty-Tab-Plugin\/main\/asset\/icon\.png$/);
+    assert.match(glyph.props.source.uri,/^data:image\/png;base64,/);
     assert.equal(glyph.props.tintColor,undefined);
     assert.deepEqual(glyph.props.style,{width:24,height:16});
     const label=bar.children[3].children[1];
@@ -487,7 +487,7 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     assert.equal(actions[2].label,'Nighty');
     assert.equal(actions[2].id,'mime-nighty-profile-button');
     assert.equal(actions[2].icon.type,'Image');
-    assert.match(actions[2].icon.props.source.uri,/icon\.png$/);
+    assert.match(actions[2].icon.props.source.uri,/^data:image\/png;base64,/);
     await Renderer.act(async()=>actions[1].onPress());
     assert.equal(sheets.size,0);
     await Renderer.act(async()=>actions[2].onPress());
@@ -518,7 +518,7 @@ test('Nighty profile button opens Nighty directly and leaves Settings alone',asy
     ]);
     let tree;await Renderer.act(async()=>{tree=Renderer.create(row());});
     assert.equal(tree.toJSON().children[2].children[0].children[0].props.tintColor,undefined);
-    assert.match(tree.toJSON().children[2].children[0].children[0].props.source.uri,/Nighty-Tab-Plugin\/main\/asset\/icon\.png$/);
+    assert.match(tree.toJSON().children[2].children[0].children[0].props.source.uri,/^data:image\/png;base64,/);
     assert.equal(tree.toJSON().children[2].children[1].children[0],'Nighty');
     assert.equal(tree.toJSON().children[2].children[1].type,'Text');
     assert.equal(tree.toJSON().children[2].props.style.flexDirection,'column');
@@ -558,7 +558,7 @@ test('Nighty adds its button inside the You screen without wrapping the screen',
     assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Nighty');
     assert.equal(tree.toJSON().children[2].type,'Pressable');
     assert.equal(tree.toJSON().children[2].children[0].type,'View');
-    assert.match(tree.toJSON().children[2].children[0].children[0].props.source.uri,/Nighty-Tab-Plugin\/main\/asset\/icon\.png$/);
+    assert.match(tree.toJSON().children[2].children[0].children[0].props.source.uri,/^data:image\/png;base64,/);
     assert.equal(tree.toJSON().children[2].children[0].children[0].props.tintColor,undefined);
     assert.equal(tree.toJSON().children[2].props.style.flexDirection,'column');
     assert.equal(tree.toJSON().children[2].children[1].type,'Text');

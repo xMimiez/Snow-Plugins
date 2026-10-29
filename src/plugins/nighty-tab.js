@@ -3,6 +3,7 @@
 import { ui } from '../runtime.js';
 import { registerSection } from '../settings-section.js';
 import { patchLazySheet } from '../action-sheet.js';
+import { blueIcon, grayIcon } from './nighty-icon.js';
 
 export function pageUrl(value) {
     try {
@@ -130,7 +131,7 @@ export default function NightyTab(r) {
     const { h, React, RN, store } = r;
     const { Page, Text, Button, Input, Toggle } = ui(r);
     const iconUrl = () => store.iconType === 'custom' ? pageUrl(store.customIconUrl)
-        : `https://raw.githubusercontent.com/xMimiez/Nighty-Tab-Plugin/main/asset/icon${store.iconType === 'grayscale' ? '-grayscale' : ''}.png`;
+        : store.iconType === 'grayscale' ? grayIcon : blueIcon;
     function Icon() {
         r.useRefresh();
         const uri = iconUrl();
@@ -278,38 +279,19 @@ export default function NightyTab(r) {
     function press() {
         return () => { if (r.active && store.showNightyButton && !openNighty()) openSheet(); };
     }
-    function flatStyle(style) {
-        const list = Array.isArray(style) ? style : [style];
-        const next = {};
-        for (const item of list) if (item && typeof item === 'object') Object.assign(next, item);
-        return next;
-    }
-    function iconSize(node, depth = 0) {
-        if (!node || depth > 5) return null;
-        const props = node.props || {};
-        const style = flatStyle(props.style);
-        if (typeof style.width === 'number' && typeof style.height === 'number') return { width: style.width, height: style.height };
-        if (typeof props.size === 'number') return { width: props.size, height: props.size };
-        const kids = Array.isArray(props.children) ? props.children : props.children ? [props.children] : [];
-        for (const kid of kids) {
-            const found = iconSize(kid, depth + 1);
-            if (found) return found;
-        }
-        return null;
-    }
     // Same artwork as the settings-row Icon, as a host Image so the toolbar can draw it directly.
-    function toolbarIcon(sample) {
+    function toolbarIcon() {
         const uri = iconUrl();
-        const size = iconSize(sample)?.width || 32;
         if (!uri) return null;
         return h(RN.Image, {
             source: { uri },
             resizeMode: 'contain',
+            fadeDuration: 0,
             accessibilityIgnoresInvertColors: true,
-            style: { width: size, height: size },
+            style: { width: 24, height: 16 },
         });
     }
-    // Native 24×16 asset, centered in the same 24 slot as the other glyphs. Scaling it up makes it blurry.
+    // 72×48 artwork in a 24×16 point box is 3 pixels per point, centered like the other glyphs.
     function profileMark() {
         const uri = iconUrl();
         if (!uri) return null;
@@ -321,6 +303,26 @@ export default function NightyTab(r) {
                 accessibilityIgnoresInvertColors: true,
                 style: { width: 24, height: 16 },
             }));
+    }
+    function findCaption(node, depth = 0) {
+        if (!node || depth > 8 || typeof node !== 'object') return null;
+        const content = captionText(node);
+        if (content && content !== 'Nighty' && content.length <= 24 && (isSettingsText(content) || isOtherText(content)) && node.type) return node;
+        const kids = node.props?.children;
+        const list = Array.isArray(kids) ? kids : kids && typeof kids === 'object' ? [kids] : [];
+        for (const kid of list) {
+            const found = findCaption(kid, depth + 1);
+            if (found) return found;
+        }
+        return null;
+    }
+    function profileLabel(sample) {
+        const found = findCaption(sample);
+        if (found?.type && found.props) {
+            const { children, ...rest } = found.props;
+            return h(found.type, rest, 'Nighty');
+        }
+        return h(Text, { variant: 'text-xs/semibold', color: 'text-normal', style: { textAlign: 'center', marginTop: 2 } }, 'Nighty');
     }
     let seenLabel = null;
     function captionText(node) {
@@ -346,28 +348,6 @@ export default function NightyTab(r) {
         const list = Array.isArray(kids) ? kids : kids && typeof kids === 'object' ? [kids] : [];
         for (const kid of list) rememberLabels(kid, depth + 1);
     }
-    function copiedFont(style) {
-        const flat = flatStyle(style);
-        const fonts = r.find('PRIMARY_SEMIBOLD') || r.find('PRIMARY_MEDIUM', 'PRIMARY_NORMAL') || r.find('PRIMARY_BOLD');
-        const next = {
-            fontFamily: fonts?.PRIMARY_SEMIBOLD || fonts?.PRIMARY_MEDIUM || fonts?.PRIMARY_BOLD,
-            fontSize: 12,
-            lineHeight: 16,
-            textAlign: 'center',
-            marginTop: 2,
-            color: '#FFFFFF',
-        };
-        for (const key of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing']) {
-            const value = flat[key];
-            if (typeof value === 'string' || typeof value === 'number') next[key] = value;
-        }
-        if (typeof flat.color === 'string' && flat.color) next.color = flat.color;
-        if (typeof next.fontSize === 'number' && (next.fontSize < 10 || next.fontSize > 20)) next.fontSize = 12;
-        return next;
-    }
-    function profileLabel(labelProps) {
-        return h(RN.Text, { numberOfLines: 1, allowFontScaling: false, style: copiedFont(labelProps?.style) }, 'Nighty');
-    }
     // Discord's header close control is the X. It replaces the back chevron.
     function discordClose(onClose) {
         const module = r.find('getRenderCloseButton') || r.find('getHeaderCloseButton');
@@ -391,7 +371,7 @@ export default function NightyTab(r) {
         return control || closeMark(onClose);
     }
     // Own pressable so the toolbar cannot drop the label. Settings' onPress is left untouched.
-    function NightyProfileButton({ labelProps }) {
+    function NightyProfileButton({ sample }) {
         r.useRefresh();
         const [open, setOpen] = React.useState(false);
         const Modal = RN.Modal;
@@ -406,10 +386,10 @@ export default function NightyTab(r) {
                 if (!r.active || !store.showNightyButton) return;
                 if (!openNighty()) setOpen(true);
             },
-            style: { flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 4, paddingBottom: 4 },
+            style: { flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
         },
         profileMark(),
-        profileLabel(labelProps),
+        profileLabel(sample),
         open && Modal ? h(Modal, {
             visible: true,
             animationType: 'slide',
@@ -420,21 +400,25 @@ export default function NightyTab(r) {
             renderClose(close),
             h(NightyPage, { close }))) : null);
     }
-    function nightyControl() {
-        return h(NightyProfileButton, { key: 'mime-nighty-profile-button', labelProps: seenLabel });
+    function nightyControl(sample) {
+        return h(NightyProfileButton, { key: 'mime-nighty-profile-button', sample });
     }
     function nightyRecord(sample) {
-        const image = toolbarIcon(sample);
-        return {
-            key: 'mime-nighty-profile-button',
-            id: 'mime-nighty-profile-button',
-            label: 'Nighty',
-            accessibilityLabel: 'Nighty',
-            accessibilityHint: 'Open Nighty',
-            IconComponent: Icon,
-            icon: typeof sample?.icon === 'function' ? Icon : image,
-            onPress: press(),
-        };
+        const image = toolbarIcon();
+        const record = sample && typeof sample === 'object' ? { ...sample } : {};
+        for (const key of Object.keys(record)) {
+            if (typeof record[key] === 'string' && isSettingsText(record[key])) record[key] = 'Nighty';
+        }
+        record.key = 'mime-nighty-profile-button';
+        record.id = 'mime-nighty-profile-button';
+        record.label = 'Nighty';
+        record.text = 'Nighty';
+        record.accessibilityLabel = 'Nighty';
+        record.accessibilityHint = 'Open Nighty';
+        record.IconComponent = Icon;
+        record.icon = typeof sample?.icon === 'function' ? Icon : image;
+        record.onPress = press();
+        return record;
     }
     function applyToolbar(element) {
         if (!r.active || !store.showNightyButton || !element?.props) return element;
