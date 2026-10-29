@@ -188,19 +188,22 @@ export default function NightyTab(r) {
         if (current[host] === token) return;
         r.set('sessions', { ...current, [host]: token });
     }
-    function settingsHeight() {
-        // The settings screen fills the app window. Match that, not a shorter sheet.
-        const windowHeight = RN.Dimensions?.get?.('window')?.height;
-        return typeof windowHeight === 'number' && windowHeight > 0 ? Math.round(windowHeight) : 700;
+    function readInset(edge) {
+        try {
+            const mod = r.find('initialWindowMetrics') || r.find('useSafeAreaInsets') || {};
+            const insets = mod.initialWindowMetrics?.insets || mod.insets;
+            const value = insets?.[edge];
+            if (typeof value === 'number' && value > 0 && value < 80) return Math.round(value);
+        } catch { /* The navigator already keeps the page on screen when no inset is published. */ }
+        return 0;
     }
     function NightyPage() {
         r.useRefresh();
         const src = pageUrl(store.url);
         const WebView = r.find('WebView')?.WebView || r.byName('WebView');
         const [error, setError] = React.useState('');
-        const height = settingsHeight();
-        // Fill the pushed screen. That screen is the same full-window size as Settings.
-        const frame = { flex: 1, width: '100%', height, minHeight: height };
+        // The navigator already places this under the header. A window-height frame paints past the bottom of the screen.
+        const frame = { flex: 1, width: '100%', paddingBottom: readInset('bottom') };
         // about:blank is the WebView's first load; blocking it leaves the page empty on iOS.
         const allow = req => {
             const url = req?.url || '';
@@ -211,7 +214,7 @@ export default function NightyTab(r) {
                 : !WebView ? h(Text, null, 'WebView is unavailable in this Snow build.')
                     : h(WebView, {
                         key: src, source: { uri: src, ...(sessionToken() ? { headers: { Cookie: `access_token=${sessionToken()}` } } : {}) },
-                        style: { flex: 1, height, width: '100%' },
+                        style: { flex: 1, width: '100%' },
                         originWhitelist: ['http://*', 'https://*'], javaScriptEnabled: true, domStorageEnabled: true,
                         sharedCookiesEnabled: false, thirdPartyCookiesEnabled: false, incognito: false, startInLoadingState: true,
                         injectedJavaScriptBeforeContentLoaded: sessionScript(sessionToken()),
@@ -266,7 +269,7 @@ export default function NightyTab(r) {
                     },
                 },
             });
-            return h(RN.View, { style: { flex: 1, width: '100%', height: settingsHeight() } }, renderClose(close), h(NightyPage, { close }));
+            return h(RN.View, { style: { flex: 1, width: '100%' } }, renderClose(close), h(NightyPage, { close }));
         }
         Screen.displayName = 'Nighty';
         try { navigation.push(Screen); return true; }
@@ -288,26 +291,26 @@ export default function NightyTab(r) {
             resizeMode: 'contain',
             fadeDuration: 0,
             accessibilityIgnoresInvertColors: true,
-            style: { width: 24, height: 16 },
+            style: { width: 22, height: 16 },
         });
     }
-    // 72×48 artwork in a 24×16 point box is 3 pixels per point, centered like the other glyphs.
+    // The artwork is a wide transparent mark. Keep the slot short so the name still fits in the pill.
     function profileMark() {
         const uri = iconUrl();
         if (!uri) return null;
-        return h(RN.View, { style: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' } },
+        return h(RN.View, { style: { width: 24, height: 18, alignItems: 'center', justifyContent: 'center' } },
             h(RN.Image, {
                 source: { uri },
                 resizeMode: 'contain',
                 fadeDuration: 0,
                 accessibilityIgnoresInvertColors: true,
-                style: { width: 24, height: 16 },
+                style: { width: 22, height: 16 },
             }));
     }
     function findCaption(node, depth = 0) {
         if (!node || depth > 8 || typeof node !== 'object') return null;
         const content = captionText(node);
-        if (content && content !== 'Nighty' && content.length <= 24 && (isSettingsText(content) || isOtherText(content)) && node.type) return node;
+        if (content && content !== 'Nighty' && content.length <= 24 && (isSettingsText(content) || isOtherText(content))) return node;
         const kids = node.props?.children;
         const list = Array.isArray(kids) ? kids : kids && typeof kids === 'object' ? [kids] : [];
         for (const kid of list) {
@@ -316,37 +319,35 @@ export default function NightyTab(r) {
         }
         return null;
     }
-    function profileLabel(sample) {
-        const found = findCaption(sample);
-        if (found?.type && found.props) {
-            const { children, ...rest } = found.props;
-            return h(found.type, rest, 'Nighty');
-        }
-        return h(Text, { variant: 'text-xs/semibold', color: 'text-normal', style: { textAlign: 'center', marginTop: 2 } }, 'Nighty');
+    function flatStyle(style) {
+        if (!style) return {};
+        if (Array.isArray(style)) return Object.assign({}, ...style.map(flatStyle));
+        return typeof style === 'object' ? style : {};
     }
-    let seenLabel = null;
+    // Native text. Cloning the sibling caption drops the string on device, and a design-system color prop is not a native color.
+    function profileLabel(sample) {
+        const flat = flatStyle(findCaption(sample)?.props?.style);
+        const fontSize = typeof flat.fontSize === 'number' && flat.fontSize >= 9 && flat.fontSize <= 13 ? flat.fontSize : 11;
+        const lineHeight = typeof flat.lineHeight === 'number' && flat.lineHeight >= fontSize && flat.lineHeight <= 16 ? flat.lineHeight : fontSize + 2;
+        return h(RN.Text, {
+            numberOfLines: 1,
+            allowFontScaling: false,
+            style: {
+                fontFamily: typeof flat.fontFamily === 'string' ? flat.fontFamily : 'gg sans',
+                fontSize,
+                lineHeight,
+                fontWeight: flat.fontWeight || '700',
+                color: typeof flat.color === 'string' ? flat.color : '#FFFFFF',
+                textAlign: 'center',
+                marginTop: 1,
+            },
+        }, 'Nighty');
+    }
     function captionText(node) {
         const kids = node?.props?.children;
         if (typeof kids === 'string' || typeof kids === 'number') return String(kids);
         if (!Array.isArray(kids)) return '';
         return kids.filter(kid => typeof kid === 'string' || typeof kid === 'number').join('');
-    }
-    function rememberLabels(node, depth = 0) {
-        if (!node || depth > 8 || typeof node !== 'object') return;
-        const content = captionText(node);
-        if (content && content.length <= 24 && content !== 'Nighty' && (isSettingsText(content) || isOtherText(content))) {
-            const props = node.props || {};
-            if (props.style || props.variant) seenLabel = {
-                type: node.type,
-                style: props.style,
-                variant: props.variant,
-                color: props.color,
-                numberOfLines: props.numberOfLines,
-            };
-        }
-        const kids = node.props?.children;
-        const list = Array.isArray(kids) ? kids : kids && typeof kids === 'object' ? [kids] : [];
-        for (const kid of list) rememberLabels(kid, depth + 1);
     }
     // Discord's header close control is the X. It replaces the back chevron.
     function discordClose(onClose) {
@@ -396,7 +397,7 @@ export default function NightyTab(r) {
             presentationStyle: 'fullScreen',
             statusBarTranslucent: true,
             onRequestClose: close,
-        }, h(RN.View, { style: { flex: 1, width: '100%', height: settingsHeight() } },
+        }, h(RN.View, { style: { flex: 1, width: '100%', paddingTop: readInset('top') } },
             renderClose(close),
             h(NightyPage, { close }))) : null);
     }
@@ -422,7 +423,6 @@ export default function NightyTab(r) {
     }
     function applyToolbar(element) {
         if (!r.active || !store.showNightyButton || !element?.props) return element;
-        rememberLabels(element);
         const slotted = insertNightySlot(r.React, element, nightyControl);
         if (slotted !== element) { r.status.profileButton = 'added'; return slotted; }
         let changed = false;

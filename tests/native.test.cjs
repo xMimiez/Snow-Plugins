@@ -234,7 +234,8 @@ test('Nighty WebView has isolated cookies, no credential bridge, and reports inv
     assert.equal(props.onShouldStartLoadWithRequest({url:'file:///local'}),false);
     assert.equal(props.onShouldStartLoadWithRequest({url:'about:blank'}),true);
     assert.equal(props.onShouldStartLoadWithRequest({url:'https://example.com/'}),true);
-    assert.ok(props.style.height > 200);
+    assert.equal(props.style.flex, 1);
+    assert.equal(props.style.height, undefined);
     assert.equal(tree.root.findAllByType('Button').length,0);assert.equal(tree.root.findAllByType('Text').length,0);
     await Renderer.act(async()=>{r.set('url','bad');});assert.match(JSON.stringify(tree.toJSON()),/valid HTTP/);
     await Renderer.act(async()=>tree.unmount());await r.dispose();
@@ -421,12 +422,12 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     assert.equal(bar.children[3].type,'Pressable');
     const slot=bar.children[3].children[0];
     assert.equal(slot.type,'View');
-    assert.deepEqual(slot.props.style,{width:24,height:24,alignItems:'center',justifyContent:'center'});
+    assert.deepEqual(slot.props.style,{width:24,height:18,alignItems:'center',justifyContent:'center'});
     const glyph=slot.children[0];
     assert.equal(glyph.type,'Image');
     assert.match(glyph.props.source.uri,/^data:image\/png;base64,/);
     assert.equal(glyph.props.tintColor,undefined);
-    assert.deepEqual(glyph.props.style,{width:24,height:16});
+    assert.deepEqual(glyph.props.style,{width:22,height:16});
     const label=bar.children[3].children[1];
     assert.equal(label.type,'Text');
     assert.equal(label.children[0],'Nighty');
@@ -538,7 +539,8 @@ test('Nighty profile button opens Nighty directly and leaves Settings alone',asy
     await Renderer.act(async()=>headerClose.props.onPress());
     assert.equal(pops,1);
     let page;await Renderer.act(async()=>{page=Renderer.create(nav.props.screens.Nighty.render());});
-    assert.ok(page.root.findByType('WebView').props.style.height>200);
+    assert.equal(page.root.findByType('WebView').props.style.flex,1);
+    assert.equal(page.root.findByType('WebView').props.style.height,undefined);
     await Renderer.act(async()=>{tree.unmount();screen.unmount();page.unmount();header.unmount();});
     await r.dispose();
 });
