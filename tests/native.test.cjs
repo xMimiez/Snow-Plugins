@@ -223,6 +223,9 @@ test('Nighty WebView has isolated cookies, no credential bridge, and reports inv
     const props=tree.root.findByType('WebView').props;
     assert.equal(props.sharedCookiesEnabled,false);assert.equal(props.thirdPartyCookiesEnabled,false);assert.equal(props.onMessage,undefined);
     assert.equal(props.injectedJavaScript,undefined);assert.equal(props.onShouldStartLoadWithRequest({url:'file:///local'}),false);
+    assert.equal(props.onShouldStartLoadWithRequest({url:'about:blank'}),true);
+    assert.equal(props.onShouldStartLoadWithRequest({url:'https://example.com/'}),true);
+    assert.ok(props.style.height > 200);
     assert.equal(tree.root.findAllByType('Button').length,0);assert.equal(tree.root.findAllByType('Text').length,0);
     await Renderer.act(async()=>{r.set('url','bad');});assert.match(JSON.stringify(tree.toJSON()),/valid HTTP/);
     await Renderer.act(async()=>tree.unmount());await r.dispose();
@@ -390,7 +393,7 @@ test('settings use the Rain navigation route and keep the second plugin function
     await b.r.dispose();assert.equal(backs,2);assert.equal(constants.SETTING_RENDERER_CONFIG.MIME_PLUGIN_SETTINGS_PAGE,undefined);
 });
 
-test('Nighty profile toggle replaces the Settings button beside Quests or Shop and restores it',async()=>{
+test('Nighty profile toggle adds a button beside Settings and removes it',async()=>{
     const {default:factory}=await import('../src/plugins/nighty-tab.js');
     const {r,sheets}=await harness({...factory.defaults,showNightyButton:true,url:'https://example.com'});
     const plugin=factory(r);plugin.start();assert.equal(r.status.profileButton,'patched');
@@ -402,9 +405,13 @@ test('Nighty profile toggle replaces the Settings button beside Quests or Shop a
     const bar=tree.toJSON();
     assert.equal(bar.children[0].props.accessibilityLabel,'Quests');
     assert.equal(bar.children[1].props.accessibilityLabel,'Shop');
-    assert.equal(bar.children[2].props.accessibilityLabel,'Nighty');
-    assert.equal(bar.children[2].props.testID,'mime-nighty-profile-button');
-    assert.equal(r.status.profileButton,'replaced');
+    assert.equal(bar.children[2].props.accessibilityLabel,'Settings');
+    assert.equal(bar.children[3].props.accessibilityLabel,'Nighty');
+    assert.equal(bar.children[3].props.testID,'mime-nighty-profile-button');
+    assert.deepEqual(bar.children[3].children[0].children[0].props.style,{width:18,height:18});
+    assert.equal(r.status.profileButton,'added');
+    await Renderer.act(async()=>tree.root.findByProps({accessibilityLabel:'Settings'}).props.onPress());
+    assert.equal(sheets.size,0);
     await Renderer.act(async()=>tree.root.findByProps({testID:'mime-nighty-profile-button'}).props.onPress());
     assert.equal(sheets.size,1);
     await Renderer.act(async()=>tree.unmount());sheets.clear();
@@ -413,7 +420,8 @@ test('Nighty profile toggle replaces the Settings button beside Quests or Shop a
         React.createElement('View',{key:'settings'},pressable('settings','Settings')),
     ]);
     await Renderer.act(async()=>{tree=Renderer.create(wrapped());});
-    assert.equal(tree.toJSON().children[1].children[0].props.accessibilityLabel,'Nighty');
+    assert.equal(tree.toJSON().children[1].children[0].props.accessibilityLabel,'Settings');
+    assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Nighty');
     await Renderer.act(async()=>tree.unmount());
     const unrelated=()=>React.createElement('View',null,[pressable('settings','Settings'),pressable('edit','Edit profile')]);
     await Renderer.act(async()=>{tree=Renderer.create(unrelated());});
@@ -421,6 +429,7 @@ test('Nighty profile toggle replaces the Settings button beside Quests or Shop a
     await Renderer.act(async()=>tree.unmount());
     r.set('showNightyButton',false);
     await Renderer.act(async()=>{tree=Renderer.create(row());});
+    assert.equal(tree.toJSON().children.length,3);
     assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Settings');
     await Renderer.act(async()=>tree.unmount());
     r.set('showNightyButton',true);
@@ -430,29 +439,36 @@ test('Nighty profile toggle replaces the Settings button beside Quests or Shop a
     ]);
     await Renderer.act(async()=>{tree=Renderer.create(i18nRow());});
     assert.equal(tree.toJSON().children[0].props.accessibilityLabel.message,'Misiones');
-    assert.equal(tree.toJSON().children[1].props.accessibilityLabel,'Nighty');
+    assert.equal(tree.toJSON().children[1].props.accessibilityLabel.message,'Ajustes');
+    assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Nighty');
     await Renderer.act(async()=>tree.unmount());
     const actionRow=()=>React.createElement('View',{actions:[
         {key:'shop',id:'shop',label:'Shop',icon:'shop',onPress(){}},{key:'settings',id:'settings',label:'Settings',icon:'gear',onPress(){}},
     ]});
     await Renderer.act(async()=>{tree=Renderer.create(actionRow());});
-    const taken=tree.toJSON().props.actions[1];
-    assert.equal(taken.label,'Nighty');
-    assert.equal(taken.id,'settings');
-    assert.equal(taken.icon,'gear');
-    await Renderer.act(async()=>taken.onPress());
+    const actions=tree.toJSON().props.actions;
+    assert.equal(actions[1].label,'Settings');
+    assert.equal(actions[1].id,'settings');
+    assert.equal(actions[1].icon,'gear');
+    assert.equal(actions[2].label,'Nighty');
+    assert.equal(actions[2].id,'mime-nighty-profile-button');
+    assert.equal(actions[2].icon,undefined);
+    await Renderer.act(async()=>actions[1].onPress());
+    assert.equal(sheets.size,0);
+    await Renderer.act(async()=>actions[2].onPress());
     assert.equal(sheets.size,1);
     await Renderer.act(async()=>tree.unmount());sheets.clear();
     await Renderer.act(async()=>{tree=Renderer.create(React.createElement(plugin.Settings));});
-    assert(tree.root.findAllByType('Switch').some(row=>row.props.label==='Nighty instead of Settings'&&row.props.value===true));
+    assert(tree.root.findAllByType('Switch').some(row=>row.props.label==='Profile Nighty button'&&row.props.value===true));
     await Renderer.act(async()=>tree.unmount());
     await r.dispose();
     await Renderer.act(async()=>{tree=Renderer.create(row());});
+    assert.equal(tree.toJSON().children.length,3);
     assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Settings');
     await Renderer.act(async()=>tree.unmount());
 });
 
-test('Nighty replaces Settings inside the You screen render',async()=>{
+test('Nighty adds its button inside the You screen without wrapping the screen',async()=>{
     const {default:factory}=await import('../src/plugins/nighty-tab.js');
     function YouScreen(){return React.createElement('View',{testID:'you-screen'},[
         React.createElement('Pressable',{key:'quests',accessibilityLabel:'Quests',onPress(){}}),
@@ -463,12 +479,14 @@ test('Nighty replaces Settings inside the You screen render',async()=>{
     const plugin=factory(r);plugin.start();
     assert.equal(hooks.size,0);
     let tree;await Renderer.act(async()=>{tree=Renderer.create(React.createElement(YouScreen));});
-    assert.equal(tree.toJSON().children[1].props.accessibilityLabel,'Nighty');
-    assert.equal(tree.toJSON().children[1].children[0].type,'View');
+    assert.equal(tree.toJSON().children[1].props.accessibilityLabel,'Settings');
+    assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Nighty');
+    assert.deepEqual(tree.toJSON().children[2].children[0].children[0].props.style,{width:18,height:18});
     await Renderer.act(async()=>tree.unmount());
     await r.dispose();
     assert.equal(hooks.size,0);
     await Renderer.act(async()=>{tree=Renderer.create(React.createElement(YouScreen));});
+    assert.equal(tree.toJSON().children.length,2);
     assert.equal(tree.toJSON().children[1].props.accessibilityLabel,'Settings');
     await Renderer.act(async()=>tree.unmount());
 });
