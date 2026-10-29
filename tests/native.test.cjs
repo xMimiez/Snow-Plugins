@@ -439,8 +439,7 @@ test('Nighty profile toggle replaces the Settings button beside Quests or Shop a
     const taken=tree.toJSON().props.actions[1];
     assert.equal(taken.label,'Nighty');
     assert.equal(taken.id,'settings');
-    assert.equal(taken.icon.type,'View');
-    assert.equal(taken.icon.props.style.width,32);
+    assert.equal(taken.icon,'gear');
     await Renderer.act(async()=>taken.onPress());
     assert.equal(sheets.size,1);
     await Renderer.act(async()=>tree.unmount());sheets.clear();
@@ -462,9 +461,10 @@ test('Nighty replaces Settings inside the You screen render',async()=>{
     const screen={name:'YouScreen',default:YouScreen};
     const {r,hooks}=await harness({...factory.defaults,showNightyButton:true},[screen]);
     const plugin=factory(r);plugin.start();
-    assert(hooks.has('YouScreen'));
-    let tree;await Renderer.act(async()=>{tree=Renderer.create(React.createElement(screen.default));});
-    assert.deepEqual(tree.toJSON().children.map(child=>child.props.accessibilityLabel),['Quests','Nighty']);
+    assert.equal(hooks.size,0);
+    let tree;await Renderer.act(async()=>{tree=Renderer.create(React.createElement(YouScreen));});
+    assert.equal(tree.toJSON().children[1].props.accessibilityLabel,'Nighty');
+    assert.equal(tree.toJSON().children[1].children[0].type,'View');
     await Renderer.act(async()=>tree.unmount());
     await r.dispose();
     assert.equal(hooks.size,0);

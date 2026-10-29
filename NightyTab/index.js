@@ -693,7 +693,6 @@ var plugin = (() => {
   function messageChannelId(message) {
     return message?.getChannelId?.() || message?.channel_id || message?.channelId;
   }
-  var TOOLBAR_NAMES = ["ProfileHeaderActions", "UserProfileHeaderActions", "ProfileActionBar", "ProfileToolbar", "ProfileButtons", "UserProfileActions", "YouProfileHeaderActions", "HeaderActionButtons", "ProfileQuickAccessBar"];
   function iconHint(node) {
     const props = node?.props || {};
     const bits = [props.name, typeof props.icon === "string" ? props.icon : ""];
@@ -706,16 +705,6 @@ var plugin = (() => {
     return bits.filter(Boolean).join(" ");
   }
   var ACTION_KEYS = ["actions", "buttons", "items", "headerActions", "trailingActions", "toolbarItems"];
-  var COMPONENT_NAMES = [...TOOLBAR_NAMES, "YouScreen", "YouHeader", "YouHeaderActions", "YouProfileHeader", "ProfileHeaderActions", "UserProfileHeader", "UserProfileHeaderActions", "UserProfileActions"];
-  var FILE_PATHS = [
-    "modules/main_tabs_v2/native/tabs/you/YouScreen.tsx",
-    "modules/main_tabs_v2/native/tabs/you/YouHeader.tsx",
-    "modules/main_tabs_v2/native/tabs/you/YouHeaderActions.tsx",
-    "modules/main_tabs_v2/native/tabs/you/ProfileHeaderActions.tsx",
-    "modules/user_profile/native/ProfileHeaderActions.tsx",
-    "modules/user_profile/native/UserProfileHeader.tsx",
-    "modules/user_profile/native/UserProfileHeaderActions.tsx"
-  ];
   var SETTINGS_MESSAGE_KEYS = ["SETTINGS", "USER_SETTINGS", "SETTINGS_TITLE", "OPEN_SETTINGS", "USER_SETTINGS_BUTTON"];
   var OTHER_MESSAGE_KEYS = ["QUESTS", "SHOP", "NITRO", "COLLECTIBLES", "COLLECTIBLES_SHOP", "QUEST_HOME"];
   function textOf(value, depth = 0) {
@@ -724,15 +713,6 @@ var plugin = (() => {
     if (typeof value === "function") return value.displayName || value.name || "";
     if (typeof value === "object") return ["message", "defaultMessage", "id", "displayName", "name"].map((key) => textOf(value[key], depth + 1)).filter(Boolean).join(" ");
     return "";
-  }
-  function toolbarSource(fn) {
-    let src = "";
-    try {
-      src = Function.prototype.toString.call(fn);
-    } catch {
-      return false;
-    }
-    return src.length > 80 && src.length < 2e4 && /USER_SETTINGS|SettingsIcon/.test(src) && /QUEST|COLLECTIBLES|ShopIcon|NitroIcon/.test(src);
   }
   function recordText(record) {
     if (!record || typeof record !== "object") return "";
@@ -940,39 +920,20 @@ var plugin = (() => {
       if (!bound) next.onPress = press();
       return next;
     }
-    function applyIcon(sample, next, graphic) {
-      let bound = false;
-      for (const key of ["icon", "Icon", "IconComponent", "iconComponent", "leading"]) {
-        if (!(key in sample)) continue;
-        next[key] = graphic;
-        bound = true;
-      }
-      if (!bound) next.icon = graphic;
-      if (sample.source && typeof sample.source === "object") next.source = graphic.props?.children?.props?.source || sample.source;
-      return next;
-    }
     function nightyControl(sample) {
-      const graphic = toolbarGraphic();
       const props = applyPress(sample.props, {
         accessibilityLabel: "Nighty",
         accessibilityHint: "Open Nighty",
         testID: "mime-nighty-profile-button"
       });
-      if (typeof sample.props.label === "string" || sample.props.label && typeof sample.props.label === "object") props.label = "Nighty";
-      if (typeof sample.props.text === "string") props.text = "Nighty";
-      applyIcon(sample.props, props, graphic);
+      if (typeof sample.props.children === "function") return r.React.cloneElement(sample, props);
       return r.React.cloneElement(sample, props, toolbarGraphic());
     }
     function nightyRecord(sample) {
-      const graphic = toolbarGraphic();
-      const next = applyPress(sample, applyIcon(sample, {
-        ...sample,
-        accessibilityLabel: "Nighty",
-        accessibilityHint: "Open Nighty"
-      }, graphic));
+      const next = applyPress(sample, { ...sample, accessibilityLabel: "Nighty", accessibilityHint: "Open Nighty" });
       if ("label" in sample) next.label = "Nighty";
-      if ("text" in sample) next.text = "Nighty";
-      if ("title" in sample && typeof sample.title === "string") next.title = "Nighty";
+      if (typeof sample.text === "string") next.text = "Nighty";
+      if (typeof sample.title === "string") next.title = "Nighty";
       return next;
     }
     function applyToolbar(element) {
@@ -995,92 +956,22 @@ var plugin = (() => {
       r.status.profileButton = "replaced";
       return r.React.cloneElement(element, props);
     }
-    function applyDeep(node, depth = 0) {
-      if (node == null || depth > 10) return node;
-      if (Array.isArray(node)) {
-        if (node.length > 40) return node;
-        let changed = false;
-        const mapped = node.map((child) => {
-          const next2 = applyDeep(child, depth + 1);
-          if (next2 !== child) changed = true;
-          return next2;
-        });
-        return changed ? mapped : node;
-      }
-      const next = applyToolbar(node);
-      if (next !== node || !r.React.isValidElement(node)) return next;
-      const children = next.props?.children;
-      const nextChildren = applyDeep(children, depth + 1);
-      if (nextChildren === children) return node;
-      return r.React.cloneElement(node, {}, nextChildren);
-    }
     const watched = /* @__PURE__ */ new Set();
-    const proxies = /* @__PURE__ */ new Map();
-    const proxiedNames = /* @__PURE__ */ new Set();
-    function watch(parent, key, deep) {
+    function watch(parent, key) {
       const fn = parent?.[key];
       if (typeof fn !== "function" || watched.has(fn)) return false;
       watched.add(fn);
       return r.patch("after", parent, key, (_args, result) => {
-        const next = deep ? applyDeep(result) : applyToolbar(result);
+        const next = applyToolbar(result);
         return next === result ? void 0 : next;
       });
-    }
-    function wrapRender(type) {
-      if (proxies.has(type)) return proxies.get(type);
-      function Proxy2(props) {
-        const rendered = type(props);
-        const next = applyDeep(rendered);
-        return next === void 0 ? rendered : next;
-      }
-      const label = type.displayName || type.name || "row";
-      Proxy2.displayName = `NightyProxy(${label})`;
-      proxies.set(type, Proxy2);
-      return Proxy2;
-    }
-    function installRenderProxy(name) {
-      const jsx = r.B.api?.react?.jsx;
-      if (!name || proxiedNames.has(name) || typeof jsx?.onJsxCreate !== "function") return false;
-      proxiedNames.add(name);
-      const callback = (Component, element) => {
-        if (!r.active || !store.showNightyButton || typeof Component !== "function" || !element) return;
-        const type = wrapRender(Component);
-        const next = r.React.createElement(type, element.props);
-        next.key = element.key;
-        next.ref = element.ref;
-        return next;
-      };
-      jsx.onJsxCreate(name, callback);
-      r.own(() => {
-        try {
-          jsx.deleteJsxCreate(name, callback);
-        } catch {
-        }
-      });
-      return true;
-    }
-    function considerModule(mod) {
-      if (!mod || typeof mod !== "object") return;
-      for (const key of Object.keys(mod)) {
-        const value = mod[key];
-        const fn = typeof value === "function" ? value : value?.render || value?.type;
-        if (typeof fn !== "function") continue;
-        const name = fn.displayName || fn.name || "";
-        if (!COMPONENT_NAMES.includes(name) && !toolbarSource(fn)) continue;
-        if (typeof value === "function") watch(mod, key, true);
-        else if (typeof value.render === "function") watch(value, "render", true);
-        else if (typeof value.type === "function") watch(value, "type", true);
-        if (name) installRenderProxy(name);
-      }
     }
     return { Settings, NightyPage, download, start() {
       r.status.settingsEntry = registerSection(r, { name: "Nighty", items: [{ key: "MIME_NIGHTY", title: () => "Nighty", headerShown: false, IconComponent: Icon, render: async () => ({ default: NightyPage }) }] });
       r.status.messageMenu = patchLazySheet(r, (key, props) => key === "MessageLongPressActionSheet" && canDownload(store, props?.message) ? { key: "mime-nighty-download", label: "Download Script", icon: h(Icon), onPress: () => download(props.message) } : null);
       rememberMessages(r.common?.i18n?.Messages || r.find("Messages")?.Messages);
-      let proxied = false;
-      for (const name of COMPONENT_NAMES) if (installRenderProxy(name)) proxied = true;
-      const patched = watch(React, "createElement", false);
-      for (const key of ["jsx", "jsxs"]) watch(React, key, false);
+      const patched = watch(React, "createElement");
+      for (const key of ["jsx", "jsxs"]) watch(React, key);
       const metro = r.B.metro;
       const factories = [r.B._jsx, r.host?._jsx];
       try {
@@ -1089,39 +980,15 @@ var plugin = (() => {
       } catch {
       }
       for (const factory of factories) {
-        watch(factory, "jsx", false);
-        watch(factory, "jsxs", false);
+        watch(factory, "jsx");
+        watch(factory, "jsxs");
       }
-      for (const name of COMPONENT_NAMES) {
-        try {
-          considerModule(metro?.findByName?.(name, false));
-          considerModule(metro?.findByDisplayName?.(name, false));
-          considerModule(metro?.findByTypeName?.(name, false));
-        } catch {
-        }
-      }
-      for (const filePath of FILE_PATHS) {
-        try {
-          considerModule(metro?.findByFilePath?.(filePath, false));
-        } catch {
-        }
-      }
-      try {
-        const matches = metro?.findAll?.((mod) => {
-          const fn = mod?.default || mod?.render || mod;
-          const label = fn?.displayName || fn?.name;
-          return typeof label === "string" && COMPONENT_NAMES.includes(label);
-        }) || [];
-        for (const mod of matches) considerModule(mod?.default ? mod : { default: mod });
-      } catch {
-      }
-      const armed = patched !== false || proxied;
-      r.status.profileButton = armed ? r.status.profileButton === "replaced" ? "replaced" : "patched" : "unavailable";
+      r.status.profileButton = patched === false ? "unavailable" : r.status.profileButton === "replaced" ? "replaced" : "patched";
     } };
   }
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "blue", customIconUrl: "", showNightyButton: true };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.0.4", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.0.5", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();
