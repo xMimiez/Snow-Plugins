@@ -408,9 +408,12 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     assert.equal(bar.children[2].props.accessibilityLabel,'Settings');
     assert.equal(bar.children[3].props.accessibilityLabel,'Nighty');
     assert.equal(bar.children[3].props.testID,'mime-nighty-profile-button');
-    assert.equal(bar.children[3].children[0].type,'Image');
-    assert.match(bar.children[3].children[0].props.source.uri,/icon\.png$/);
-    assert.deepEqual(bar.children[3].children[0].props.style,{width:24,height:24});
+    assert.equal(bar.children[3].type,'Pressable');
+    const glyph=bar.children[3].children[0];
+    assert.equal(glyph.type,'View');
+    assert.equal(glyph.children[0].type,'Image');
+    assert.match(glyph.children[0].props.source.uri,/icon\.png$/);
+    assert.deepEqual(glyph.children[0].props.style,{width:18,height:18});
     assert.equal(r.status.profileButton,'added');
     await Renderer.act(async()=>tree.root.findByProps({accessibilityLabel:'Settings'}).props.onPress());
     assert.equal(sheets.size,0);
@@ -471,6 +474,44 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     await Renderer.act(async()=>tree.unmount());
 });
 
+test('Nighty profile button opens the settings stack page at full height',async()=>{
+    const {default:factory}=await import('../src/plugins/nighty-tab.js');
+    const state={routeNames:['Home'],routes:[{name:'Home'}]};
+    let current={name:'Home'};
+    const nav={
+        navigate(name,params){current={name,params};},
+        getRootState:()=>state,getState:()=>state,getCurrentRoute:()=>current,goBack(){current={name:'Home'};},
+    };
+    const {r,sheets}=await harness({...factory.defaults,showNightyButton:true,url:'https://example.com'},[{getRootNavigationRef:()=>nav},{WebView:'WebView'}]);
+    const plugin=factory(r);plugin.start();
+    const pressable=(key,label,onPress)=>React.createElement('Pressable',{key,accessibilityLabel:label,onPress});
+    const row=()=>React.createElement('View',null,[
+        pressable('quests','Quests',()=>{}),
+        pressable('settings','Settings',()=>{state.routes=[{name:'Settings',state:{routeNames:['USER_SETTINGS','MIME_PLUGIN_SETTINGS_PAGE'],routes:[]}}];}),
+    ]);
+    let tree;await Renderer.act(async()=>{tree=Renderer.create(row());});
+    await Renderer.act(async()=>{
+        tree.root.findByProps({testID:'mime-nighty-profile-button'}).props.onPress();
+        await new Promise(resolve=>setTimeout(resolve,80));
+    });
+    assert.equal(sheets.size,0);
+    assert.equal(current.name,'MIME_PLUGIN_SETTINGS_PAGE');
+    assert.equal(current.params.headerShown,false);
+    assert.equal(current.params.title,'Nighty');
+    let page;await Renderer.act(async()=>{page=Renderer.create(current.params.render());});
+    assert.ok(page.root.findByType('WebView').props.style.height>200);
+    await Renderer.act(async()=>{tree.unmount();page.unmount();});
+    state.routeNames=['Home','MIME_PLUGIN_SETTINGS_PAGE'];
+    current={name:'Home'};
+    await Renderer.act(async()=>{tree=Renderer.create(row());});
+    await Renderer.act(async()=>tree.root.findByProps({testID:'mime-nighty-profile-button'}).props.onPress());
+    assert.equal(current.name,'MIME_PLUGIN_SETTINGS_PAGE');
+    assert.equal(sheets.size,0);
+    await Renderer.act(async()=>tree.unmount());
+    await r.dispose();
+    assert.equal(nav.getCurrentRoute().name,'MIME_PLUGIN_SETTINGS_PAGE');
+});
+
 test('Nighty adds its button inside the You screen without wrapping the screen',async()=>{
     const {default:factory}=await import('../src/plugins/nighty-tab.js');
     function YouScreen(){return React.createElement('View',{testID:'you-screen'},[
@@ -484,8 +525,10 @@ test('Nighty adds its button inside the You screen without wrapping the screen',
     let tree;await Renderer.act(async()=>{tree=Renderer.create(React.createElement(YouScreen));});
     assert.equal(tree.toJSON().children[1].props.accessibilityLabel,'Settings');
     assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Nighty');
-    assert.equal(tree.toJSON().children[2].children[0].type,'Image');
-    assert.match(tree.toJSON().children[2].children[0].props.source.uri,/icon\.png$/);
+    assert.equal(tree.toJSON().children[2].type,'Pressable');
+    assert.equal(tree.toJSON().children[2].children[0].type,'View');
+    assert.equal(tree.toJSON().children[2].children[0].children[0].type,'Image');
+    assert.match(tree.toJSON().children[2].children[0].children[0].props.source.uri,/icon\.png$/);
     await Renderer.act(async()=>tree.unmount());
     await r.dispose();
     assert.equal(hooks.size,0);
