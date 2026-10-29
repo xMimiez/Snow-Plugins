@@ -27,7 +27,7 @@ async function harness(defaults = {}, modules = []) {
     const patcher = {};
     for (const kind of ['before','after','instead']) patcher[kind] = (key, parent, cb) => { const old=parent[key]; const wrap=function(...args) { if(kind==='before') { cb(args); return old.apply(this,args); } if(kind==='instead') return cb(args,(...next)=>old.apply(this,next)); const out=old.apply(this,args); return cb(args,out) ?? out; }; parent[key]=wrap; return ()=>{if(parent[key]===wrap)parent[key]=old;}; };
     const store={...defaults};
-    const RN={View:'View',Text:'Text',Image:'Image',ScrollView:'ScrollView',TextInput:'RNInput',Pressable:'Pressable',ActivityIndicator:'Spinner',Platform:{OS:'ios'},NativeModules:{},Linking:{openURL:async u=>calls.push(u),canOpenURL:async()=>false}};
+    const RN={View:'View',Text:'Text',Image:'Image',ScrollView:'ScrollView',TextInput:'RNInput',Pressable:'Pressable',Modal:'Modal',ActivityIndicator:'Spinner',Platform:{OS:'ios'},NativeModules:{},Linking:{openURL:async u=>calls.push(u),canOpenURL:async()=>false}};
     const D={Text:'Text',Button:'Button',TextInput:'Input',ActionSheet:'ActionSheet',TableSwitchRow:'Switch',TableRowGroup:'Group',AlertModal:'Alert',AlertActions:'Actions',AlertActionButton:'AlertButton'};
     const C={...D,SettingsPage:'SettingsPage',RowIcon:'RowIcon'};
     const common={React,ReactNative:RN,components:D,clipboard:{setString:s=>calls.push(s)},FluxDispatcher:{dispatch:e=>{for(const fn of events.get(e.type)||[])fn(e);}},url:{openURL:u=>calls.push(u)}};
@@ -414,11 +414,14 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     assert.equal(glyph.children[0].type,'Image');
     assert.match(glyph.children[0].props.source.uri,/icon\.png$/);
     assert.deepEqual(glyph.children[0].props.style,{width:18,height:18});
+    assert.equal(bar.children[3].children[1].children[0],'Nighty');
+    assert.equal(bar.children[3].props.style.flexDirection,'row');
     assert.equal(r.status.profileButton,'added');
     await Renderer.act(async()=>tree.root.findByProps({accessibilityLabel:'Settings'}).props.onPress());
     assert.equal(sheets.size,0);
     await Renderer.act(async()=>tree.root.findByProps({testID:'mime-nighty-profile-button'}).props.onPress());
-    assert.equal(sheets.size,1);
+    assert.equal(sheets.size,0);
+    assert.equal(tree.root.findByType('Modal').props.presentationStyle,'fullScreen');
     await Renderer.act(async()=>tree.unmount());sheets.clear();
     const wrapped=()=>React.createElement('View',{testID:'wrapped-toolbar'},[
         React.createElement('View',{key:'quests'},pressable('quests','Quests')),
@@ -474,42 +477,32 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     await Renderer.act(async()=>tree.unmount());
 });
 
-test('Nighty profile button opens the settings stack page at full height',async()=>{
+test('Nighty profile button opens Nighty directly and leaves Settings alone',async()=>{
     const {default:factory}=await import('../src/plugins/nighty-tab.js');
-    const state={routeNames:['Home'],routes:[{name:'Home'}]};
-    let current={name:'Home'};
-    const nav={
-        navigate(name,params){current={name,params};},
-        getRootState:()=>state,getState:()=>state,getCurrentRoute:()=>current,goBack(){current={name:'Home'};},
-    };
-    const {r,sheets}=await harness({...factory.defaults,showNightyButton:true,url:'https://example.com'},[{getRootNavigationRef:()=>nav},{WebView:'WebView'}]);
-    const plugin=factory(r);plugin.start();
+    let pushed, settingsPresses=0;
+    function Navigator(props){return React.createElement('Navigator',props);}
+    const navigation={push(screen){pushed=screen;},pop(){},pushLazy(){}};
+    const {r,sheets}=await harness({...factory.defaults,showNightyButton:true,url:'https://example.com'},[navigation,{Navigator},{WebView:'WebView'}]);
+    factory(r).start();
     const pressable=(key,label,onPress)=>React.createElement('Pressable',{key,accessibilityLabel:label,onPress});
     const row=()=>React.createElement('View',null,[
         pressable('quests','Quests',()=>{}),
-        pressable('settings','Settings',()=>{state.routes=[{name:'Settings',state:{routeNames:['USER_SETTINGS','MIME_PLUGIN_SETTINGS_PAGE'],routes:[]}}];}),
+        pressable('settings','Settings',()=>{settingsPresses++;}),
     ]);
     let tree;await Renderer.act(async()=>{tree=Renderer.create(row());});
-    await Renderer.act(async()=>{
-        tree.root.findByProps({testID:'mime-nighty-profile-button'}).props.onPress();
-        await new Promise(resolve=>setTimeout(resolve,80));
-    });
-    assert.equal(sheets.size,0);
-    assert.equal(current.name,'MIME_PLUGIN_SETTINGS_PAGE');
-    assert.equal(current.params.headerShown,false);
-    assert.equal(current.params.title,'Nighty');
-    let page;await Renderer.act(async()=>{page=Renderer.create(current.params.render());});
-    assert.ok(page.root.findByType('WebView').props.style.height>200);
-    await Renderer.act(async()=>{tree.unmount();page.unmount();});
-    state.routeNames=['Home','MIME_PLUGIN_SETTINGS_PAGE'];
-    current={name:'Home'};
-    await Renderer.act(async()=>{tree=Renderer.create(row());});
+    assert.equal(tree.toJSON().children[2].children[1].children[0],'Nighty');
     await Renderer.act(async()=>tree.root.findByProps({testID:'mime-nighty-profile-button'}).props.onPress());
-    assert.equal(current.name,'MIME_PLUGIN_SETTINGS_PAGE');
+    assert.equal(settingsPresses,0);
     assert.equal(sheets.size,0);
-    await Renderer.act(async()=>tree.unmount());
+    assert.equal(tree.root.findAllByType('Modal').length,0);
+    let screen;await Renderer.act(async()=>{screen=Renderer.create(React.createElement(pushed));});
+    const nav=screen.root.findByType('Navigator');
+    assert.equal(nav.props.initialRouteName,'Nighty');
+    assert.equal(nav.props.screens.Nighty.title,'Nighty');
+    let page;await Renderer.act(async()=>{page=Renderer.create(nav.props.screens.Nighty.render());});
+    assert.ok(page.root.findByType('WebView').props.style.height>200);
+    await Renderer.act(async()=>{tree.unmount();screen.unmount();page.unmount();});
     await r.dispose();
-    assert.equal(nav.getCurrentRoute().name,'MIME_PLUGIN_SETTINGS_PAGE');
 });
 
 test('Nighty adds its button inside the You screen without wrapping the screen',async()=>{
@@ -529,6 +522,7 @@ test('Nighty adds its button inside the You screen without wrapping the screen',
     assert.equal(tree.toJSON().children[2].children[0].type,'View');
     assert.equal(tree.toJSON().children[2].children[0].children[0].type,'Image');
     assert.match(tree.toJSON().children[2].children[0].children[0].props.source.uri,/icon\.png$/);
+    assert.equal(tree.toJSON().children[2].children[1].children[0],'Nighty');
     await Renderer.act(async()=>tree.unmount());
     await r.dispose();
     assert.equal(hooks.size,0);

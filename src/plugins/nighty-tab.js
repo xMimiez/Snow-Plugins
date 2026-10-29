@@ -190,7 +190,7 @@ export default function NightyTab(r) {
         return h(Page, { title: 'Nighty Tab', close },
             h(Text, null, 'URL'), h(Input, { value: store.url, placeholder: 'https://', autoCapitalize: 'none', onChange: v => r.set('url', v) }),
             store.url && !pageUrl(store.url) ? h(Text, null, 'Enter an HTTP or HTTPS URL without embedded credentials.') : null,
-            h(Button, { text: 'Open Nighty', onPress: openNighty }),
+            h(Button, { text: 'Open Nighty', onPress: () => { if (!openNighty()) openSheet(); } }),
             h(Toggle, { setting: 'showNightyButton', label: 'Profile Nighty button', subLabel: 'Adds a Nighty button beside Settings on your profile. It uses the same icon as the Nighty settings row.' }),
             h(Toggle, { setting: 'scriptUtils', label: 'Script Utils functions', subLabel: 'Download Script replies to an attachment with your prefix followed by dls.' }),
             h(Text, null, 'Nighty prefix (one character)'),
@@ -199,72 +199,42 @@ export default function NightyTab(r) {
             store.iconType === 'custom' ? h(Input, { value: store.customIconUrl, placeholder: 'https:// image URL', autoCapitalize: 'none', onChange: v => r.set('customIconUrl', v) }) : null,
             h(Icon), h(Text, { muted: true }, `Settings entry: ${r.status.settingsEntry ? 'registered' : 'unavailable'} · Message menu: ${r.status.messageMenu ? 'registered' : 'unavailable'} · Profile button: ${store.showNightyButton ? (r.status.profileButton === 'added' ? 'added beside Settings' : 'watching') : 'off'}`));
     }
-    function routeNames(state, found = []) {
-        if (!state || typeof state !== 'object') return found;
-        if (Array.isArray(state.routeNames)) found.push(...state.routeNames);
-        for (const route of state.routes || []) routeNames(route.state, found);
-        return found;
+    function screenNavigator() {
+        const found = r.byName('Navigator', true) || r.byName('Navigator') || r.find('Navigator');
+        if (typeof found === 'function') return found;
+        if (typeof found?.Navigator === 'function') return found.Navigator;
+        if (typeof found?.default === 'function') return found.default;
+        return null;
     }
-    function rootNav() {
-        const raw = r.find('getRootNavigationRef')?.getRootNavigationRef?.();
-        return raw?.navigate ? raw : raw?.current;
-    }
-    function settingsParams() {
-        return {
-            title: 'Nighty',
-            headerShown: false,
-            owner: r.meta.id,
-            render: () => r.active ? h(NightyPage, { close: () => rootNav()?.goBack?.() }) : null,
-        };
-    }
-    // The settings row opens MIME_PLUGIN_SETTINGS_PAGE on the settings stack. That screen is full height.
-    // A bottom sheet cannot grow to that size, and the route is absent until Settings is mounted.
-    function openSettingsScreen() {
-        const nav = rootNav();
-        if (typeof nav?.navigate !== 'function') return false;
-        const names = routeNames(nav.getRootState?.() || nav.getState?.());
-        if (!names.includes('MIME_PLUGIN_SETTINGS_PAGE')) return false;
-        nav.navigate('MIME_PLUGIN_SETTINGS_PAGE', settingsParams());
-        return true;
-    }
-    let settingsOpener = null;
-    let openTimer = null;
-    function clearOpenTimer() {
-        if (!openTimer) return;
-        clearInterval(openTimer);
-        openTimer = null;
+    // Push Discord's own full-screen navigator. This opens Nighty directly and does not open Settings first.
+    function openNighty() {
+        if (!r.active) return false;
+        const navigation = r.common.navigation || r.find('push', 'pushLazy', 'pop');
+        if (typeof navigation?.push !== 'function') return false;
+        const Navigator = screenNavigator();
+        function Screen() {
+            if (Navigator) return h(Navigator, {
+                initialRouteName: 'Nighty',
+                goBackOnBackPress: true,
+                screens: {
+                    Nighty: {
+                        title: 'Nighty',
+                        render: () => r.active ? h(NightyPage, { close: () => navigation.pop?.() }) : null,
+                    },
+                },
+            });
+            return h(RN.View, { style: { flex: 1, width: '100%', height: settingsHeight() } }, h(NightyPage, { close: () => navigation.pop?.() }));
+        }
+        Screen.displayName = 'Nighty';
+        try { navigation.push(Screen); return true; }
+        catch (error) { if (r.active) r.error('Open Nighty', error); return false; }
     }
     function openSheet() {
         try { r.open('nighty', NightyPage, {}, { scrollable: false }); }
         catch (error) { if (r.active) r.error('Open Nighty', error); }
     }
-    function openNighty() {
-        if (!r.active) return;
-        try { if (openSettingsScreen()) return; }
-        catch (error) { if (r.active) r.error('Open Nighty', error); }
-        const navigationRef = r.find('getRootNavigationRef');
-        if (navigationRef && typeof settingsOpener === 'function') {
-            try { settingsOpener(); }
-            catch (error) { if (r.active) r.error('Open Nighty', error); }
-            if (openSettingsScreen()) return;
-            clearOpenTimer();
-            let left = 40;
-            openTimer = setInterval(() => {
-                if (!r.active || left-- <= 0) {
-                    clearOpenTimer();
-                    if (r.active && left < 0) openSheet();
-                    return;
-                }
-                try { if (openSettingsScreen()) clearOpenTimer(); }
-                catch (error) { clearOpenTimer(); if (r.active) r.error('Open Nighty', error); }
-            }, 50);
-            r.own(clearOpenTimer);
-            return;
-        }
-        openSheet();
-    }
     function press() {
-        return () => { if (r.active && store.showNightyButton) openNighty(); };
+        return () => { if (r.active && store.showNightyButton && !openNighty()) openSheet(); };
     }
     function flatStyle(style) {
         const list = Array.isArray(style) ? style : [style];
@@ -297,22 +267,37 @@ export default function NightyTab(r) {
             style: { width: size, height: size },
         });
     }
-    // The toolbar button ignores children and would forward an icon element onto RCTView.
-    // Draw the same settings-row Icon inside RN.Pressable, and keep Settings' own onPress so this page can use that stack.
-    function nightyControl(sample) {
-        const props = sample?.props || {};
-        if (typeof props.onPress === 'function') settingsOpener = props.onPress;
-        const Pressable = RN.Pressable || sample.type;
-        return h(Pressable, {
-            key: 'mime-nighty-profile-button',
+    // Own pressable so the toolbar cannot drop the label. Settings' onPress is left untouched.
+    function NightyProfileButton() {
+        const [open, setOpen] = React.useState(false);
+        const Modal = RN.Modal;
+        const close = () => setOpen(false);
+        return h(RN.Pressable || RN.TouchableOpacity, {
             accessibilityLabel: 'Nighty',
             accessibilityHint: 'Open Nighty',
             accessibilityRole: 'button',
             testID: 'mime-nighty-profile-button',
-            hitSlop: props.hitSlop || { top: 8, bottom: 8, left: 8, right: 8 },
-            onPress: press(),
-            style: [props.style, { minWidth: 40, minHeight: 40, alignItems: 'center', justifyContent: 'center' }],
-        }, h(Icon));
+            hitSlop: { top: 8, bottom: 8, left: 8, right: 8 },
+            onPress: () => {
+                if (!r.active || !store.showNightyButton) return;
+                if (!openNighty()) setOpen(true);
+            },
+            style: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', minHeight: 40, paddingHorizontal: 8 },
+        },
+        h(Icon),
+        h(Text, { style: { marginLeft: 6 } }, 'Nighty'),
+        open && Modal ? h(Modal, {
+            visible: true,
+            animationType: 'slide',
+            presentationStyle: 'fullScreen',
+            statusBarTranslucent: true,
+            onRequestClose: close,
+        }, h(RN.View, { style: { flex: 1, width: '100%', height: settingsHeight() } },
+            h(Button, { text: 'Close', onPress: close }),
+            h(NightyPage, { close }))) : null);
+    }
+    function nightyControl() {
+        return h(NightyProfileButton, { key: 'mime-nighty-profile-button' });
     }
     function nightyRecord(sample) {
         const image = toolbarIcon(sample);
