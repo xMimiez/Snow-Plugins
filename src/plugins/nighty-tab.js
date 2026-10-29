@@ -267,26 +267,59 @@ export default function NightyTab(r) {
         return h(RN.Image, {
             source: { uri },
             resizeMode: 'contain',
-            tintColor: '#FFFFFF',
             accessibilityIgnoresInvertColors: true,
             style: { width: size, height: size },
         });
     }
-    // Quests, Shop, and Settings are a white glyph stacked over a bold white label.
+    // The chosen settings icon is a 24×16 mark. Leave its colors alone. A tint turns it into a white box.
     function profileMark() {
         const uri = iconUrl();
         if (!uri) return null;
         return h(RN.Image, {
             source: { uri },
             resizeMode: 'contain',
-            tintColor: '#FFFFFF',
             accessibilityIgnoresInvertColors: true,
-            style: { width: 26, height: 26 },
+            style: { width: 32, height: 22 },
         });
     }
-    function profileLabel() {
+    let seenLabel = null;
+    function captionText(node) {
+        const kids = node?.props?.children;
+        if (typeof kids === 'string' || typeof kids === 'number') return String(kids);
+        if (!Array.isArray(kids)) return '';
+        return kids.filter(kid => typeof kid === 'string' || typeof kid === 'number').join('');
+    }
+    function rememberLabels(node, depth = 0) {
+        if (!node || depth > 8 || typeof node !== 'object') return;
+        const content = captionText(node);
+        if (content && content.length <= 24 && content !== 'Nighty' && (isSettingsText(content) || isOtherText(content))) {
+            const props = node.props || {};
+            if (props.style || props.variant) seenLabel = {
+                type: node.type,
+                style: props.style,
+                variant: props.variant,
+                color: props.color,
+                numberOfLines: props.numberOfLines,
+            };
+        }
+        const kids = node.props?.children;
+        const list = Array.isArray(kids) ? kids : kids && typeof kids === 'object' ? [kids] : [];
+        for (const kid of list) rememberLabels(kid, depth + 1);
+    }
+    function profileLabel(labelProps) {
+        if (labelProps?.type && (labelProps.style || labelProps.variant)) {
+            return h(labelProps.type, {
+                style: labelProps.style,
+                variant: labelProps.variant,
+                color: labelProps.color,
+                numberOfLines: labelProps.numberOfLines || 1,
+            }, 'Nighty');
+        }
+        const fonts = r.find('PRIMARY_SEMIBOLD') || r.find('PRIMARY_MEDIUM', 'PRIMARY_NORMAL') || r.find('PRIMARY_BOLD');
+        const fontFamily = fonts?.PRIMARY_SEMIBOLD || fonts?.PRIMARY_MEDIUM || fonts?.PRIMARY_BOLD;
         return h(RN.Text, {
-            style: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', marginTop: 6, textAlign: 'center' },
+            numberOfLines: 1,
+            style: { fontFamily, fontSize: 12, lineHeight: 16, textAlign: 'center', marginTop: 4, color: '#FFFFFF' },
         }, 'Nighty');
     }
     // Discord's header close control is the X. It replaces the back chevron.
@@ -312,7 +345,8 @@ export default function NightyTab(r) {
         return control || closeMark(onClose);
     }
     // Own pressable so the toolbar cannot drop the label. Settings' onPress is left untouched.
-    function NightyProfileButton() {
+    function NightyProfileButton({ labelProps }) {
+        r.useRefresh();
         const [open, setOpen] = React.useState(false);
         const Modal = RN.Modal;
         const close = () => setOpen(false);
@@ -329,7 +363,7 @@ export default function NightyTab(r) {
             style: { flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 56, paddingVertical: 8 },
         },
         profileMark(),
-        profileLabel(),
+        profileLabel(labelProps),
         open && Modal ? h(Modal, {
             visible: true,
             animationType: 'slide',
@@ -341,7 +375,7 @@ export default function NightyTab(r) {
             h(NightyPage, { close }))) : null);
     }
     function nightyControl() {
-        return h(NightyProfileButton, { key: 'mime-nighty-profile-button' });
+        return h(NightyProfileButton, { key: 'mime-nighty-profile-button', labelProps: seenLabel });
     }
     function nightyRecord(sample) {
         const image = toolbarIcon(sample);
@@ -358,6 +392,7 @@ export default function NightyTab(r) {
     }
     function applyToolbar(element) {
         if (!r.active || !store.showNightyButton || !element?.props) return element;
+        rememberLabels(element);
         const slotted = insertNightySlot(r.React, element, nightyControl);
         if (slotted !== element) { r.status.profileButton = 'added'; return slotted; }
         let changed = false;

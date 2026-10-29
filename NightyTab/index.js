@@ -967,7 +967,6 @@ var plugin = (() => {
       return h(RN.Image, {
         source: { uri },
         resizeMode: "contain",
-        tintColor: "#FFFFFF",
         accessibilityIgnoresInvertColors: true,
         style: { width: size, height: size }
       });
@@ -978,14 +977,48 @@ var plugin = (() => {
       return h(RN.Image, {
         source: { uri },
         resizeMode: "contain",
-        tintColor: "#FFFFFF",
         accessibilityIgnoresInvertColors: true,
-        style: { width: 26, height: 26 }
+        style: { width: 32, height: 22 }
       });
     }
-    function profileLabel() {
+    let seenLabel = null;
+    function captionText(node) {
+      const kids = node?.props?.children;
+      if (typeof kids === "string" || typeof kids === "number") return String(kids);
+      if (!Array.isArray(kids)) return "";
+      return kids.filter((kid) => typeof kid === "string" || typeof kid === "number").join("");
+    }
+    function rememberLabels(node, depth = 0) {
+      if (!node || depth > 8 || typeof node !== "object") return;
+      const content = captionText(node);
+      if (content && content.length <= 24 && content !== "Nighty" && (isSettingsText(content) || isOtherText(content))) {
+        const props = node.props || {};
+        if (props.style || props.variant) seenLabel = {
+          type: node.type,
+          style: props.style,
+          variant: props.variant,
+          color: props.color,
+          numberOfLines: props.numberOfLines
+        };
+      }
+      const kids = node.props?.children;
+      const list = Array.isArray(kids) ? kids : kids && typeof kids === "object" ? [kids] : [];
+      for (const kid of list) rememberLabels(kid, depth + 1);
+    }
+    function profileLabel(labelProps) {
+      if (labelProps?.type && (labelProps.style || labelProps.variant)) {
+        return h(labelProps.type, {
+          style: labelProps.style,
+          variant: labelProps.variant,
+          color: labelProps.color,
+          numberOfLines: labelProps.numberOfLines || 1
+        }, "Nighty");
+      }
+      const fonts = r.find("PRIMARY_SEMIBOLD") || r.find("PRIMARY_MEDIUM", "PRIMARY_NORMAL") || r.find("PRIMARY_BOLD");
+      const fontFamily = fonts?.PRIMARY_SEMIBOLD || fonts?.PRIMARY_MEDIUM || fonts?.PRIMARY_BOLD;
       return h(RN.Text, {
-        style: { color: "#FFFFFF", fontSize: 13, fontWeight: "700", marginTop: 6, textAlign: "center" }
+        numberOfLines: 1,
+        style: { fontFamily, fontSize: 12, lineHeight: 16, textAlign: "center", marginTop: 4, color: "#FFFFFF" }
       }, "Nighty");
     }
     function discordClose(onClose) {
@@ -1013,7 +1046,8 @@ var plugin = (() => {
       if (typeof control === "function") return h(control);
       return control || closeMark(onClose);
     }
-    function NightyProfileButton() {
+    function NightyProfileButton({ labelProps }) {
+      r.useRefresh();
       const [open, setOpen] = React.useState(false);
       const Modal = RN.Modal;
       const close = () => setOpen(false);
@@ -1032,7 +1066,7 @@ var plugin = (() => {
           style: { flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 56, paddingVertical: 8 }
         },
         profileMark(),
-        profileLabel(),
+        profileLabel(labelProps),
         open && Modal ? h(Modal, {
           visible: true,
           animationType: "slide",
@@ -1048,7 +1082,7 @@ var plugin = (() => {
       );
     }
     function nightyControl() {
-      return h(NightyProfileButton, { key: "mime-nighty-profile-button" });
+      return h(NightyProfileButton, { key: "mime-nighty-profile-button", labelProps: seenLabel });
     }
     function nightyRecord(sample) {
       const image = toolbarIcon(sample);
@@ -1065,6 +1099,7 @@ var plugin = (() => {
     }
     function applyToolbar(element) {
       if (!r.active || !store.showNightyButton || !element?.props) return element;
+      rememberLabels(element);
       const slotted = insertNightySlot(r.React, element, nightyControl);
       if (slotted !== element) {
         r.status.profileButton = "added";
@@ -1116,6 +1151,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "blue", customIconUrl: "", showNightyButton: true };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.1.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.1.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();

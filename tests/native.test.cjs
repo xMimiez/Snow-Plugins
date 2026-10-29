@@ -397,7 +397,8 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     const {default:factory}=await import('../src/plugins/nighty-tab.js');
     const {r,sheets}=await harness({...factory.defaults,showNightyButton:true,url:'https://example.com'});
     const plugin=factory(r);plugin.start();assert.equal(r.status.profileButton,'patched');
-    const pressable=(key,label)=>React.createElement('Pressable',{key,accessibilityLabel:label,onPress(){}});
+    const toolbarFont={fontFamily:'gg sans',fontSize:12,fontWeight:'600',lineHeight:16,color:'#F2F3F5'};
+    const pressable=(key,label)=>React.createElement('Pressable',{key,accessibilityLabel:label,onPress(){}},React.createElement('Text',{style:toolbarFont},label));
     const row=()=>React.createElement('View',{testID:'profile-toolbar'},[
         pressable('quests','Quests'),pressable('shop','Shop'),pressable('settings','Settings'),
     ]);
@@ -412,13 +413,15 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     const glyph=bar.children[3].children[0];
     assert.equal(glyph.type,'Image');
     assert.match(glyph.props.source.uri,/icon\.png$/);
-    assert.equal(glyph.props.tintColor,'#FFFFFF');
-    assert.deepEqual(glyph.props.style,{width:26,height:26});
+    assert.equal(glyph.props.tintColor,undefined);
+    assert.deepEqual(glyph.props.style,{width:32,height:22});
     const label=bar.children[3].children[1];
     assert.equal(label.type,'Text');
     assert.equal(label.children[0],'Nighty');
-    assert.equal(label.props.style.color,'#FFFFFF');
-    assert.equal(label.props.style.fontWeight,'700');
+    assert.equal(label.props.style.fontFamily,'gg sans');
+    assert.equal(label.props.style.fontSize,12);
+    assert.equal(label.props.style.fontWeight,'600');
+    assert.equal(label.props.style.color,'#F2F3F5');
     assert.equal(bar.children[3].props.style.flexDirection,'column');
     assert.equal(bar.children[3].props.style.flex,1);
     assert.equal(r.status.profileButton,'added');
@@ -502,8 +505,8 @@ test('Nighty profile button opens Nighty directly and leaves Settings alone',asy
         pressable('settings','Settings',()=>{settingsPresses++;}),
     ]);
     let tree;await Renderer.act(async()=>{tree=Renderer.create(row());});
-    assert.equal(tree.toJSON().children[2].children[0].props.tintColor,'#FFFFFF');
-    assert.equal(tree.toJSON().children[2].children[1].props.style.fontWeight,'700');
+    assert.equal(tree.toJSON().children[2].children[0].props.tintColor,undefined);
+    assert.match(tree.toJSON().children[2].children[0].props.source.uri,/icon\.png$/);
     assert.equal(tree.toJSON().children[2].children[1].children[0],'Nighty');
     assert.equal(tree.toJSON().children[2].props.style.flexDirection,'column');
     await Renderer.act(async()=>tree.root.findByProps({testID:'mime-nighty-profile-button'}).props.onPress());
@@ -543,10 +546,9 @@ test('Nighty adds its button inside the You screen without wrapping the screen',
     assert.equal(tree.toJSON().children[2].type,'Pressable');
     assert.equal(tree.toJSON().children[2].children[0].type,'Image');
     assert.match(tree.toJSON().children[2].children[0].props.source.uri,/icon\.png$/);
-    assert.equal(tree.toJSON().children[2].children[0].props.tintColor,'#FFFFFF');
+    assert.equal(tree.toJSON().children[2].children[0].props.tintColor,undefined);
     assert.equal(tree.toJSON().children[2].props.style.flexDirection,'column');
     assert.equal(tree.toJSON().children[2].children[1].children[0],'Nighty');
-    assert.equal(tree.toJSON().children[2].children[1].props.style.color,'#FFFFFF');
     await Renderer.act(async()=>tree.unmount());
     await r.dispose();
     assert.equal(hooks.size,0);
