@@ -822,8 +822,8 @@ var plugin = (() => {
       const uri = iconUrl();
       return uri ? h(
         RN.View,
-        { style: { width: 24, height: 24, alignItems: "center", justifyContent: "center" } },
-        h(RN.Image, { source: { uri }, resizeMode: "contain", style: { width: 24, height: 24, ...iconTint() ? { tintColor: iconTint() } : {} }, accessibilityIgnoresInvertColors: true })
+        { style: { width: 32, height: 32, alignItems: "center", justifyContent: "center" } },
+        h(RN.Image, { source: { uri }, resizeMode: "contain", style: { width: 32, height: 32, ...iconTint() ? { tintColor: iconTint() } : {} }, accessibilityIgnoresInvertColors: true })
       ) : null;
     }
     const sending = /* @__PURE__ */ new Set();
@@ -1067,7 +1067,7 @@ var plugin = (() => {
         resizeMode: "contain",
         fadeDuration: 0,
         accessibilityIgnoresInvertColors: true,
-        style: { width: 40, height: 40, transform: [{ scale: 1.35 }], ...iconTint() ? { tintColor: iconTint() } : {} }
+        style: { width: 32, height: 32, ...iconTint() ? { tintColor: iconTint() } : {} }
       });
     }
     function profileImage() {
@@ -1075,13 +1075,13 @@ var plugin = (() => {
       if (!uri) return null;
       return h(
         RN.View,
-        { style: { width: 40, height: 40, alignItems: "center", justifyContent: "center" } },
+        { style: { width: 32, height: 32, alignItems: "center", justifyContent: "center" } },
         h(RN.Image, {
           source: { uri },
           resizeMode: "contain",
           fadeDuration: 0,
           accessibilityIgnoresInvertColors: true,
-          style: { width: 40, height: 40, transform: [{ scale: 1.35 }], ...iconTint() ? { tintColor: iconTint() } : {} }
+          style: { width: 32, height: 32, ...iconTint() ? { tintColor: iconTint() } : {} }
         })
       );
     }
@@ -1306,6 +1306,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "white", customIconUrl: "", showNightyButton: true, sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with a Discord-native profile-bar button and white or blue logo.", "version": "1.12.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/aboveproof/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with a Discord-native profile-bar button and white or blue logo.", "version": "1.12.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/aboveproof/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();
