@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.nightytab",
-  "version": "1.12.1",
+  "version": "1.12.2",
   "display": {
     "name": "Nighty Tab",
     "description": "Nighty in mobile settings, with a Discord-native profile-bar button and white or blue logo.",
