@@ -816,14 +816,15 @@ var plugin = (() => {
     const { Page, Text, Button, Input, Toggle } = ui(r);
     const iconUrl = () => store.iconType === "custom" ? pageUrl(store.customIconUrl) : nightyBlueAsset;
     const iconTint = () => store.iconType === "white" || store.iconType === "grayscale" ? "#F2F3F5" : void 0;
+    const selectedIconSize = 28;
     const colors = { background: "#111214", surface: "#1E1F22", surfacePressed: "#26272B", border: "#2B2D31", text: "#F2F3F5", muted: "#B5BAC1", accent: "#5865F2", danger: "#F23F43" };
     function Icon() {
       r.useRefresh();
       const uri = iconUrl();
       return uri ? h(
         RN.View,
-        { style: { width: 20, height: 20, alignItems: "center", justifyContent: "center" } },
-        h(RN.Image, { source: { uri }, resizeMode: "contain", style: { width: 20, height: 20, ...iconTint() ? { tintColor: iconTint() } : {} }, accessibilityIgnoresInvertColors: true })
+        { style: { width: selectedIconSize, height: selectedIconSize, alignItems: "center", justifyContent: "center" } },
+        h(RN.Image, { source: { uri }, resizeMode: "contain", style: { width: selectedIconSize, height: selectedIconSize, ...iconTint() ? { tintColor: iconTint() } : {} }, accessibilityIgnoresInvertColors: true })
       ) : null;
     }
     const sending = /* @__PURE__ */ new Set();
@@ -1067,7 +1068,7 @@ var plugin = (() => {
         resizeMode: "contain",
         fadeDuration: 0,
         accessibilityIgnoresInvertColors: true,
-        style: { width: 20, height: 20, ...iconTint() ? { tintColor: iconTint() } : {} }
+        style: { width: selectedIconSize, height: selectedIconSize, ...iconTint() ? { tintColor: iconTint() } : {} }
       });
     }
     function profileImage() {
@@ -1075,13 +1076,13 @@ var plugin = (() => {
       if (!uri) return null;
       return h(
         RN.View,
-        { style: { width: 20, height: 20, alignItems: "center", justifyContent: "center" } },
+        { style: { width: selectedIconSize, height: selectedIconSize, alignItems: "center", justifyContent: "center" } },
         h(RN.Image, {
           source: { uri },
           resizeMode: "contain",
           fadeDuration: 0,
           accessibilityIgnoresInvertColors: true,
-          style: { width: 20, height: 20, ...iconTint() ? { tintColor: iconTint() } : {} }
+          style: { width: selectedIconSize, height: selectedIconSize, ...iconTint() ? { tintColor: iconTint() } : {} }
         })
       );
     }
@@ -1306,6 +1307,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "white", customIconUrl: "", showNightyButton: true, sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with a Discord-native profile-bar button and white or blue logo.", "version": "1.12.2", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/aboveproof/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with a Discord-native profile-bar button and white or blue logo.", "version": "1.12.3", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/aboveproof/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();
