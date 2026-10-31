@@ -810,14 +810,15 @@ var plugin = (() => {
   function NightyTab(r) {
     const { h, React, RN, store } = r;
     const { Page, Text, Button, Input, Toggle } = ui(r);
-    const iconUrl = () => store.iconType === "custom" ? pageUrl(store.customIconUrl) : store.iconType === "grayscale" ? grayIcon : blueIcon;
+    const iconUrl = () => store.iconType === "custom" ? pageUrl(store.customIconUrl) : store.iconType === "white" || store.iconType === "grayscale" ? grayIcon : blueIcon;
+    const iconTint = () => store.iconType === "white" || store.iconType === "grayscale" ? "#F2F3F5" : void 0;
     function Icon() {
       r.useRefresh();
       const uri = iconUrl();
       return uri ? h(
         RN.View,
         { style: { width: 24, height: 24, alignItems: "center", justifyContent: "center" } },
-        h(RN.Image, { source: { uri }, resizeMode: "contain", style: { width: 18, height: 18 }, accessibilityIgnoresInvertColors: true })
+        h(RN.Image, { source: { uri }, resizeMode: "contain", style: { width: 18, height: 18, ...iconTint() ? { tintColor: iconTint() } : {} }, accessibilityIgnoresInvertColors: true })
       ) : null;
     }
     const sending = /* @__PURE__ */ new Set();
@@ -939,7 +940,7 @@ var plugin = (() => {
         h(Toggle, { setting: "scriptUtils", label: "Script Utils functions", subLabel: "Download Script replies to an attachment with your prefix followed by dls." }),
         h(Text, null, "Nighty prefix (one character)"),
         h(Input, { value: store.nightyPrefix, onChange: (v) => r.set("nightyPrefix", v), autoCapitalize: "none", placeholder: "." }),
-        ...["blue", "grayscale", "custom"].map((style) => h(Button, { key: style, text: `${store.iconType === style ? "\u2713 " : ""}${style} icon`, onPress: () => r.set("iconType", style) })),
+        ...[{ value: "white", label: "White logo" }, { value: "blue", label: "Blue logo" }, { value: "custom", label: "Custom logo" }].map(({ value, label }) => h(Button, { key: value, text: `${store.iconType === value || value === "white" && store.iconType === "grayscale" ? "\u2713 " : ""}${label}`, onPress: () => r.set("iconType", value) })),
         store.iconType === "custom" ? h(Input, { value: store.customIconUrl, placeholder: "https:// image URL", autoCapitalize: "none", onChange: (v) => r.set("customIconUrl", v) }) : null,
         h(Icon),
         h(Text, { muted: true }, `Settings entry: ${r.status.settingsEntry ? "registered" : "unavailable"} \xB7 Message menu: ${r.status.messageMenu ? "registered" : "unavailable"} \xB7 Profile button: ${store.showNightyButton ? r.status.profileButton === "added" ? "added beside Settings" : "watching" : "off"}`)
@@ -1003,7 +1004,7 @@ var plugin = (() => {
         resizeMode: "contain",
         fadeDuration: 0,
         accessibilityIgnoresInvertColors: true,
-        style: { width: 48, height: 32 }
+        style: { width: 40, height: 32, ...iconTint() ? { tintColor: iconTint() } : {} }
       });
     }
     function profileImage() {
@@ -1011,13 +1012,13 @@ var plugin = (() => {
       if (!uri) return null;
       return h(
         RN.View,
-        { style: { width: 52, height: 40, alignItems: "center", justifyContent: "center", overflow: "visible" } },
+        { style: { width: 40, height: 40, alignItems: "center", justifyContent: "center" } },
         h(RN.Image, {
           source: { uri },
           resizeMode: "contain",
           fadeDuration: 0,
           accessibilityIgnoresInvertColors: true,
-          style: { width: 48, height: 32 }
+          style: { width: 40, height: 28, ...iconTint() ? { tintColor: iconTint() } : {} }
         })
       );
     }
@@ -1046,11 +1047,33 @@ var plugin = (() => {
       if (typeof control === "function") return h(control);
       return control || closeMark(onClose);
     }
+    function nativeControlTree(node, depth = 0) {
+      if (Array.isArray(node)) return node.map((child) => nativeControlTree(child, depth));
+      if (typeof node === "string") return isSettingsText(node) ? "Nighty" : node;
+      if (!React.isValidElement(node)) return node;
+      const hint = `${iconHint(node)} ${nodeText(node)}`;
+      if (depth > 0 && /SettingsIcon|GearIcon|CogIcon|\b(?:gear|cog)\b/i.test(hint) && !pressProps(node.props)) return profileImage();
+      const props = {};
+      for (const key of ["accessibilityLabel", "accessibilityHint", "aria-label", "testID", "nativeID", "label", "name", "id"]) {
+        if (typeof node.props?.[key] === "string" && isSettingsText(node.props[key])) props[key] = "Nighty";
+      }
+      if (node.props?.children != null) props.children = nativeControlTree(node.props.children, depth + 1);
+      return React.cloneElement(node, props);
+    }
     function NightyProfileButton({ sample }) {
       r.useRefresh();
-      const [open, setOpen] = React.useState(false);
-      const Modal = RN.Modal;
-      const close = () => setOpen(false);
+      const onPress = press();
+      if (React.isValidElement(sample)) {
+        const native = nativeControlTree(sample);
+        return React.cloneElement(native, {
+          key: "mime-nighty-profile-button",
+          accessibilityLabel: "Nighty",
+          accessibilityHint: "Open Nighty",
+          testID: "mime-nighty-profile-button",
+          onPress,
+          onPressOut: void 0
+        });
+      }
       return h(
         RN.Pressable || RN.TouchableOpacity,
         {
@@ -1058,26 +1081,11 @@ var plugin = (() => {
           accessibilityHint: "Open Nighty",
           accessibilityRole: "button",
           testID: "mime-nighty-profile-button",
-          hitSlop: { top: 8, bottom: 8, left: 8, right: 8 },
-          onPress: () => {
-            if (!r.active || !store.showNightyButton) return;
-            if (!openNighty()) setOpen(true);
-          },
-          style: { flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center", overflow: "visible" }
+          onPress,
+          style: { flex: 1, alignItems: "center", justifyContent: "center" }
         },
         profileImage(),
-        open && Modal ? h(Modal, {
-          visible: true,
-          animationType: "slide",
-          presentationStyle: "fullScreen",
-          statusBarTranslucent: true,
-          onRequestClose: close
-        }, h(
-          RN.View,
-          { style: { flex: 1, width: "100%", paddingTop: readInset("top") } },
-          renderClose(close),
-          h(NightyPage, { close })
-        )) : null
+        h(RN.Text, { style: { color: "#F2F3F5", fontSize: 14, lineHeight: 18, fontWeight: "500", marginTop: 2 } }, "Nighty")
       );
     }
     function nightyControl(sample) {
@@ -1150,9 +1158,9 @@ var plugin = (() => {
       r.status.profileButton = patched === false ? "unavailable" : r.status.profileButton === "replaced" ? "replaced" : "patched";
     } };
   }
-  NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "blue", customIconUrl: "", showNightyButton: true, sessions: {} };
+  NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "white", customIconUrl: "", showNightyButton: true, sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with an optional profile-bar button and Download Script replies.", "version": "1.7.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with a Discord-native profile-bar button and white or blue logo.", "version": "1.8.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/aboveproof/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();
