@@ -30,6 +30,8 @@ If you are testing another fork, replace `aboveproof/Snow-Plugins` and `main` in
 
 Inside the Nighty page, pull down from the top to reload. Pinch zoom and horizontal page movement are disabled so the embedded page stays fixed in place.
 
+After the first successful login, Nighty Tab saves Nighty's access token locally for the configured host and restores its cookie when the tab is reopened. Your username and password are not stored. Nighty may ask you to sign in again if the server expires or revokes the token.
+
 ## Updating
 
 Remove the older copy first if your client does not replace plugins cleanly, then install the same manifest URL again. Reload Discord after updating.
