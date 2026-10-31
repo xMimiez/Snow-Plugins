@@ -28,6 +28,8 @@ If you are testing another fork, replace `aboveproof/Snow-Plugins` and `main` in
 4. Choose **White logo** to match Discord's native bar icons, or **Blue logo** for Nighty's brand color. A custom HTTPS image URL is also supported.
 5. Tap **Open Nighty** to test the page.
 
+Inside the Nighty page, pull down from the top to reload. Pinch zoom and horizontal page movement are disabled so the embedded page stays fixed in place.
+
 ## Updating
 
 Remove the older copy first if your client does not replace plugins cleanly, then install the same manifest URL again. Reload Discord after updating.
