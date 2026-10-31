@@ -869,7 +869,7 @@ var plugin = (() => {
       return `(() => { try { var saved = ${saved}; if (saved) { var secure = location.protocol === 'https:' ? '; Secure' : ''; document.cookie = 'access_token=' + saved + '; Path=/; Max-Age=2592000; SameSite=Lax' + secure; try { localStorage.setItem('access_token', saved); } catch (e) {} } if (window.__mimeNightySession) return true; window.__mimeNightySession = true; var send = function (value) { if (typeof value !== 'string' || !value || !window.ReactNativeWebView) return; window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'NIGHTY_TOKEN', token: value })); }; var orig = window.fetch; if (typeof orig === 'function') { window.fetch = function () { var args = arguments; return Promise.resolve(orig.apply(this, args)).then(function (res) { try { var first = args[0]; var url = typeof first === 'string' ? first : (first && first.url) || ''; if (String(url).indexOf('/api/login') !== -1 && res && res.clone) res.clone().json().then(function (data) { if (data && typeof data.access_token === 'string') send(data.access_token); }).catch(function () {}); } catch (e) {} return res; }); }; } } catch (e) {} return true; })();`;
     }
     function pageScript(token) {
-      return `${sessionScript(token)}(() => { try { var apply = function () { var meta = document.querySelector('meta[name="viewport"]'); if (!meta) { meta = document.createElement('meta'); meta.name = 'viewport'; document.head.appendChild(meta); } meta.content = 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'; document.documentElement.style.overflowX = 'hidden'; document.documentElement.style.touchAction = 'pan-y'; if (document.body) { document.body.style.width = '100%'; document.body.style.maxWidth = '100%'; document.body.style.overflowX = 'hidden'; document.body.style.touchAction = 'pan-y'; document.body.style.marginBottom = '0'; } }; apply(); document.addEventListener('DOMContentLoaded', apply, { once: true }); } catch (e) {} return true; })();`;
+      return `${sessionScript(token)}(() => { try { var apply = function () { var meta = document.querySelector('meta[name="viewport"]'); if (!meta) { meta = document.createElement('meta'); meta.name = 'viewport'; document.head.appendChild(meta); } meta.content = 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'; var style = document.getElementById('mime-nighty-mobile-fit'); if (!style) { style = document.createElement('style'); style.id = 'mime-nighty-mobile-fit'; style.textContent = 'html,body,#root,#app{width:100%!important;max-width:100vw!important;margin-left:0!important;margin-right:0!important;overflow-x:hidden!important}*,*:before,*:after{box-sizing:border-box}'; document.head.appendChild(style); } document.documentElement.style.touchAction = 'pan-y'; if (document.body) { document.body.style.touchAction = 'pan-y'; document.body.style.marginBottom = '0'; } }; apply(); document.addEventListener('DOMContentLoaded', apply, { once: true }); } catch (e) {} return true; })();`;
     }
     function onSessionMessage(event) {
       if (!r.active) return;
@@ -1113,26 +1113,55 @@ var plugin = (() => {
       if (typeof control === "function") return h(control);
       return control || closeMark(onClose);
     }
-    function NightySettingsPage(props) {
-      const navigation = r.common.navigation || r.find("push", "pushLazy", "pop");
-      const close = () => {
-        if (typeof props?.navigation?.goBack === "function") props.navigation.goBack();
-        else navigation?.pop?.();
-      };
-      return h(RN.View, { style: { flex: 1, width: "100%", backgroundColor: "#000000" } },
-        h(RN.View, { style: { height: 58, flexDirection: "row", alignItems: "center", borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: "#000000" } },
-          h(RN.View, { style: { width: 64, alignItems: "center", justifyContent: "center" } }, renderClose(close)),
-          h(RN.Text, { style: { flex: 1, color: colors.text, fontSize: 20, lineHeight: 25, fontWeight: "700", textAlign: "center" } }, "Nighty"),
-          h(RN.View, { style: { width: 64 } })
-        ),
-        h(NightyPage)
-      );
-    }
     function treeContainsSettingsLabel(node) {
       if (Array.isArray(node)) return node.some(treeContainsSettingsLabel);
       if (typeof node === "string") return isSettingsText(node);
       if (!React.isValidElement(node)) return false;
       return treeContainsSettingsLabel(node.props?.children);
+    }
+    function treeContainsNightyLabel(node) {
+      if (Array.isArray(node)) return node.some(treeContainsNightyLabel);
+      if (typeof node === "string") return /^Nighty$/i.test(node.trim());
+      if (!React.isValidElement(node)) return false;
+      return treeContainsNightyLabel(node.props?.children);
+    }
+    function repairNightyChildren(node, state) {
+      if (Array.isArray(node)) {
+        const labelIndex = node.findIndex(treeContainsNightyLabel);
+        return node.map((child, index) => {
+          if (!state.icon && labelIndex >= 0 && index !== labelIndex && React.isValidElement(child)) {
+            state.icon = true;
+            state.changed = true;
+            return profileImage();
+          }
+          return repairNightyChildren(child, state);
+        });
+      }
+      if (!React.isValidElement(node)) return node;
+      const props = {};
+      for (const key of ["icon", "Icon", "IconComponent", "renderIcon", "leading", "leadingIcon", "iconSource", "iconName", "glyph", "image"]) {
+        if (node.props?.[key] != null) {
+          props[key] = typeof node.props[key] === "function" ? ProfileBarIcon : profileImage();
+          state.changed = true;
+        }
+      }
+      if (node.props?.children != null) props.children = repairNightyChildren(node.props.children, state);
+      return Object.keys(props).length ? React.cloneElement(node, props) : node;
+    }
+    function repairNightyControl(element) {
+      if (!isIconControl(element)) return element;
+      const isNighty = /(?:^|\s)Nighty(?:\s|$)|mime-nighty-profile-button/i.test(nodeText(element)) || treeContainsNightyLabel(element.props?.children);
+      if (!isNighty) return element;
+      const state = { icon: false, changed: false };
+      const props = {};
+      for (const key of ["icon", "Icon", "IconComponent", "renderIcon", "leading", "leadingIcon", "iconSource", "iconName", "glyph", "image"]) {
+        if (element.props?.[key] != null) {
+          props[key] = typeof element.props[key] === "function" ? ProfileBarIcon : profileImage();
+          state.changed = true;
+        }
+      }
+      if (element.props?.children != null) props.children = repairNightyChildren(element.props.children, state);
+      return state.changed ? React.cloneElement(element, props) : element;
     }
     function nativeControlTree(node, depth = 0, state = { icon: false }) {
       if (Array.isArray(node)) {
@@ -1154,9 +1183,8 @@ var plugin = (() => {
       }
       const props = {};
       for (const key of ["icon", "Icon", "IconComponent", "renderIcon", "leading", "leadingIcon"]) {
-        if (!state.icon && node.props?.[key] != null) {
+        if (node.props?.[key] != null) {
           props[key] = typeof node.props[key] === "function" ? ProfileBarIcon : profileImage();
-          state.icon = true;
         }
       }
       for (const key of ["accessibilityLabel", "accessibilityHint", "aria-label", "testID", "nativeID", "label", "name", "id"]) {
@@ -1198,7 +1226,10 @@ var plugin = (() => {
     }
     function nightyRecord(sample) {
       const image = toolbarIcon();
-      const record = sample && typeof sample === "object" ? { ...sample } : {};
+      const record = {};
+      if (sample && typeof sample === "object") for (const [key, value] of Object.entries(sample)) {
+        if (!/(?:icon|image|glyph|leading)/i.test(key)) record[key] = value;
+      }
       for (const key of Object.keys(record)) {
         if (typeof record[key] === "string" && isSettingsText(record[key])) record[key] = "Nighty";
       }
@@ -1215,6 +1246,8 @@ var plugin = (() => {
     }
     function applyToolbar(element) {
       if (!r.active || !store.showNightyButton || !element?.props) return element;
+      const repaired = repairNightyControl(element);
+      if (repaired !== element) return repaired;
       const slotted = insertNightySlot(r.React, element, nightyControl);
       if (slotted !== element) {
         r.status.profileButton = "added";
@@ -1244,7 +1277,14 @@ var plugin = (() => {
       });
     }
     return { Settings, NightyPage, download, start() {
-      r.status.settingsEntry = registerSection(r, { name: "Nighty", items: [{ key: "MIME_NIGHTY", title: () => "Nighty", headerShown: false, IconComponent: Icon, render: async () => ({ default: NightySettingsPage }) }] });
+      r.status.settingsEntry = registerSection(r, { name: "Nighty", items: [{
+        key: "MIME_NIGHTY",
+        title: () => "Nighty",
+        headerShown: false,
+        IconComponent: Icon,
+        onPress: () => { if (!openNighty()) openSheet(); },
+        render: async () => ({ default: NightyPage })
+      }] });
       r.status.messageMenu = patchLazySheet(r, (key, props) => key === "MessageLongPressActionSheet" && canDownload(store, props?.message) ? { key: "mime-nighty-download", label: "Download Script", icon: h(Icon), onPress: () => download(props.message) } : null);
       rememberMessages(r.common?.i18n?.Messages || r.find("Messages")?.Messages);
       const patched = watch(React, "createElement");
@@ -1266,6 +1306,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "white", customIconUrl: "", showNightyButton: true, sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with a Discord-native profile-bar button and white or blue logo.", "version": "1.11.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/aboveproof/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Nighty in mobile settings, with a Discord-native profile-bar button and white or blue logo.", "version": "1.12.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/aboveproof/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();
