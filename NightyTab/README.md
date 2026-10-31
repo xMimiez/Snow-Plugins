@@ -1,6 +1,6 @@
 # Nighty Tab
 
-Nighty Tab adds Nighty to Discord's mobile settings and can place a **Nighty** shortcut beside **Settings** in Discord's profile action bar. The shortcut reuses Discord's own control layout, so its spacing, label, touch target, and alignment match the other actions.
+Nighty Tab adds Nighty to Discord's mobile settings and profile action bar. The shortcut uses Discord's control layout, spacing, label, touch target, and alignment.
 
 ## Install on KettuTweak, Snowcord, or another compatible mobile client
 
@@ -12,13 +12,13 @@ You need a client that supports Bunny/Snow **spec 3** plugins and installation f
 4. Paste this manifest URL:
 
    ```text
-   https://raw.githubusercontent.com/aboveproof/Snow-Plugins/main/NightyTab/manifest.json
+   https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/NightyTab/manifest.json
    ```
 
 5. Install and enable **Nighty Tab**.
 6. Reload or fully restart Discord if the new profile-bar button does not appear immediately.
 
-If you are testing another fork, replace `aboveproof/Snow-Plugins` and `main` in the URL with your GitHub username, repository, and branch. The `manifest.json` and `index.js` files must remain together in the `NightyTab` folder.
+For a fork, replace `xMimiez/Snow-Plugins` and `main` with your GitHub username, repository, and branch. Keep `manifest.json` and `index.js` together in the `NightyTab` folder.
 
 ## Set up Nighty Tab
 
@@ -30,7 +30,7 @@ If you are testing another fork, replace `aboveproof/Snow-Plugins` and `main` in
 
 Inside the Nighty page, pull down from the top to reload. Pinch zoom and horizontal page movement are disabled so the embedded page stays fixed in place.
 
-After the first successful login, Nighty Tab saves Nighty's access token locally for the configured host and restores its cookie when the tab is reopened. Your username and password are not stored. Nighty may ask you to sign in again if the server expires or revokes the token.
+After you sign in, Nighty Tab saves Nighty's access token on your device for the configured host. The plugin restores the cookie when you reopen the tab. Nighty handles your username and password. The server may ask you to sign in after it expires or revokes the token.
 
 ## Updating
 
@@ -38,7 +38,7 @@ Remove the older copy first if your client does not replace plugins cleanly, the
 
 ## Troubleshooting
 
-- **The button is missing:** enable **Profile Nighty button**, then reload Discord. Discord UI updates can temporarily break injected controls.
+- **The button is missing:** enable **Profile shortcut**, then reload Discord. A Discord UI update may break the injected control.
 - **The old oversized logo remains:** remove the old plugin, restart Discord, reinstall from the manifest URL, and reload once more.
 - **Nighty does not load:** verify that the configured address begins with `http://` or `https://` and does not contain embedded credentials.
 - **Install from URL fails:** open the manifest URL in your browser to confirm it is reachable, then copy it again without spaces.
@@ -46,4 +46,4 @@ Remove the older copy first if your client does not replace plugins cleanly, the
 
 ## Notes
 
-Nighty Tab is a third-party plugin and is not affiliated with Discord or Nighty. Modified Discord clients may violate Discord's Terms of Service; use them at your own risk.
+Nighty Tab has no affiliation with Discord or Nighty. Discord may prohibit modified clients under its Terms of Service. Use one at your own risk.
