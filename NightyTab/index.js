@@ -855,10 +855,83 @@ var plugin = (() => {
       }
     }
     function cleanToken(value) {
-      if (typeof value !== "string") return "";
-      const token = value.trim();
-      if (token.length < 8 || token.length > 4096 || !/^[\w.~+/-]+=*$/.test(token)) return "";
+      if (typeof value !== "string" && typeof value !== "number") return "";
+      const token = String(value).trim().replace(/^Bearer\s+/i, "");
+      if (!token || token.length > 8192 || /[;\r\n]/.test(token)) return "";
       return token;
+    }
+    const NATIVE_SESSION_KEY = "MIME_NIGHTYTAB_SESSION_V1";
+    const sessionDiagnostics = { restored: false, captured: false, page: "waiting" };
+    function nativeModule(...names) {
+      try {
+        for (const name of names) {
+          const turbo = globalThis.__turboModuleProxy?.(name);
+          if (turbo) return turbo;
+          const legacy = globalThis.nativeModuleProxy?.[name];
+          if (legacy) return legacy;
+        }
+      } catch {
+      }
+      return null;
+    }
+    function nativeCache() {
+      const module = nativeModule("NativeCacheModule", "MMKVManager");
+      return module?.getItem && module?.setItem ? module : null;
+    }
+    function nativeCookieManager() {
+      const found = r.find("setFromResponse", "clearByName", "getAll");
+      const module = found?.default || found || nativeModule("RNCookieManagerIOS", "RNCookieManagerAndroid", "CookieManager");
+      return module?.set || module?.setFromResponse ? module : null;
+    }
+    async function persistBrowserCookie(host, token) {
+      const manager = nativeCookieManager();
+      const src = pageUrl(store.url);
+      if (!manager || !src || !host || !cleanToken(token)) return;
+      try {
+        const url = new URL(src);
+        if (url.host !== host) return;
+        const expires = new Date(Date.now() + 2592e6).toISOString();
+        if (typeof manager.set === "function") {
+          await manager.set(src, { name: "access_token", value: token, path: "/", expires, secure: url.protocol === "https:" }, true);
+        } else {
+          const secure = url.protocol === "https:" ? "; Secure" : "";
+          await manager.setFromResponse(src, `access_token=${token}; Path=/; Expires=${new Date(expires).toUTCString()}; SameSite=Lax${secure}`);
+        }
+      } catch (error) {
+        r.error("Save Nighty browser cookie", error);
+      }
+    }
+    async function restoreNativeSession() {
+      const cache = nativeCache();
+      if (!cache) return;
+      try {
+        const raw = await cache.getItem(NATIVE_SESSION_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        const host = typeof saved?.host === "string" ? saved.host : "";
+        const token = cleanToken(saved?.token);
+        if (!host || !token) return;
+        sessionDiagnostics.restored = true;
+        const current = store.sessions && typeof store.sessions === "object" ? store.sessions : {};
+        store.sessionHost = host;
+        store.sessionToken = token;
+        store.sessions = { ...current, [host]: token };
+        await persistBrowserCookie(host, token);
+        r.changed();
+      } catch (error) {
+        r.error("Restore Nighty login", error);
+      }
+    }
+    function persistNativeSession(host, token) {
+      const cache = nativeCache();
+      if (!cache) return;
+      try {
+        sessionDiagnostics.captured = true;
+        const saved = JSON.stringify({ host, token, savedAt: Date.now() });
+        Promise.resolve(cache.setItem(NATIVE_SESSION_KEY, saved)).catch((error) => r.error("Save Nighty login", error));
+      } catch (error) {
+        r.error("Save Nighty login", error);
+      }
     }
     function sessionToken() {
       const host = pageHost();
@@ -868,9 +941,90 @@ var plugin = (() => {
       const legacy = cleanToken(store.sessions?.[host]);
       return legacy || "";
     }
+    async function saveSessionToken(value) {
+      const token = cleanToken(value);
+      const host = pageHost();
+      if (!token || !host) return false;
+      const current = store.sessions && typeof store.sessions === "object" ? store.sessions : {};
+      store.sessionHost = host;
+      store.sessionToken = token;
+      store.sessions = { ...current, [host]: token };
+      sessionDiagnostics.captured = true;
+      persistNativeSession(host, token);
+      await persistBrowserCookie(host, token);
+      r.changed();
+      return true;
+    }
+    async function loginToNighty(username, password) {
+      const src = pageUrl(store.url);
+      if (!src) throw new Error("Set a valid Nighty address first.");
+      if (!username || !password) throw new Error("Enter your Nighty username and password.");
+      const endpoint = new URL("/api/login", src).toString();
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ username, password }),
+        credentials: "include"
+      });
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(`Nighty returned HTTP ${response.status}.`);
+      }
+      if (!response.ok) throw new Error(data?.message || data?.error || "Nighty rejected that login.");
+      const cookieHeaders = [];
+      const directCookie = response.headers?.get?.("set-cookie") || response.headers?.get?.("Set-Cookie");
+      if (directCookie) cookieHeaders.push(directCookie);
+      try {
+        response.headers?.forEach?.((value, key) => {
+          if (String(key).toLowerCase() === "set-cookie") cookieHeaders.push(value);
+        });
+      } catch {
+      }
+      try {
+        const mapped = response.headers?.map?.["set-cookie"] || response.headers?.map?.["Set-Cookie"];
+        if (mapped) cookieHeaders.push(...Array.isArray(mapped) ? mapped : [mapped]);
+        const raw = response.headers?.raw?.();
+        const rawCookies = raw?.["set-cookie"] || raw?.["Set-Cookie"];
+        if (rawCookies) cookieHeaders.push(...Array.isArray(rawCookies) ? rawCookies : [rawCookies]);
+      } catch {
+      }
+      let cookieToken = "";
+      for (const header of cookieHeaders.flat()) {
+        const cookieMatch = String(header).match(/(?:^|[,;]\s*)access_token=([^;,]+)/i);
+        if (cookieMatch) {
+          try {
+            cookieToken = decodeURIComponent(cookieMatch[1].trim());
+          } catch {
+            cookieToken = cookieMatch[1].trim();
+          }
+          if (cookieToken) break;
+        }
+      }
+      const candidates = [
+        data?.access_token,
+        data?.accessToken,
+        data?.token,
+        data?.session_token,
+        data?.sessionToken,
+        data?.data?.access_token,
+        data?.data?.accessToken,
+        data?.data?.token,
+        data?.result?.access_token,
+        data?.result?.token,
+        cookieToken,
+        typeof data?.message === "string" && data.message.length >= 8 && !/\s/.test(data.message) ? data.message : "",
+        response.headers?.get?.("x-access-token"),
+        response.headers?.get?.("authorization")
+      ];
+      for (const candidate of candidates) if (await saveSessionToken(candidate)) return;
+      const shape = data && typeof data === "object" ? Object.entries(data).map(([key, value]) => `${key}:${Array.isArray(value) ? "array" : typeof value}`).join(", ") : typeof data;
+      throw new Error(`Nighty login succeeded, but its session cookie could not be read (${shape || "empty response"}).`);
+    }
     function sessionScript(token) {
       const saved = JSON.stringify(cleanToken(token) || "");
-      return `(() => { try { var saved = ${saved}; var persist = function (value) { if (typeof value !== 'string' || !value) return; var secure = location.protocol === 'https:' ? '; Secure' : ''; document.cookie = 'access_token=' + value + '; Path=/; Max-Age=2592000; SameSite=Lax' + secure; try { localStorage.setItem('access_token', value); } catch (e) {} }; if (saved) persist(saved); if (window.__mimeNightySession) return true; window.__mimeNightySession = true; var lastSent = ''; var send = function (value) { if (typeof value !== 'string' || !value || value === lastSent || !window.ReactNativeWebView) return; lastSent = value; window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'NIGHTY_TOKEN', token: value })); }; var readCookie = function () { try { var parts = document.cookie.split(';'); for (var i = 0; i < parts.length; i++) { var part = parts[i].trim(); if (part.indexOf('access_token=') === 0) return decodeURIComponent(part.slice(13)); } } catch (e) {} return ''; }; var publish = function () { var value = readCookie(); if (!value) { try { value = localStorage.getItem('access_token') || ''; } catch (e) {} } if (value && value !== lastSent) { persist(value); send(value); } }; publish(); var orig = window.fetch; if (typeof orig === 'function') { window.fetch = function () { var args = arguments; return Promise.resolve(orig.apply(this, args)).then(function (res) { try { var first = args[0]; var url = typeof first === 'string' ? first : (first && first.url) || ''; if (String(url).indexOf('/api/login') !== -1 && res && res.clone) res.clone().json().then(function (data) { if (data && typeof data.access_token === 'string') { persist(data.access_token); send(data.access_token); } }).catch(function () {}); } catch (e) {} return res; }); }; } document.addEventListener('visibilitychange', publish); window.addEventListener('pageshow', publish); window.addEventListener('focus', publish); window.setInterval(publish, 1000); } catch (e) {} return true; })();`;
+      return `(() => { try { var saved = ${saved}; if (window.__mimeNightySession) return true; window.__mimeNightySession = true; var lastSent = ''; var post = function (data) { if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(data)); }; var send = function (value) { if (typeof value !== 'string' || !value || value === lastSent) return; lastSent = value; post({ type: 'NIGHTY_TOKEN', token: value }); try { window.location.href = 'nightytab://session?token=' + encodeURIComponent(value); } catch (e) {} }; var desc = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie') || Object.getOwnPropertyDescriptor(HTMLDocument.prototype, 'cookie'); var rawSet = function (value) { if (desc && desc.set) return desc.set.call(document, value); document.cookie = value; }; var persist = function (value) { if (typeof value !== 'string' || !value) return; var secure = location.protocol === 'https:' ? '; Secure' : ''; rawSet('access_token=' + encodeURIComponent(value) + '; Path=/; Max-Age=2592000; SameSite=Lax' + secure); try { localStorage.setItem('access_token', value); } catch (e) {} }; if (desc && desc.get && desc.set) { Object.defineProperty(document, 'cookie', { configurable: true, enumerable: true, get: function () { return desc.get.call(document); }, set: function (value) { var str = String(value); var match = str.match(/access_token=([^;]+)/i); if (match) { var token = ''; try { token = decodeURIComponent(match[1]); } catch (e) { token = match[1]; } str = str.replace(/;[ ]*max-age=[^;]*/ig, '').replace(/;[ ]*expires=[^;]*/ig, '') + '; Max-Age=2592000'; try { localStorage.setItem('access_token', token); } catch (e) {} send(token); } return desc.set.call(document, str); } }); } if (saved) persist(saved); var readCookie = function () { try { var parts = document.cookie.split(';'); for (var i = 0; i < parts.length; i++) { var part = parts[i].trim(); if (part.indexOf('access_token=') === 0) return decodeURIComponent(part.slice(13)); } } catch (e) {} return ''; }; var publish = function () { var value = readCookie(); if (!value) { try { value = localStorage.getItem('access_token') || ''; } catch (e) {} } if (value && value !== lastSent) { persist(value); send(value); } }; var report = function () { post({ type: 'NIGHTY_AUTH_STATE', login: !!document.querySelector('input[type="password"]'), cookie: !!readCookie() }); }; publish(); window.setTimeout(report, 400); var orig = window.fetch; if (typeof orig === 'function') { window.fetch = function () { var args = arguments; return Promise.resolve(orig.apply(this, args)).then(function (res) { try { var first = args[0]; var url = typeof first === 'string' ? first : (first && first.url) || ''; if (String(url).indexOf('/api/login') !== -1 && res && res.clone) res.clone().json().then(function (data) { if (data && typeof data.access_token === 'string') { persist(data.access_token); send(data.access_token); } }).catch(function () {}); } catch (e) {} return res; }); }; } document.addEventListener('DOMContentLoaded', function () { window.setTimeout(report, 400); }, { once: true }); document.addEventListener('visibilitychange', publish); window.addEventListener('pageshow', function () { publish(); window.setTimeout(report, 400); }); window.addEventListener('focus', publish); window.setInterval(publish, 1000); } catch (e) {} return true; })();`;
     }
     function pageScript(token) {
       const saved = JSON.stringify(cleanToken(token) || "");
@@ -886,16 +1040,25 @@ var plugin = (() => {
       } catch {
         return;
       }
+      if (data?.type === "NIGHTY_AUTH_STATE") {
+        sessionDiagnostics.page = data.login ? sessionToken() ? "rejected" : "login" : "signed-in";
+        r.changed();
+        return;
+      }
       if (data?.type !== "NIGHTY_TOKEN") return;
-      const token = cleanToken(data.token);
-      if (!token) return;
-      const current = store.sessions && typeof store.sessions === "object" ? store.sessions : {};
-      if (store.sessionHost === host && cleanToken(store.sessionToken) === token && current[host] === token) return;
-      store.sessionHost = host;
-      store.sessionToken = token;
-      store.sessions = { ...current, [host]: token };
-      r.changed();
+      saveSessionToken(data.token);
       Promise.resolve(r.api.storage.flush()).catch((error) => r.error("Save Nighty login", error));
+    }
+    function rememberSessionFromUrl(value) {
+      try {
+        const url = new URL(value);
+        if (url.protocol !== "nightytab:" || url.hostname !== "session") return false;
+        const token = cleanToken(url.searchParams.get("token"));
+        if (token) saveSessionToken(token);
+        return true;
+      } catch {
+        return false;
+      }
     }
     function readInset(edge) {
       try {
@@ -917,6 +1080,7 @@ var plugin = (() => {
       const frame = { flex: 1, width: "100%", backgroundColor: "#080D1B", overflow: "hidden" };
       const allow = (req) => {
         const url = req?.url || "";
+        if (rememberSessionFromUrl(url)) return false;
         return !url || url === "about:blank" || url === src || !!pageUrl(url);
       };
       return h(
@@ -928,10 +1092,10 @@ var plugin = (() => {
           source: { uri: src, ...savedSession ? { headers: { Cookie: `access_token=${savedSession}` } } : {} },
           style: { flex: 1, width: "100%", backgroundColor: "#080D1B" },
           containerStyle: { flex: 1, backgroundColor: "#080D1B" },
-          originWhitelist: ["http://*", "https://*"],
+          originWhitelist: ["http://*", "https://*", "nightytab://*"],
           javaScriptEnabled: true,
           domStorageEnabled: true,
-          cacheEnabled: true,
+          cacheEnabled: false,
           sharedCookiesEnabled: true,
           thirdPartyCookiesEnabled: true,
           incognito: false,
@@ -963,11 +1127,17 @@ var plugin = (() => {
     }
     function Settings({ close }) {
       r.useRefresh();
+      const [loginUsername, setLoginUsername] = React.useState("");
+      const [loginPassword, setLoginPassword] = React.useState("");
+      const [loginError, setLoginError] = React.useState("");
+      const [loggingIn, setLoggingIn] = React.useState(false);
       const selectedLogo = store.iconType === "grayscale" ? "white" : store.iconType;
+      const sessionStatus = !sessionToken() ? "No login token was captured." : sessionDiagnostics.page === "rejected" ? "Nighty rejected the restored login token." : sessionDiagnostics.restored ? "Login token restored after launch." : sessionDiagnostics.captured ? "Login token captured and saved." : "Login token is stored.";
+      const storageStatus = `v1.14.9 · Native backup ${nativeCache() ? "available" : "unavailable"} · WebKit cookie bridge ${nativeCookieManager() ? "available" : "using page fallback"}`;
       const sectionLabel = (label) => h(RN.Text, { style: { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, label);
       const card = (...children) => h(RN.View, { style: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: "hidden" } }, ...children);
       const divider = () => h(RN.View, { style: { height: 1, backgroundColor: colors.border, marginLeft: 16 } });
-      const field = ({ value, onChange, placeholder, maxLength, keyboardType }) => h(RN.TextInput, {
+      const field = ({ value, onChange, placeholder, maxLength, keyboardType, secureTextEntry, autoComplete }) => h(RN.TextInput, {
         value,
         onChangeText: onChange,
         placeholder,
@@ -976,6 +1146,8 @@ var plugin = (() => {
         autoCorrect: false,
         maxLength,
         keyboardType,
+        secureTextEntry,
+        autoComplete,
         selectionColor: colors.accent,
         style: { minHeight: 50, color: colors.text, fontSize: 16, lineHeight: 21, backgroundColor: "#151619", borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 12 }
       });
@@ -1008,8 +1180,32 @@ var plugin = (() => {
         card(h(RN.View, { style: { padding: 14 } },
           field({ value: store.url, placeholder: "https://nighty.example", onChange: (value) => r.set("url", value), keyboardType: "url" }),
           store.url && !pageUrl(store.url) ? h(RN.Text, { style: { color: colors.danger, fontSize: 13, lineHeight: 18, marginTop: 8 } }, "Use an HTTP or HTTPS address without a username or password.") : null,
+          !sessionToken() ? h(RN.View, { style: { gap: 10, marginTop: 12 } },
+            field({ value: loginUsername, placeholder: "Nighty username", onChange: setLoginUsername, autoComplete: "username" }),
+            field({ value: loginPassword, placeholder: "Nighty password", onChange: setLoginPassword, secureTextEntry: true, autoComplete: "current-password" }),
+            h(RN.Pressable || RN.TouchableOpacity, {
+              accessibilityRole: "button",
+              disabled: loggingIn,
+              onPress: async () => {
+                setLoggingIn(true);
+                setLoginError("");
+                try {
+                  await loginToNighty(loginUsername.trim(), loginPassword);
+                  setLoginPassword("");
+                } catch (error) {
+                  setLoginError(error?.message || "Could not sign in to Nighty.");
+                } finally {
+                  setLoggingIn(false);
+                }
+              },
+              style: ({ pressed } = {}) => ({ height: 46, borderRadius: 12, backgroundColor: pressed ? "#3D424E" : "#34373F", opacity: loggingIn ? 0.6 : 1, alignItems: "center", justifyContent: "center" })
+            }, h(RN.Text, { style: { color: colors.text, fontSize: 15, lineHeight: 20, fontWeight: "700" } }, loggingIn ? "Signing in…" : "Save Nighty login")),
+            loginError ? h(RN.Text, { style: { color: colors.danger, fontSize: 13, lineHeight: 18 } }, loginError) : null,
+            h(RN.Text, { style: { color: colors.muted, fontSize: 12, lineHeight: 17 } }, "Your password is used for this request and is not saved.")
+          ) : null,
           h(RN.Pressable || RN.TouchableOpacity, { accessibilityRole: "button", onPress: () => { if (!openNighty()) openSheet(); }, style: ({ pressed } = {}) => ({ height: 48, borderRadius: 12, backgroundColor: pressed ? "#4752C4" : colors.accent, alignItems: "center", justifyContent: "center", marginTop: 12 }) }, h(RN.Text, { style: { color: "#FFFFFF", fontSize: 16, lineHeight: 20, fontWeight: "700" } }, "Open Nighty")),
-          h(RN.Text, { style: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 8 } }, sessionToken() ? "Login saved for this address." : "Sign in once to save your login.")
+          h(RN.Text, { style: { color: sessionDiagnostics.page === "rejected" ? colors.danger : colors.muted, fontSize: 13, lineHeight: 18, marginTop: 8 } }, sessionStatus),
+          h(RN.Text, { style: { color: colors.muted, fontSize: 12, lineHeight: 17, marginTop: 4 } }, storageStatus)
         )),
         h(RN.View, { style: { height: 22 } }),
         sectionLabel("Behavior"),
@@ -1292,7 +1488,8 @@ var plugin = (() => {
         return next === result ? void 0 : next;
       });
     }
-    return { Settings, NightyPage, download, start() {
+    return { Settings, NightyPage, download, async start() {
+      await restoreNativeSession();
       r.status.settingsEntry = registerSection(r, { name: "Nighty", items: [{
         key: "MIME_NIGHTY",
         title: () => "Nighty",
@@ -1322,6 +1519,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "white", customIconUrl: "", showNightyButton: true, sessionHost: "", sessionToken: "", sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "1.14.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "1.14.9", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();
