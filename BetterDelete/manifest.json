@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.betterdelete",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "display": {
     "name": "BetterDelete",
     "description": "Puts Delete and Better Delete in the Edit, Reply, and Forward group. Better Delete hides your message from other message loggers.",

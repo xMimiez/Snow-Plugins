@@ -652,17 +652,18 @@ test('BetterDelete moves Delete into the Edit group and sends the logger replace
     const calls=[];
     const text=await runBetterDelete({
         deleteMessage:async(...args)=>calls.push(['delete',args]),
-        _sendMessage:async(...args)=>calls.push(['send',args]),
+        _sendMessage:async(...args)=>{calls.push(['send',args]);return {id:'333'};},
     },null,'222','111','  ');
     assert.equal(text,'redacted eh');
     assert.deepEqual(calls,[
         ['delete',['222','111']],
         ['send',['222',{content:'redacted eh',tts:false,invalidEmojis:[],validNonShortcutEmojis:[]},{nonce:'111'}]],
+        ['delete',['222','333']],
     ]);
     const menuCalls=[];
     const api={
         deleteMessage:async(...args)=>menuCalls.push(['delete',args]),
-        _sendMessage:async(...args)=>menuCalls.push(['send',args]),
+        _sendMessage:async(...args)=>{menuCalls.push(['send',args]);return {id:'333333333333333333'};},
         getToken(){throw new Error('Must not read token');},
     };
     const {r,toasts}=await harness(factory.defaults,[
@@ -697,6 +698,7 @@ test('BetterDelete moves Delete into the Edit group and sends the logger replace
     assert.deepEqual(menuCalls,[
         ['delete',['222222222222222222','111111111111111111']],
         ['send',['222222222222222222',{content:'gone',tts:false,invalidEmojis:[],validNonShortcutEmojis:[]},{nonce:'111111111111111111'}]],
+        ['delete',['222222222222222222','333333333333333333']],
     ]);
     await Renderer.act(async()=>view.unmount());
     await r.dispose();

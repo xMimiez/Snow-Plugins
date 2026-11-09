@@ -828,25 +828,70 @@ var plugin = (() => {
     const text = String(value ?? "").trim();
     return (text || "redacted eh").slice(0, 2e3);
   }
+  function sentMessageId(sent) {
+    const value = sent?.id || sent?.message?.id || sent?.body?.id || sent?.body?.message?.id;
+    return value == null ? "" : String(value);
+  }
+  function missingHttp(error) {
+    return /unavailable|Invalid Discord API path/i.test(String(error?.message || error || ""));
+  }
+  function alreadyGone(error) {
+    return error?.status === 404 || /unknown message/i.test(String(error?.message || error?.body?.message || ""));
+  }
+  async function deleteOnServer(api, discord, channelId, id) {
+    let clientOk = false;
+    let clientError;
+    if (typeof api?.deleteMessage === "function") {
+      try {
+        await api.deleteMessage(channelId, id);
+        clientOk = true;
+      } catch (error) {
+        if (alreadyGone(error)) clientOk = true;
+        else clientError = error;
+      }
+    }
+    let restOk = false;
+    if (typeof discord === "function") {
+      try {
+        await discord(`/channels/${channelId}/messages/${id}`, { method: "DELETE" });
+        restOk = true;
+      } catch (error) {
+        if (alreadyGone(error)) restOk = true;
+        else if (!missingHttp(error) && !clientOk) throw error;
+      }
+    }
+    if (!clientOk && !restOk) throw clientError || new Error("Delete is unavailable");
+  }
+  async function sendReplacement(api, discord, channelId, payload, messageId) {
+    if (typeof api?._sendMessage === "function") return api._sendMessage(channelId, payload, { nonce: messageId });
+    if (typeof api?.sendMessage === "function") return api.sendMessage(channelId, { ...payload, nonce: messageId }, true, { nonce: messageId });
+    if (typeof discord === "function") {
+      const result = await discord(`/channels/${channelId}/messages`, { method: "POST", body: JSON.stringify({ ...payload, nonce: messageId }) });
+      return typeof result?.json === "function" ? result.json() : result;
+    }
+    throw new Error("Replacement send is unavailable");
+  }
+  async function findSentId(discord, channelId, messageId, text) {
+    if (typeof discord !== "function") return "";
+    try {
+      const result = await discord(`/channels/${channelId}/messages?limit=10`);
+      const list = typeof result?.json === "function" ? result.json() : result;
+      const rows = Array.isArray(list) ? list : [];
+      const hit = rows.find((row) => String(row?.nonce || "") === String(messageId)) || rows.find((row) => row?.content === text);
+      return hit?.id == null ? "" : String(hit.id);
+    } catch (error) {
+      if (missingHttp(error)) return "";
+      return "";
+    }
+  }
   async function runBetterDelete(api, discord, channelId, messageId, content) {
     const text = replacementText(content);
     const payload = { content: text, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] };
-    if (typeof api?.deleteMessage === "function") await api.deleteMessage(channelId, messageId);
-    else if (typeof discord === "function") await discord(`/channels/${channelId}/messages/${messageId}`, { method: "DELETE" });
-    else throw new Error("Delete is unavailable");
-    if (typeof api?._sendMessage === "function") {
-      await api._sendMessage(channelId, payload, { nonce: messageId });
-      return text;
-    }
-    if (typeof api?.sendMessage === "function") {
-      await api.sendMessage(channelId, { ...payload, nonce: messageId }, true, { nonce: messageId });
-      return text;
-    }
-    if (typeof discord === "function") {
-      await discord(`/channels/${channelId}/messages`, { method: "POST", body: JSON.stringify({ ...payload, nonce: messageId }) });
-      return text;
-    }
-    throw new Error("Replacement send is unavailable");
+    await deleteOnServer(api, discord, channelId, messageId);
+    const sent = await sendReplacement(api, discord, channelId, payload, messageId);
+    const followId = sentMessageId(sent) || await findSentId(discord, channelId, messageId, text) || messageId;
+    await deleteOnServer(api, discord, channelId, followId);
+    return text;
   }
   function patchMessageSheet(r, transform) {
     const sheets = r.find("openLazy", "hideActionSheet");
@@ -907,7 +952,7 @@ var plugin = (() => {
           h(Toggle, {
             setting: "enabled",
             label: "Better Delete",
-            subLabel: "Deletes your message, then sends the replacement with the same nonce so other message loggers keep the replacement."
+            subLabel: "Sends the replacement with the same nonce so other message loggers keep it, then deletes that message."
           }),
           h(Input, {
             label: "Replacement message",
@@ -943,6 +988,6 @@ var plugin = (() => {
   BetterDelete.defaults = { enabled: true, replacement: "redacted eh" };
 
   // BetterDelete.entry.js
-  var BetterDelete_entry_default = register({ "id": "mime.betterdelete", "name": "BetterDelete", "description": "Puts Delete and Better Delete in the Edit, Reply, and Forward group. Better Delete hides your message from other message loggers.", "version": "1.0.0", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/BetterDelete" }, BetterDelete);
+  var BetterDelete_entry_default = register({ "id": "mime.betterdelete", "name": "BetterDelete", "description": "Puts Delete and Better Delete in the Edit, Reply, and Forward group. Better Delete hides your message from other message loggers.", "version": "1.0.1", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/BetterDelete" }, BetterDelete);
   return __toCommonJS(BetterDelete_entry_exports);
 })();
