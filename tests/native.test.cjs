@@ -43,8 +43,10 @@ async function harness(defaults = {}, modules = []) {
 test('NightyTab bundle opens iOS http addresses through the cleartext loader',()=>{
     const manifest=JSON.parse(fs.readFileSync(path.join(root,'NightyTab/manifest.json'),'utf8'));
     const src=fs.readFileSync(path.join(root,'NightyTab/index.js'),'utf8');
-    assert.equal(manifest.version,'2.0.1');
-    assert.match(src,/"version": "2\.0\.1"/);
+    assert.equal(manifest.version,'2.0.2');
+    assert.match(src,/"version": "2\.0\.2"/);
+    assert.match(src,/function isIpHost/);
+    assert.match(src,/Open in Safari/);
     assert.match(src,/function loadCleartextPage/);
     assert.match(src,/function isHttpPage/);
     assert.match(src,/NIGHTY_HTTP/);
@@ -63,7 +65,7 @@ test('all Bunny spec-3 artifacts export definePlugin and match the hosted manife
         assert.equal(manifest.type,'plugin');
         assert.equal(manifest.main,'index.js');
         assert.equal(manifest.id,meta.id);
-        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.1');
+        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.2');
         else assert.equal(manifest.version,meta.version);
         assert.equal(manifest.display.name,meta.name);
         assert(manifest.display.authors.some(a=>a.id==='957164619061932045'));

@@ -1172,21 +1172,44 @@ var plugin = (() => {
       if (saved) parts.push("access_token=" + saved);
       return parts.join("; ");
     }
-    async function readHttp(url, options = {}) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 20000);
+    function isIpHost(value) {
       try {
-        const response = await fetch(url, { ...options, signal: controller.signal });
+        const host = new URL(String(value)).hostname.replace(/^\[|\]$/g, "");
+        return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || host.includes(":");
+      } catch {
+        return false;
+      }
+    }
+    async function readHttp(url, options = {}) {
+      const attempt = async (headers) => {
+        const response = await fetch(url, {
+          method: options.method || "GET",
+          ...headers && Object.keys(headers).length ? { headers } : {},
+          ...options.body != null && options.method && options.method !== "GET" && options.method !== "HEAD" ? { body: options.body } : {}
+        });
         rememberCookies(new URL(url).host, response);
         const text = await response.text();
         return { response, text };
+      };
+      const timed = (promise) => Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("The HTTP address timed out."), { name: "AbortError" })), 20000))
+      ]);
+      try {
+        return await timed(attempt(options.headers));
       } catch (error) {
+        if (error?.name === "AbortError") throw error;
+        if (options.headers && Object.keys(options.headers).length) {
+          try {
+            return await timed(attempt(void 0));
+          } catch {
+          }
+        }
         const message = String(error?.message || error || "");
-        if (error?.name === "AbortError") throw new Error("The HTTP address timed out.");
-        if (/ATS|App Transport Security|secure connection|-1022/i.test(message)) throw new Error("iOS blocked this insecure address before it could be opened.");
+        if (/Network request failed|ATS|App Transport Security|secure connection|-1022|offline|Local network/i.test(message)) {
+          throw new Error("iOS blocked this http address inside Discord.");
+        }
         throw error instanceof Error ? error : new Error(message || "Could not download the HTTP page.");
-      } finally {
-        clearTimeout(timer);
       }
     }
     function downloadCleartext(src) {
@@ -1277,7 +1300,7 @@ var plugin = (() => {
     function NightyPage() {
       r.useRefresh();
       const src = pageUrl(store.url);
-      const cleartext = RN.Platform?.OS === "ios" && isHttpPage(src);
+      const cleartext = RN.Platform?.OS === "ios" && isHttpPage(src) && isIpHost(src);
       const WebView = r.find("WebView")?.WebView || r.byName("WebView");
       const webViewRef = React.useRef(null);
       pageBridge.ref = webViewRef;
@@ -1350,7 +1373,7 @@ var plugin = (() => {
           onError: (event) => {
             const description = event.nativeEvent?.description || "";
             if (cleartext) {
-              setError(/secure connection|App Transport Security|-1022/i.test(description) ? "iOS blocked this insecure address before it could be opened." : description || "Could not load this HTTP address.");
+              setError(/secure connection|App Transport Security|-1022|Network request failed/i.test(description) ? "iOS blocked this http address inside Discord." : description || "Could not load this HTTP address.");
               return;
             }
             setError(description || "Could not load Nighty.");
@@ -1359,7 +1382,16 @@ var plugin = (() => {
           onLoad: () => setError(""),
           onLoadEnd: () => webViewRef.current?.injectJavaScript?.(pageScript(sessionToken()) + loginScript())
         }),
-        error ? h(Text, null, error) : null
+        error && !(cleartext && !html) ? h(Text, null, error) : null,
+        cleartext && !html && error ? h(RN.Pressable || RN.TouchableOpacity, {
+          accessibilityRole: "button",
+          accessibilityLabel: "Open in Safari",
+          onPress: () => {
+            const opener = RN.Linking?.openURL || r.common?.url?.openURL;
+            if (typeof opener === "function") Promise.resolve(opener(src)).catch((cause) => r.error("Open Nighty", cause));
+          },
+          style: { height: 44, margin: 16, borderRadius: 12, backgroundColor: "#5865F2", alignItems: "center", justifyContent: "center" }
+        }, h(RN.Text, { style: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" } }, "Open in Safari")) : null
       );
     }
     function Settings({ close }) {
@@ -1410,7 +1442,7 @@ var plugin = (() => {
         card(h(RN.View, { style: { padding: 14 } },
           field({ value: store.url, placeholder: "https://nighty.example", onChange: (value) => r.set("url", value), keyboardType: "url" }),
           store.url && !pageUrl(store.url) ? h(RN.Text, { style: { color: colors.danger, fontSize: 13, lineHeight: 18, marginTop: 8 } }, "Use an HTTP or HTTPS address without a username or password.") : null,
-          isHttpPage(store.url) ? h(RN.Text, { style: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 8 } }, "On iPhone this http address is downloaded and opened inside the page. iOS blocks insecure WebViews.") : null,
+          isHttpPage(store.url) ? h(RN.Text, { style: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 8 } }, "On iPhone, an http IP address is blocked by iOS. Use https://, or the computer name such as http://nighty.local:port.") : null,
           h(RN.Pressable || RN.TouchableOpacity, { accessibilityRole: "button", onPress: () => { if (!openNighty()) openSheet(); }, style: ({ pressed } = {}) => ({ height: 48, borderRadius: 12, backgroundColor: pressed ? "#4752C4" : colors.accent, alignItems: "center", justifyContent: "center", marginTop: 12 }) }, h(RN.Text, { style: { color: "#FFFFFF", fontSize: 16, lineHeight: 20, fontWeight: "700" } }, "Open Nighty")),
           h(RN.Text, { style: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 8 } }, sessionToken() ? "Login saved for this address." : "Sign in once to save your login.")
         )),
@@ -1735,6 +1767,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "white", customIconUrl: "", showNightyButton: true, autoLogin: false, loginUsername: "", loginPassword: "", sessionHost: "", sessionToken: "", sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.2", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();
