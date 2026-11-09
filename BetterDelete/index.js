@@ -667,7 +667,7 @@ var plugin = (() => {
   function isPlainDeleteRow(node) {
     if (!isActionRow(node)) return false;
     const id = labelId(node);
-    if (/HIDE|LOGGER|BETTER/.test(id)) return false;
+    if (/HIDE|LOGGER|BETTER|SILENT/.test(id)) return false;
     if (id === "DELETE" || id === "DELETE_MESSAGE" || id === "MESSAGE_DELETE") return true;
     return DELETE.test(rowText(node));
   }
@@ -678,7 +678,7 @@ var plugin = (() => {
     if (name === "ButtonRow" || name === "ActionSheetRow" || name === "FormRow" || name === "ContextMenuRow") return true;
     if (typeof node.props.onPress !== "function" && typeof node.props.action !== "function") return false;
     const id = labelId(node);
-    return QUICK.test(rowText(node)) || DELETE.test(rowText(node)) || /^BETTER DELETE$/i.test(rowText(node)) || /EDIT_MESSAGE|REPLY|FORWARD|DELETE/.test(id);
+    return QUICK.test(rowText(node)) || DELETE.test(rowText(node)) || /^SILENT DELETE MESSAGE$/i.test(rowText(node)) || /EDIT_MESSAGE|REPLY|FORWARD|DELETE/.test(id);
   }
   function childList(children) {
     if (children == null || children === false) return [];
@@ -752,7 +752,7 @@ var plugin = (() => {
   }
   function spliceActions(React, rows, captured, options) {
     const presentDelete = rows.some(isPlainDeleteRow);
-    const presentBetter = rows.some((row) => row?.key === "mime-better-delete" || row?.props?.key === "mime-better-delete" || /^better delete$/i.test(rowText(row)));
+    const presentBetter = rows.some((row) => row?.key === "mime-silent-delete" || row?.props?.key === "mime-silent-delete" || /^silent delete message$/i.test(rowText(row)));
     const additions = [];
     if (!presentDelete && captured[0]) additions.push(captured[0]);
     else if (!presentDelete && options.canDelete && options.onDelete) {
@@ -761,7 +761,7 @@ var plugin = (() => {
     }
     if (options.showBetter && !presentBetter && options.onBetter) {
       const template = captured[0] || rows.find(isActionRow);
-      if (template) additions.push(relabel(React, template, "mime-better-delete", "Better Delete", options.onBetter, !captured[0]));
+      if (template) additions.push(relabel(React, template, "mime-silent-delete", "Silent Delete Message", options.onBetter, !captured[0]));
     }
     if (!additions.length) return rows;
     let anchor = -1;
@@ -948,10 +948,10 @@ var plugin = (() => {
         r.useRefresh();
         return h(
           Page,
-          { title: "Better Delete" },
+          { title: "Silent Delete" },
           h(Toggle, {
             setting: "enabled",
-            label: "Better Delete",
+            label: "Silent Delete",
             subLabel: "Sends the replacement with the same nonce so other message loggers keep it, then deletes that message."
           }),
           h(Input, {
@@ -959,7 +959,7 @@ var plugin = (() => {
             value: r.store.replacement,
             onChange: (value) => r.set("replacement", String(value).slice(0, 2e3))
           }),
-          h(Text, { muted: true }, "Delete and Better Delete are placed in the Edit, Reply, and Forward group. Better Delete only appears on your own messages and deletes immediately. Might not be safe; use at your own risk.")
+          h(Text, { muted: true }, "Delete and Silent Delete Message are placed in the Edit, Reply, and Forward group. Silent Delete only appears on your own messages and deletes immediately. Might not be safe; use at your own risk.")
         );
       },
       start() {
@@ -971,7 +971,7 @@ var plugin = (() => {
             } catch {
             }
             Promise.resolve().then(action).catch((error) => {
-              if (r.active) r.error("Better Delete", error);
+              if (r.active) r.error("Silent Delete", error);
             });
           };
           return placeMessageActions(r.React, tree, {
@@ -988,6 +988,6 @@ var plugin = (() => {
   BetterDelete.defaults = { enabled: true, replacement: "redacted eh" };
 
   // BetterDelete.entry.js
-  var BetterDelete_entry_default = register({ "id": "mime.betterdelete", "name": "BetterDelete", "description": "Puts Delete and Better Delete in the Edit, Reply, and Forward group. Better Delete hides your message from other message loggers.", "version": "1.0.1", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/BetterDelete" }, BetterDelete);
+  var BetterDelete_entry_default = register({ "id": "mime.betterdelete", "name": "Silent Delete", "description": "Puts Delete and Silent Delete Message in the Edit, Reply, and Forward group. Silent Delete hides your message from other message loggers.", "version": "1.0.2", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/BetterDelete" }, BetterDelete);
   return __toCommonJS(BetterDelete_entry_exports);
 })();

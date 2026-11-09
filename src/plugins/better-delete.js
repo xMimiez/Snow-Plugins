@@ -56,7 +56,7 @@ export function isQuickRow(node) {
 export function isPlainDeleteRow(node) {
     if (!isActionRow(node)) return false;
     const id = labelId(node);
-    if (/HIDE|LOGGER|BETTER/.test(id)) return false;
+    if (/HIDE|LOGGER|BETTER|SILENT/.test(id)) return false;
     if (id === 'DELETE' || id === 'DELETE_MESSAGE' || id === 'MESSAGE_DELETE') return true;
     return DELETE.test(rowText(node));
 }
@@ -68,7 +68,7 @@ export function isActionRow(node) {
     if (name === 'ButtonRow' || name === 'ActionSheetRow' || name === 'FormRow' || name === 'ContextMenuRow') return true;
     if (typeof node.props.onPress !== 'function' && typeof node.props.action !== 'function') return false;
     const id = labelId(node);
-    return QUICK.test(rowText(node)) || DELETE.test(rowText(node)) || /^BETTER DELETE$/i.test(rowText(node)) || /EDIT_MESSAGE|REPLY|FORWARD|DELETE/.test(id);
+    return QUICK.test(rowText(node)) || DELETE.test(rowText(node)) || /^SILENT DELETE MESSAGE$/i.test(rowText(node)) || /EDIT_MESSAGE|REPLY|FORWARD|DELETE/.test(id);
 }
 
 function childList(children) {
@@ -147,7 +147,7 @@ function stripDeletes(React, node, captured) {
 
 function spliceActions(React, rows, captured, options) {
     const presentDelete = rows.some(isPlainDeleteRow);
-    const presentBetter = rows.some(row => row?.key === 'mime-better-delete' || row?.props?.key === 'mime-better-delete' || /^better delete$/i.test(rowText(row)));
+    const presentBetter = rows.some(row => row?.key === 'mime-silent-delete' || row?.props?.key === 'mime-silent-delete' || /^silent delete message$/i.test(rowText(row)));
     const additions = [];
     if (!presentDelete && captured[0]) additions.push(captured[0]);
     else if (!presentDelete && options.canDelete && options.onDelete) {
@@ -156,7 +156,7 @@ function spliceActions(React, rows, captured, options) {
     }
     if (options.showBetter && !presentBetter && options.onBetter) {
         const template = captured[0] || rows.find(isActionRow);
-        if (template) additions.push(relabel(React, template, 'mime-better-delete', 'Better Delete', options.onBetter, !captured[0]));
+        if (template) additions.push(relabel(React, template, 'mime-silent-delete', 'Silent Delete Message', options.onBetter, !captured[0]));
     }
     if (!additions.length) return rows;
     let anchor = -1;
@@ -358,10 +358,10 @@ export default function BetterDelete(r) {
     return {
         Settings() {
             r.useRefresh();
-            return h(Page, { title: 'Better Delete' },
+            return h(Page, { title: 'Silent Delete' },
                 h(Toggle, {
                     setting: 'enabled',
-                    label: 'Better Delete',
+                    label: 'Silent Delete',
                     subLabel: 'Sends the replacement with the same nonce so other message loggers keep it, then deletes that message.',
                 }),
                 h(Input, {
@@ -369,14 +369,14 @@ export default function BetterDelete(r) {
                     value: r.store.replacement,
                     onChange: value => r.set('replacement', String(value).slice(0, 2000)),
                 }),
-                h(Text, { muted: true }, 'Delete and Better Delete are placed in the Edit, Reply, and Forward group. Better Delete only appears on your own messages and deletes immediately. Might not be safe; use at your own risk.'));
+                h(Text, { muted: true }, 'Delete and Silent Delete Message are placed in the Edit, Reply, and Forward group. Silent Delete only appears on your own messages and deletes immediately. Might not be safe; use at your own risk.'));
         },
         start() {
             const patched = patchMessageSheet(r, (tree, message, hideSheet) => {
                 const own = isOwnMessage(r, message);
                 const press = action => () => {
                     try { hideSheet(); } catch {}
-                    Promise.resolve().then(action).catch(error => { if (r.active) r.error('Better Delete', error); });
+                    Promise.resolve().then(action).catch(error => { if (r.active) r.error('Silent Delete', error); });
                 };
                 return placeMessageActions(r.React, tree, {
                     showBetter: !!r.store.enabled && own,

@@ -639,7 +639,7 @@ test('BetterDelete moves Delete into the Edit group and sends the logger replace
         return found;
     };
     const moved=placeMessageActions(React,tree,{showBetter:true,canDelete:true,onBetter(){},onDelete(){}});
-    assert.deepEqual(labels(moved.props.children[1]),['Edit Message','Reply','Forward','Delete Message','Better Delete']);
+    assert.deepEqual(labels(moved.props.children[1]),['Edit Message','Reply','Forward','Delete Message','Silent Delete Message']);
     assert.deepEqual(labels(moved.props.children[2]),['Copy Text','Pin Message']);
     assert.equal(moved.props.children[3],undefined);
     const again=placeMessageActions(React,moved,{showBetter:true,canDelete:true,onBetter(){},onDelete(){}});
@@ -675,7 +675,7 @@ test('BetterDelete moves Delete into the Edit group and sends the logger replace
     assert.equal(isOwnMessage(r,{id:'111',channel_id:'222',author:{id:'other'}}),false);
     const plugin=factory(r);plugin.start();
     let view;await Renderer.act(async()=>{view=Renderer.create(React.createElement(plugin.Settings));});
-    assert.equal(view.root.findByType('Switch').props.accessibilityLabel,'Better Delete');
+    assert.equal(view.root.findByType('Switch').props.accessibilityLabel,'Silent Delete');
     assert.equal(view.root.findByType('RNInput').props.value,'redacted eh');
     await Renderer.act(async()=>view.root.findByType('RNInput').props.onChangeText('gone'));
     assert.equal(r.store.replacement,'gone');
@@ -684,12 +684,12 @@ test('BetterDelete moves Delete into the Edit group and sends the logger replace
     const pending=sheets.openLazy(Promise.resolve({default(){return tree;}}),'MessageLongPressActionSheet',{message});
     const wrapped=await pending;
     const rendered=wrapped.default({message});
-    const better=labels(rendered).includes('Better Delete');
+    const better=labels(rendered).includes('Silent Delete Message');
     assert.equal(better,true);
     const press=node=>{
         if(!node)return null;
         if(Array.isArray(node)){for(const child of node){const found=press(child);if(found)return found;}return null;}
-        if(node.props?.label==='Better Delete')return node.props.onPress;
+        if(node.props?.label==='Silent Delete Message')return node.props.onPress;
         return press(node.props?.children);
     };
     await press(rendered)();

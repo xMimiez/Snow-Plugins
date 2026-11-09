@@ -401,9 +401,9 @@
     "folder": "BetterDelete",
     "module": "better-delete",
     "id": "mime.betterdelete",
-    "name": "BetterDelete",
-    "description": "Puts Delete and Better Delete in the Edit, Reply, and Forward group. Better Delete hides your message from other message loggers.",
-    "version": "1.0.1",
+    "name": "Silent Delete",
+    "description": "Puts Delete and Silent Delete Message in the Edit, Reply, and Forward group. Silent Delete hides your message from other message loggers.",
+    "version": "1.0.2",
     "authors": [
       {
         "name": "Vendicated",

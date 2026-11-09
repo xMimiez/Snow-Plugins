@@ -8,7 +8,7 @@ These releases use **Bunny spec 3**. Install from the `manifest.json` URL, then 
 
 | Plugin | Current release | What it does | Install |
 | --- | --- | --- | --- |
-| [BetterDelete](BetterDelete/) | 1.0.1 | Puts Delete and Better Delete in the Edit, Reply, and Forward group. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/BetterDelete/manifest.json) |
+| [Silent Delete](BetterDelete/) | 1.0.2 | Puts Delete and Silent Delete Message in the Edit, Reply, and Forward group. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/BetterDelete/manifest.json) |
 | [DebugConsole](DebugConsole/) | 2.2.1 | Live logs with clear/copy/search. Ignores Discord intl locale spam. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/DebugConsole/manifest.json) |
 | [Decor](Decor/) | 2.2.5 | Browse and equip Decor avatar decorations. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/Decor/manifest.json) |
 | [GifRoulette](GifRoulette/) | 2.2.1 | `/gifroulette` sends one random favorite GIF. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/GifRoulette/manifest.json) |
