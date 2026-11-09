@@ -43,10 +43,9 @@ async function harness(defaults = {}, modules = []) {
 test('NightyTab bundle opens iOS http addresses through the cleartext loader',()=>{
     const manifest=JSON.parse(fs.readFileSync(path.join(root,'NightyTab/manifest.json'),'utf8'));
     const src=fs.readFileSync(path.join(root,'NightyTab/index.js'),'utf8');
-    assert.equal(manifest.version,'2.0.2');
-    assert.match(src,/"version": "2\.0\.2"/);
-    assert.match(src,/function isIpHost/);
-    assert.match(src,/Open in Safari/);
+    assert.equal(manifest.version,'2.0.3');
+    assert.match(src,/"version": "2\.0\.3"/);
+    assert.doesNotMatch(src,/Open in Safari/);
     assert.match(src,/function loadCleartextPage/);
     assert.match(src,/function isHttpPage/);
     assert.match(src,/NIGHTY_HTTP/);
@@ -65,7 +64,7 @@ test('all Bunny spec-3 artifacts export definePlugin and match the hosted manife
         assert.equal(manifest.type,'plugin');
         assert.equal(manifest.main,'index.js');
         assert.equal(manifest.id,meta.id);
-        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.2');
+        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.3');
         else assert.equal(manifest.version,meta.version);
         assert.equal(manifest.display.name,meta.name);
         assert(manifest.display.authors.some(a=>a.id==='957164619061932045'));
@@ -687,32 +686,29 @@ test('BetterDelete moves Delete into the Edit group and sends the logger replace
     const other=placeMessageActions(React,tree,{showBetter:false,canDelete:false,onBetter(){},onDelete(){}});
     assert.deepEqual(labels(other.props.children[1]),['Edit Message','Reply','Forward','Delete Message']);
     let sent=0, deleted=0;
-    await assert.rejects(runBetterDelete({deleteMessage:async()=>{deleted++;},_sendMessage:async()=>{sent++;throw new Error('denied');}},null,'1','2','secret',0));
-    assert.equal(sent,1);assert.equal(deleted,0);
+    await assert.rejects(runBetterDelete({deleteMessage:async()=>{deleted++;throw new Error('denied');},_sendMessage:async()=>{sent++;}},null,'1','2','secret'));
+    assert.equal(deleted,1);assert.equal(sent,0);
     const calls=[];
     const text=await runBetterDelete({
         deleteMessage:async(...args)=>calls.push(['delete',args]),
         _sendMessage:async(...args)=>{calls.push(['send',args]);return {id:'333'};},
-    },null,'222','111','  ',0);
+    },async()=>{throw new Error('REST should not run');},'222','111','  ');
     assert.equal(text,'redacted eh');
     assert.deepEqual(calls,[
-        ['send',['222',{content:'redacted eh',tts:false,invalidEmojis:[],validNonShortcutEmojis:[],nonce:'111'},{nonce:'111'}]],
         ['delete',['222','111']],
-        ['delete',['222','333']],
+        ['send',['222',{content:'redacted eh',tts:false,invalidEmojis:[],validNonShortcutEmojis:[]},{nonce:'111'}]],
     ]);
     const rest=[];
     const discord=async(path,options)=>{
-        rest.push(['http',path,options]);
+        rest.push([path,options]);
         if(options?.method==='POST') return {json:()=>({id:'444',nonce:'111'})};
         return {json:()=>[]};
     };
-    await runBetterDelete({
-        deleteMessage:async(...args)=>rest.push(['delete',args]),
-        _sendMessage:async()=>{throw new Error('client send should not run');},
-    },discord,'222','111','secret',0);
-    assert.equal(JSON.parse(rest[0][2].body).nonce,'111');
-    assert.equal(JSON.parse(rest[0][2].body).content,'secret');
-    assert.deepEqual(rest.filter(row=>row[0]==='delete'),[['delete',['222','111']],['delete',['222','444']]]);
+    await runBetterDelete({},discord,'222','111','secret');
+    assert.deepEqual(rest.map(row=>row[0]),['/channels/222/messages/111','/channels/222/messages']);
+    assert.equal(rest[0][1].method,'DELETE');
+    assert.equal(JSON.parse(rest[1][1].body).nonce,'111');
+    assert.equal(JSON.parse(rest[1][1].body).content,'secret');
     const menuCalls=[];
     const api={
         deleteMessage:async(...args)=>menuCalls.push(['delete',args]),
@@ -746,12 +742,11 @@ test('BetterDelete moves Delete into the Edit group and sends the logger replace
         return press(node.props?.children);
     };
     await press(rendered)();
-    await new Promise(resolve=>setTimeout(resolve,1200));
+    await tick();
     assert.equal(toasts.length,0);
     assert.deepEqual(menuCalls,[
-        ['send',['222222222222222222',{content:'gone',tts:false,invalidEmojis:[],validNonShortcutEmojis:[],nonce:'111111111111111111'},{nonce:'111111111111111111'}]],
         ['delete',['222222222222222222','111111111111111111']],
-        ['delete',['222222222222222222','333333333333333333']],
+        ['send',['222222222222222222',{content:'gone',tts:false,invalidEmojis:[],validNonShortcutEmojis:[]},{nonce:'111111111111111111'}]],
     ]);
     await Renderer.act(async()=>view.unmount());
     await r.dispose();

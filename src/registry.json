@@ -403,7 +403,7 @@
     "id": "mime.betterdelete",
     "name": "Silent Delete",
     "description": "Puts Delete and Silent Delete Message in the Edit, Reply, and Forward group. Silent Delete hides your message from other message loggers.",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "authors": [
       {
         "name": "Vendicated",

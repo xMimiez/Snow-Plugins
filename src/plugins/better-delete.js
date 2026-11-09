@@ -231,11 +231,6 @@ export function replacementText(value) {
     return (text || 'redacted eh').slice(0, 2000);
 }
 
-function sentMessageId(sent) {
-    const value = sent?.id || sent?.message?.id || sent?.body?.id || sent?.body?.message?.id;
-    return value == null ? '' : String(value);
-}
-
 function missingHttp(error) {
     return /unavailable|Invalid Discord API path/i.test(String(error?.message || error || ''));
 }
@@ -269,53 +264,25 @@ async function deleteOnServer(api, discord, channelId, id) {
     if (!clientOk && !restOk) throw clientError || new Error('Delete is unavailable');
 }
 
-function wait(ms) {
-    if (!ms) return Promise.resolve();
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Mobile _sendMessage keeps the nonce off the gateway payload unless it is also a field on the message.
-// Discord's own client replaces a cached message when a new message's nonce equals that message's id.
+// Equicord puts the nonce only in the third argument. Discord's client then replaces the
+// cached message whose id equals that nonce. A REST send, or a second delete, skips that replace.
 async function sendReplacement(api, discord, channelId, payload, messageId) {
-    const nonce = String(messageId);
-    const clientBody = { ...payload, nonce };
-    const restBody = { content: payload.content, tts: false, nonce };
+    const nonce = messageId;
+    if (typeof api?._sendMessage === 'function') return api._sendMessage(channelId, payload, { nonce });
+    if (typeof api?.sendMessage === 'function') return api.sendMessage(channelId, payload, true, { nonce });
     if (typeof discord === 'function') {
-        try {
-            const result = await discord(`/channels/${channelId}/messages`, { method: 'POST', body: JSON.stringify(restBody) });
-            return typeof result?.json === 'function' ? result.json() : result;
-        } catch (error) {
-            if (!missingHttp(error)) throw error;
-        }
+        const result = await discord(`/channels/${channelId}/messages`, { method: 'POST', body: JSON.stringify({ content: payload.content, tts: false, nonce: String(nonce) }) });
+        return typeof result?.json === 'function' ? result.json() : result;
     }
-    if (typeof api?._sendMessage === 'function') return api._sendMessage(channelId, clientBody, { nonce });
-    if (typeof api?.sendMessage === 'function') return api.sendMessage(channelId, clientBody, true, { nonce });
     throw new Error('Replacement send is unavailable');
 }
 
-async function findSentId(discord, channelId, messageId, text) {
-    if (typeof discord !== 'function') return '';
-    try {
-        const result = await discord(`/channels/${channelId}/messages?limit=10`);
-        const list = typeof result?.json === 'function' ? result.json() : result;
-        const rows = Array.isArray(list) ? list : [];
-        const hit = rows.find(row => String(row?.nonce || '') === String(messageId))
-            || rows.find(row => row?.content === text);
-        return hit?.id == null ? '' : String(hit.id);
-    } catch (error) {
-        if (missingHttp(error)) return '';
-        return '';
-    }
-}
-
-export async function runBetterDelete(api, discord, channelId, messageId, content, pauseMs = 750) {
+export async function runBetterDelete(api, discord, channelId, messageId, content) {
     const text = replacementText(content);
     const payload = { content: text, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] };
-    const sent = await sendReplacement(api, discord, channelId, payload, messageId);
-    const followId = sentMessageId(sent) || await findSentId(discord, channelId, messageId, text) || '';
-    await wait(pauseMs);
-    await deleteOnServer(api, discord, channelId, messageId);
-    if (followId && followId !== String(messageId)) await deleteOnServer(api, discord, channelId, followId);
+    if (typeof api?.deleteMessage === 'function') await api.deleteMessage(channelId, messageId);
+    else await deleteOnServer(api, discord, channelId, messageId);
+    await sendReplacement(api, discord, channelId, payload, messageId);
     return text;
 }
 
@@ -377,7 +344,7 @@ export default function BetterDelete(r) {
                 h(Toggle, {
                     setting: 'enabled',
                     label: 'Silent Delete',
-                    subLabel: 'Replaces the message in other clients before it is deleted, so loggers keep the replacement instead of the original.',
+                    subLabel: 'Deletes the message, then sends the replacement with that message id as the nonce, the same way Equicord does.',
                 }),
                 h(Input, {
                     label: 'Replacement message',
