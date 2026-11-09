@@ -396,5 +396,25 @@
     "version": "1.0.2",
     "license": "GPL-3.0-or-later",
     "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PinDms"
+  },
+  {
+    "folder": "BetterDelete",
+    "module": "better-delete",
+    "id": "mime.betterdelete",
+    "name": "BetterDelete",
+    "description": "Puts Delete and Better Delete in the Edit, Reply, and Forward group. Better Delete hides your message from other message loggers.",
+    "version": "1.0.0",
+    "authors": [
+      {
+        "name": "Vendicated",
+        "id": "343383572805058560"
+      },
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ],
+    "license": "GPL-3.0-or-later",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/BetterDelete"
   }
 ]

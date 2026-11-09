@@ -42,7 +42,7 @@ async function harness(defaults = {}, modules = []) {
 }
 test('all Bunny spec-3 artifacts export definePlugin and match the hosted manifest', async()=>{
     const registry=JSON.parse(fs.readFileSync(path.join(root,'src/registry.json')));
-    assert.equal(registry.length,20);
+    assert.equal(registry.length,21);
     for(const meta of registry){
         const manifest=JSON.parse(fs.readFileSync(path.join(root,meta.folder,'manifest.json')));
         const bytes=fs.readFileSync(path.join(root,meta.folder,manifest.main));
@@ -610,6 +610,96 @@ test('InstallLinks uses supported manual installation and restores URL regex pat
     await Renderer.act(async()=>tree.root.findAllByType('Pressable').find(b=>b.props.accessibilityLabel==='Copy manifest URL').props.onPress());
     assert.deepEqual(calls,['https://example.com/plugin/manifest.json']);
     await Renderer.act(async()=>tree.unmount());p.stop();await r.dispose();assert.equal(parser.URL_REGEX,original);
+});
+
+test('BetterDelete moves Delete into the Edit group and sends the logger replacement',async()=>{
+    const {default:factory,placeMessageActions,runBetterDelete,isOwnMessage}=await import('../src/plugins/better-delete.js');
+    function Row(props){return React.createElement('Text',null,props.label);}
+    Row.displayName='ActionSheetRow';
+    const nativeDelete=()=>{};
+    const tree=React.createElement('Sheet',null,
+        React.createElement('Hint',null,'Double tap a message to Edit'),
+        React.createElement('Group',null,
+            React.createElement(Row,{key:'edit',label:'Edit Message',onPress(){}}),
+            React.createElement(Row,{key:'reply',label:'Reply',onPress(){}}),
+            React.createElement(Row,{key:'forward',label:'Forward',onPress(){}})),
+        React.createElement('Group',null,
+            React.createElement(Row,{key:'copy',label:'Copy Text',onPress(){}}),
+            React.createElement(Row,{key:'pin',label:'Pin Message',onPress(){}})),
+        React.createElement('Group',null,React.createElement(Row,{key:'delete',label:'Delete Message',onPress:nativeDelete})));
+    const labels=node=>{
+        const found=[];
+        const walk=value=>{
+            if(!value)return;
+            if(Array.isArray(value)){value.forEach(walk);return;}
+            if(value.props?.label)found.push(value.props.label);
+            if(value.props?.children)walk(value.props.children);
+        };
+        walk(node);
+        return found;
+    };
+    const moved=placeMessageActions(React,tree,{showBetter:true,canDelete:true,onBetter(){},onDelete(){}});
+    assert.deepEqual(labels(moved.props.children[1]),['Edit Message','Reply','Forward','Delete Message','Better Delete']);
+    assert.deepEqual(labels(moved.props.children[2]),['Copy Text','Pin Message']);
+    assert.equal(moved.props.children[3],undefined);
+    const again=placeMessageActions(React,moved,{showBetter:true,canDelete:true,onBetter(){},onDelete(){}});
+    assert.deepEqual(labels(again),labels(moved));
+    const other=placeMessageActions(React,tree,{showBetter:false,canDelete:false,onBetter(){},onDelete(){}});
+    assert.deepEqual(labels(other.props.children[1]),['Edit Message','Reply','Forward','Delete Message']);
+    let sent=0, deleted=0;
+    await assert.rejects(runBetterDelete({deleteMessage:async()=>{deleted++;throw new Error('denied');},_sendMessage:async()=>{sent++;}},null,'1','2','secret'));
+    assert.equal(deleted,1);assert.equal(sent,0);
+    const calls=[];
+    const text=await runBetterDelete({
+        deleteMessage:async(...args)=>calls.push(['delete',args]),
+        _sendMessage:async(...args)=>calls.push(['send',args]),
+    },null,'222','111','  ');
+    assert.equal(text,'redacted eh');
+    assert.deepEqual(calls,[
+        ['delete',['222','111']],
+        ['send',['222',{content:'redacted eh',tts:false,invalidEmojis:[],validNonShortcutEmojis:[]},{nonce:'111'}]],
+    ]);
+    const menuCalls=[];
+    const api={
+        deleteMessage:async(...args)=>menuCalls.push(['delete',args]),
+        _sendMessage:async(...args)=>menuCalls.push(['send',args]),
+        getToken(){throw new Error('Must not read token');},
+    };
+    const {r,toasts}=await harness(factory.defaults,[
+        api,
+        {storeName:'UserStore',getCurrentUser:()=>({id:'me'})},
+        {openLazy(pending){return pending;},hideActionSheet(){}},
+    ]);
+    assert.equal(isOwnMessage(r,{id:'111',channel_id:'222',author:{id:'me'}}),true);
+    assert.equal(isOwnMessage(r,{id:'111',channel_id:'222',author:{id:'other'}}),false);
+    const plugin=factory(r);plugin.start();
+    let view;await Renderer.act(async()=>{view=Renderer.create(React.createElement(plugin.Settings));});
+    assert.equal(view.root.findByType('Switch').props.accessibilityLabel,'Better Delete');
+    assert.equal(view.root.findByType('RNInput').props.value,'redacted eh');
+    await Renderer.act(async()=>view.root.findByType('RNInput').props.onChangeText('gone'));
+    assert.equal(r.store.replacement,'gone');
+    const sheets=r.find('openLazy','hideActionSheet');
+    const message={id:'111111111111111111',channel_id:'222222222222222222',author:{id:'me'}};
+    const pending=sheets.openLazy(Promise.resolve({default(){return tree;}}),'MessageLongPressActionSheet',{message});
+    const wrapped=await pending;
+    const rendered=wrapped.default({message});
+    const better=labels(rendered).includes('Better Delete');
+    assert.equal(better,true);
+    const press=node=>{
+        if(!node)return null;
+        if(Array.isArray(node)){for(const child of node){const found=press(child);if(found)return found;}return null;}
+        if(node.props?.label==='Better Delete')return node.props.onPress;
+        return press(node.props?.children);
+    };
+    await press(rendered)();
+    await tick();
+    assert.equal(toasts.length,0);
+    assert.deepEqual(menuCalls,[
+        ['delete',['222222222222222222','111111111111111111']],
+        ['send',['222222222222222222',{content:'gone',tts:false,invalidEmojis:[],validNonShortcutEmojis:[]},{nonce:'111111111111111111'}]],
+    ]);
+    await Renderer.act(async()=>view.unmount());
+    await r.dispose();
 });
 
 test('GifRoulette and MoreCommands coexist with distinct SDK command names',async()=>{
