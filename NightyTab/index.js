@@ -687,6 +687,8 @@ var plugin = (() => {
   var nightyGrayAsset = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAYAAAAMJL+VAAADTElEQVR4AWSUWSt3URTGn33Mc2SehyRSiijChXIhPoJP44oPYbjlzoULCZEQkhsiZChzpszjec9vHf83ve/p7PbZa6+1nmc9e+3jZWVl+f+O7u5uf3h42J+cnPSnpqb82dlZf3p62h8dHfV7enrMPzs72+bfsZmZmX5+fr4/NDTk9/X1+Xl5eb6nn8fzws+Kigp1dnbq8vJSGxsben5+1sfHhz4/P5Wbm6ve3l5lZGTo+/tbzrmfaIl455xaWloUgKijo0NdXV0KswZuBCQkJKiurk6np6c6OzvTwcGBTk5O9Pj4qIeHB11dXSk2NlYlJSWW3DkXRMq+iU9NTVV7e7uROzw8VGtrawjgXOhYXFyswsJCxcXFKSUlRUlJSdra2tLt7a1VAoiChwqCyRL/nuvr6xUdHa2npyd9fX0pKioqBPB9XzExMWpoaDCGOCUnJxuT1dVVk+f9/d2kginAJCbOOWdy5eTkqK2tTfi9vLyYDYkD6Tx8VVNTo7KyMgOi1GBDm5uburm5scRvb296fX0VM1KSnEDnHJMlj4+PN19ir6+vNTMzIw9HNpqamiw5axLgcH5+boyQxrmQKSCUTpXOhbbS0lJVVlaaNCRHDSrnLA2gtrZWONEtBNMx8/PzxgbGd3d3f/VGWwiRhG/8OVhsxGG/v78XAJD1MDQ3N9uBUCvs9/b2xHDOmf5Uw55z4ZomoJuwQY7GoDLWjIWFBes6wL3GxkZjD5sIi6WlJRl6cDecc3YOrGFIlQA456zbiGePSpHn6OjI7g82GsKDPagYANjZ2RFOERszJTvn7DLhl5iYaO1YXV2t9PR0ISFs2VtcXDRpAVPweOXl5daztB4M19bWbE1AsG8vCWBIAtqQKoqKilRVVSXAI/Jsb2/b5SQ57An2+EhLSxMD5miPA2AkxIkuioCQjIvEpaLiSM9jW15eNnLEORe2r0evFhQU2GEGPzTTPuIQmflVHB8fm0RUwHlxyDQIIFS/srKii4sL6zbiIMbwJiYmxKnv7+9rd3f3PweckARt2Ucq1gyAkGhubk7r6+sWiyLERIYHo/7+fg0MDJjtNzqGyJpWHR8f18jIiILfsQYHBxX80jU2NmY3nsT4OhdKQyzjDwAAAP//JpRgGAAAAAZJREFUAwCqHzEP1SxsYQAAAABJRU5ErkJggg==";
 
   // project:src/plugins/nighty-tab.js
+  const httpCookies = Object.create(null);
+  const pageBridge = { ref: null };
   function pageUrl(value) {
     try {
       const url = new URL(String(value).trim());
@@ -695,6 +697,273 @@ var plugin = (() => {
       return null;
     }
   }
+  const IMPORT_RE = /(^|[^\w$])(?:import\s*(?:[^'"();\n]{0,240}?\bfrom\s*)?|import\s*\(\s*|export\s*[^'"();\n]{0,240}?\bfrom\s*)(['"])([^'"]+)\2/g;
+  const CSS_IMPORT_RE = /@import\s+(?:url\(\s*)?(['"])([^'"]+)\1/g;
+
+  function isHttpPage(value) {
+      try {
+          const url = new URL(String(value));
+          return url.protocol === 'http:' && !url.username && !url.password;
+      } catch {
+          return false;
+      }
+  }
+
+  function resolveAgainst(base, spec) {
+      const raw = String(spec || '').trim();
+      if (!raw || /^(?:data|blob|javascript|mailto):/i.test(raw)) return '';
+      try {
+          return new URL(raw, base).href;
+      } catch {
+          return '';
+      }
+  }
+
+  function sameOrigin(page, asset) {
+      try {
+          return new URL(page).origin === new URL(asset).origin;
+      } catch {
+          return false;
+      }
+  }
+
+  function parseSetCookie(raw) {
+      if (!raw) return [];
+      const parts = Array.isArray(raw) ? raw : String(raw).split(/,(?=\s*[^;,=\s]+=)/);
+      return parts.map(line => {
+          const pair = String(line).split(';', 1)[0].trim();
+          const eq = pair.indexOf('=');
+          if (eq <= 0) return null;
+          return { name: pair.slice(0, eq).trim(), value: pair.slice(eq + 1).trim() };
+      }).filter(Boolean);
+  }
+
+  function cookieHeader(cookies) {
+      return Object.entries(cookies || {}).filter(([, value]) => value != null && value !== '').map(([name, value]) => `${name}=${value}`).join('; ');
+  }
+
+  function attr(attrs, name) {
+      const match = new RegExp(`\\b${name}\\s*=\\s*(['"])(.*?)\\1`, 'i').exec(attrs || '');
+      return match ? match[2] : '';
+  }
+
+  function importedSpecifiers(code) {
+      const specs = [];
+      IMPORT_RE.lastIndex = 0;
+      let match;
+      while ((match = IMPORT_RE.exec(String(code)))) specs.push(match[3]);
+      return specs;
+  }
+
+  function rewriteSpecifiers(code, fileUrl) {
+      return String(code).replace(IMPORT_RE, (full, _lead, quote, spec) => {
+          if (!spec || (!spec.startsWith('.') && !spec.startsWith('/'))) return full;
+          const abs = resolveAgainst(fileUrl, spec);
+          if (!abs) return full;
+          const quoted = quote + spec + quote;
+          const at = full.lastIndexOf(quoted);
+          return at < 0 ? full : full.slice(0, at) + quote + abs + quote;
+      });
+  }
+
+  function addUrl(list, page, spec, base) {
+      const abs = resolveAgainst(base || page, spec);
+      if (!abs || !sameOrigin(page, abs) || abs === page || list.includes(abs)) return;
+      list.push(abs);
+  }
+
+  function stylesheetUrls(html, page) {
+      const urls = new Set();
+      for (const match of String(html || '').matchAll(/<link\b([^>]*)\/?>/gi)) {
+          const rel = attr(match[1], 'rel').toLowerCase();
+          const href = attr(match[1], 'href');
+          if (!rel.includes('stylesheet') || !href) continue;
+          const abs = resolveAgainst(page, href);
+          if (abs) urls.add(abs);
+      }
+      return urls;
+  }
+
+  function isStylesheet(url, html, page) {
+      return stylesheetUrls(html, page).has(url) || /\.css(?:$|\?)/i.test(url);
+  }
+
+  function discoverUrls(html, page, files) {
+      const urls = [];
+      const source = String(html || '');
+      for (const match of source.matchAll(/<script\b([^>]*)>/gi)) {
+          const src = attr(match[1], 'src');
+          if (src) addUrl(urls, page, src, page);
+      }
+      for (const match of source.matchAll(/<link\b([^>]*)\/?>/gi)) {
+          const rel = attr(match[1], 'rel').toLowerCase();
+          const href = attr(match[1], 'href');
+          if (!href) continue;
+          if (rel.includes('stylesheet') || rel.includes('modulepreload')) addUrl(urls, page, href, page);
+      }
+      for (const [url, text] of files || []) {
+          const specs = isStylesheet(url, html, page)
+              ? [...String(text).matchAll(CSS_IMPORT_RE)].map(item => item[2])
+              : importedSpecifiers(text);
+          for (const spec of specs) addUrl(urls, page, spec, url);
+      }
+      return urls;
+  }
+
+  function escapeAttr(value) {
+      return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  }
+
+  function escapeScript(code) {
+      return String(code).replace(/<\/script/gi, '<\\/script>');
+  }
+
+  function escapeStyle(code) {
+      return String(code).replace(/<\/style/gi, '<\\/style>');
+  }
+
+  function bridgeScript() {
+      return `(() => { try {
+  if (window.__mimeNightyHttp) return;
+  window.__mimeNightyHttp = true;
+  var pending = Object.create(null);
+  var seq = 0;
+  window.__mimeNightyHttpResult = function (msg) {
+    var item = pending[msg && msg.id];
+    if (!item) return;
+    delete pending[msg.id];
+    if (msg.error) item.reject(new Error(msg.error));
+    else item.resolve(msg);
+  };
+  function headersOf(input) {
+    var out = {};
+    if (!input) return out;
+    try {
+      if (typeof input.forEach === 'function') input.forEach(function (value, key) { out[String(key)] = String(value); });
+      else Object.keys(input).forEach(function (key) { out[key] = String(input[key]); });
+    } catch (e) {}
+    return out;
+  }
+  function call(url, method, headers, body) {
+    return new Promise(function (resolve, reject) {
+      if (!window.ReactNativeWebView) { reject(new Error('Nighty bridge unavailable')); return; }
+      var id = ++seq;
+      pending[id] = { resolve: resolve, reject: reject };
+      var payload = body;
+      if (payload != null && typeof payload !== 'string') { try { payload = JSON.stringify(payload); } catch (e) { payload = String(payload); } }
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'NIGHTY_HTTP', id: id, url: url, method: method || 'GET', headers: headers || {}, body: payload || '' }));
+      setTimeout(function () { if (pending[id]) { delete pending[id]; reject(new Error('Timed out')); } }, 20000);
+    });
+  }
+  function note(url, body) {
+    if (String(url).indexOf('/api/login') === -1 || !window.ReactNativeWebView) return;
+    try {
+      var data = JSON.parse(body);
+      if (data && typeof data.access_token === 'string') window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'NIGHTY_TOKEN', token: data.access_token }));
+    } catch (e) {}
+  }
+  function localHttp(url) {
+    try { var next = new URL(url, location.href); return next.protocol === 'http:' && next.origin === location.origin; } catch (e) { return false; }
+  }
+  var origFetch = window.fetch;
+  window.fetch = function (input, init) {
+    var raw = typeof input === 'string' ? input : (input && input.url) || '';
+    var abs; try { abs = new URL(raw, location.href).href; } catch (e) { abs = raw; }
+    if (!localHttp(abs)) return origFetch ? origFetch.apply(this, arguments) : Promise.reject(new Error('fetch unavailable'));
+    var method = (init && init.method) || (input && input.method) || 'GET';
+    var headers = headersOf((init && init.headers) || (input && input.headers));
+    return call(abs, method, headers, init && init.body).then(function (msg) {
+      note(abs, msg.body || '');
+      return new Response(msg.body || '', { status: msg.status || 200, headers: msg.headers || { 'content-type': 'text/plain' } });
+    });
+  };
+  var XHR = window.XMLHttpRequest;
+  if (XHR && XHR.prototype) {
+    var open = XHR.prototype.open;
+    var send = XHR.prototype.send;
+    XHR.prototype.open = function (method, url) { this.__mimeHttp = { method: method, url: url }; return open.apply(this, arguments); };
+    XHR.prototype.send = function (body) {
+      var info = this.__mimeHttp || {};
+      var abs; try { abs = new URL(info.url || '', location.href).href; } catch (e) { abs = info.url || ''; }
+      if (!localHttp(abs)) return send.apply(this, arguments);
+      var xhr = this;
+      call(abs, info.method, {}, body).then(function (msg) {
+        note(abs, msg.body || '');
+        try { Object.defineProperty(xhr, 'readyState', { configurable: true, get: function () { return 4; } }); } catch (e) {}
+        try { Object.defineProperty(xhr, 'status', { configurable: true, get: function () { return msg.status || 200; } }); } catch (e) {}
+        try { Object.defineProperty(xhr, 'responseText', { configurable: true, get: function () { return msg.body || ''; } }); } catch (e) {}
+        try { Object.defineProperty(xhr, 'response', { configurable: true, get: function () { return msg.body || ''; } }); } catch (e) {}
+        if (typeof xhr.onreadystatechange === 'function') xhr.onreadystatechange();
+        if (xhr.dispatchEvent) xhr.dispatchEvent(new Event('load'));
+      }).catch(function () { if (typeof xhr.onerror === 'function') xhr.onerror(); });
+    };
+  }
+  } catch (e) {} })();`;
+  }
+
+  function buildCleartextDocument(html, page, files) {
+      const assets = files instanceof Map ? files : new Map(Object.entries(files || {}));
+      let body = String(html || '').replace(/<base\b[^>]*>/gi, '');
+      const classic = [];
+      const modules = [];
+      body = body.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (full, attrs, code) => {
+          const src = attr(attrs, 'src');
+          const module = /type\s*=\s*(['"])module\1/i.test(attrs) || /\btype\s*=\s*module\b/i.test(attrs);
+          if (src) {
+              const abs = resolveAgainst(page, src);
+              if (!abs || !sameOrigin(page, abs) || !assets.has(abs)) return full;
+              if (module) modules.push(abs);
+              else classic.push(assets.get(abs));
+              return '';
+          }
+          if (module) return `<script type="module">${escapeScript(rewriteSpecifiers(code, page))}</script>`;
+          return full;
+      });
+      const styles = [];
+      body = body.replace(/<link\b([^>]*)\/?>/gi, (full, attrs) => {
+          const rel = attr(attrs, 'rel').toLowerCase();
+          const href = attr(attrs, 'href');
+          if (!href || (!rel.includes('stylesheet') && !rel.includes('modulepreload'))) return full;
+          const abs = resolveAgainst(page, href);
+          if (!abs || !assets.has(abs)) return full;
+          if (rel.includes('stylesheet')) styles.push(assets.get(abs));
+          return '';
+      });
+      const imports = {};
+      for (const [url, code] of assets) {
+          if (isStylesheet(url, html, page)) continue;
+          imports[url] = 'data:text/javascript;charset=utf-8,' + encodeURIComponent(rewriteSpecifiers(code, url));
+      }
+      const map = Object.keys(imports).length ? `<script type="importmap">${JSON.stringify({ imports })}</script>` : '';
+      const moduleTags = modules.map(url => `<script type="module" src="${escapeAttr(url)}"></script>`).join('');
+      const classicTags = classic.map(code => `<script>${escapeScript(code)}</script>`).join('');
+      const styleTags = styles.map(code => `<style>${escapeStyle(code)}</style>`).join('');
+      const block = `<base href="${escapeAttr(page)}">${bridgeScript()}${styleTags}${classicTags}${map}${moduleTags}`;
+      if (/<head[^>]*>/i.test(body)) return body.replace(/<head[^>]*>/i, match => match + block);
+      return block + body;
+  }
+
+  async function loadCleartextPage(pageHref, fetchText, options = {}) {
+      const maxAssets = options.maxAssets ?? 40;
+      const maxChars = options.maxChars ?? 6000000;
+      const page = new URL(String(pageHref)).href;
+      if (!isHttpPage(page)) throw new Error('Only an http:// address uses this loader.');
+      const files = new Map();
+      const html = await fetchText(page);
+      let chars = String(html || '').length;
+      if (chars > maxChars) throw new Error('This HTTP page is too large to open on iOS.');
+      for (;;) {
+          const next = discoverUrls(html, page, files).find(url => !files.has(url));
+          if (!next) break;
+          if (files.size >= maxAssets) throw new Error('This HTTP page has too many files to open on iOS.');
+          const text = await fetchText(next);
+          chars += String(text || '').length;
+          if (chars > maxChars) throw new Error('This HTTP page is too large to open on iOS.');
+          files.set(next, String(text || ''));
+      }
+      return { html: buildCleartextDocument(html, page, files), files: files.size, chars };
+  }
+
   function canDownload(settings, message) {
     return !!settings.scriptUtils && typeof settings.nightyPrefix === "string" && Array.from(settings.nightyPrefix).length === 1 && !!settings.nightyPrefix.trim() && !!message?.id && !!messageChannelId(message) && !!message.attachments?.length;
   }
@@ -876,26 +1145,114 @@ var plugin = (() => {
       const saved = JSON.stringify(cleanToken(token) || "");
       return `${sessionScript(token)}(() => { try { var saved = ${saved}; var apply = function () { var meta = document.querySelector('meta[name="viewport"]'); if (!meta) { meta = document.createElement('meta'); meta.name = 'viewport'; document.head.appendChild(meta); } meta.content = 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'; var style = document.getElementById('mime-nighty-mobile-fit'); if (!style) { style = document.createElement('style'); style.id = 'mime-nighty-mobile-fit'; style.textContent = 'html,body,#root,#app{width:100%!important;max-width:100vw!important;margin-left:0!important;margin-right:0!important;overflow-x:hidden!important}*,*:before,*:after{box-sizing:border-box}'; document.head.appendChild(style); } document.documentElement.style.touchAction = 'pan-y'; if (document.body) { document.body.style.touchAction = 'pan-y'; document.body.style.marginBottom = '0'; } }; var restore = function () { if (!saved) return; var key = 'mime-nighty-restored'; var login = document.querySelector('input[type="password"]'); try { if (!login) { if (document.readyState !== 'loading') sessionStorage.removeItem(key); return; } var marker = saved.slice(-24); if (sessionStorage.getItem(key) === marker) return; sessionStorage.setItem(key, marker); location.reload(); } catch (e) {} }; apply(); restore(); document.addEventListener('DOMContentLoaded', function () { apply(); restore(); }, { once: true }); } catch (e) {} return true; })();`;
     }
+    function saveNightyToken(token) {
+      const host = pageHost();
+      const clean = cleanToken(token);
+      if (!host || !clean) return;
+      const current = store.sessions && typeof store.sessions === "object" ? store.sessions : {};
+      if (store.sessionHost === host && cleanToken(store.sessionToken) === clean && current[host] === clean) return;
+      store.sessionHost = host;
+      store.sessionToken = clean;
+      store.sessions = { ...current, [host]: clean };
+      r.changed();
+      Promise.resolve(r.api.storage.flush()).catch((error) => r.error("Save Nighty login", error));
+    }
+    function rememberCookies(host, response) {
+      const raw = response?.headers?.get?.("set-cookie") || response?.headers?.map?.["set-cookie"] || "";
+      const rows = parseSetCookie(raw);
+      if (!host || !rows.length) return;
+      const jar = httpCookies[host] || (httpCookies[host] = {});
+      for (const row of rows) jar[row.name] = row.value;
+    }
+    function cookieFor(host) {
+      const parts = [];
+      const jar = cookieHeader(httpCookies[host]);
+      if (jar) parts.push(jar);
+      const saved = sessionToken();
+      if (saved) parts.push("access_token=" + saved);
+      return parts.join("; ");
+    }
+    async function readHttp(url, options = {}) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
+      try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        rememberCookies(new URL(url).host, response);
+        const text = await response.text();
+        return { response, text };
+      } catch (error) {
+        const message = String(error?.message || error || "");
+        if (error?.name === "AbortError") throw new Error("The HTTP address timed out.");
+        if (/ATS|App Transport Security|secure connection|-1022/i.test(message)) throw new Error("iOS blocked this insecure address before it could be opened.");
+        throw error instanceof Error ? error : new Error(message || "Could not download the HTTP page.");
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    function downloadCleartext(src) {
+      return loadCleartextPage(src, async (url) => {
+        const headers = {};
+        const cookie = cookieFor(new URL(src).host);
+        if (cookie) headers.Cookie = cookie;
+        const { response, text } = await readHttp(url, { headers });
+        if (!response.ok) throw new Error("Nighty returned HTTP " + response.status + ".");
+        return text;
+      });
+    }
+    function handleHttpMessage(data) {
+      const id = data?.id;
+      const reply = (payload) => {
+        const js = "window.__mimeNightyHttpResult&&window.__mimeNightyHttpResult(" + JSON.stringify(payload) + ");true;";
+        pageBridge.ref?.current?.injectJavaScript?.(js);
+      };
+      Promise.resolve().then(async () => {
+        const page = pageUrl(store.url);
+        let target = "";
+        try {
+          target = new URL(String(data?.url || ""), page || undefined).href;
+        } catch {
+        }
+        if (!page || !target || !sameOrigin(page, target)) {
+          reply({ id, error: "Blocked" });
+          return;
+        }
+        const method = String(data?.method || "GET").toUpperCase();
+        const headers = data?.headers && typeof data.headers === "object" ? { ...data.headers } : {};
+        const cookie = cookieFor(new URL(page).host);
+        if (cookie) headers.Cookie = headers.Cookie ? headers.Cookie + "; " + cookie : cookie;
+        const { response, text } = await readHttp(target, {
+          method,
+          headers,
+          body: method === "GET" || method === "HEAD" ? undefined : data?.body || undefined
+        });
+        if (target.includes("/api/login")) {
+          try {
+            const parsed = JSON.parse(text);
+            if (typeof parsed?.access_token === "string") saveNightyToken(parsed.access_token);
+          } catch {
+          }
+        }
+        const headerDump = {};
+        response.headers?.forEach?.((value, key) => {
+          if (String(key).toLowerCase() !== "set-cookie") headerDump[key] = value;
+        });
+        reply({ id, status: response.status, body: text, headers: headerDump });
+      }).catch((error) => reply({ id, error: String(error?.message || error || "Request failed") }));
+    }
     function onSessionMessage(event) {
       if (!r.active) return;
-      const host = pageHost();
-      if (!host) return;
       let data;
       try {
         data = JSON.parse(event?.nativeEvent?.data || "");
       } catch {
         return;
       }
+      if (data?.type === "NIGHTY_HTTP") {
+        handleHttpMessage(data);
+        return;
+      }
       if (data?.type !== "NIGHTY_TOKEN") return;
-      const token = cleanToken(data.token);
-      if (!token) return;
-      const current = store.sessions && typeof store.sessions === "object" ? store.sessions : {};
-      if (store.sessionHost === host && cleanToken(store.sessionToken) === token && current[host] === token) return;
-      store.sessionHost = host;
-      store.sessionToken = token;
-      store.sessions = { ...current, [host]: token };
-      r.changed();
-      Promise.resolve(r.api.storage.flush()).catch((error) => r.error("Save Nighty login", error));
+      saveNightyToken(data.token);
     }
     function readInset(edge) {
       try {
@@ -920,25 +1277,52 @@ var plugin = (() => {
     function NightyPage() {
       r.useRefresh();
       const src = pageUrl(store.url);
+      const cleartext = RN.Platform?.OS === "ios" && isHttpPage(src);
       const WebView = r.find("WebView")?.WebView || r.byName("WebView");
       const webViewRef = React.useRef(null);
+      pageBridge.ref = webViewRef;
       const savedSession = sessionToken();
       const [error, setError] = React.useState("");
+      const [html, setHtml] = React.useState("");
+      const [pageToken, setPageToken] = React.useState(0);
       const frame = { flex: 1, width: "100%", backgroundColor: "#080D1B", overflow: "hidden" };
+      React.useEffect(() => {
+        if (!cleartext) {
+          setHtml("");
+          return;
+        }
+        let alive = true;
+        setError("");
+        setHtml("");
+        downloadCleartext(src).then((result) => {
+          if (alive && r.active) setHtml(result.html);
+        }).catch((cause) => {
+          if (alive && r.active) setError(cause?.message || "Could not load this HTTP address.");
+        });
+        return () => {
+          alive = false;
+        };
+      }, [src, pageToken, cleartext]);
       const allow = (req) => {
         const url = req?.url || "";
-        return !url || url === "about:blank" || url === src || !!pageUrl(url);
+        if (!url || url === "about:blank" || cleartext && (url.startsWith("data:") || url.startsWith("blob:"))) return true;
+        if (cleartext && req?.isTopFrame && req?.navigationType === "reload") {
+          setPageToken((value) => value + 1);
+          return false;
+        }
+        if (cleartext && isHttpPage(url) && url !== src) return false;
+        return url === src || !!pageUrl(url);
       };
       return h(
         RN.View,
         { style: frame },
-        !src ? h(Text, null, "Set a valid HTTP or HTTPS URL in Nighty Tab settings.") : !WebView ? h(Text, null, "WebView is unavailable in this Snow build.") : h(WebView, {
-          key: `${src}:${savedSession ? "signed-in" : "signed-out"}:${store.autoLogin && store.loginUsername && store.loginPassword ? "auto" : "manual"}`,
+        !src ? h(Text, null, "Set a valid HTTP or HTTPS URL in Nighty Tab settings.") : !WebView ? h(Text, null, "WebView is unavailable in this Snow build.") : cleartext && !html ? h(Text, null, error || "Opening the HTTP address…") : h(WebView, {
+          key: `${src}:${cleartext ? "http" : "https"}:${pageToken}:${html.length}:${savedSession ? "signed-in" : "signed-out"}:${store.autoLogin && store.loginUsername && store.loginPassword ? "auto" : "manual"}`,
           ref: webViewRef,
-          source: { uri: src, ...savedSession ? { headers: { Cookie: `access_token=${savedSession}` } } : {} },
+          source: cleartext ? { html, baseUrl: src } : { uri: src, ...savedSession ? { headers: { Cookie: `access_token=${savedSession}` } } : {} },
           style: { flex: 1, width: "100%", backgroundColor: "#080D1B" },
           containerStyle: { flex: 1, backgroundColor: "#080D1B" },
-          originWhitelist: ["http://*", "https://*"],
+          originWhitelist: ["*", "http://*", "https://*"],
           javaScriptEnabled: true,
           domStorageEnabled: true,
           cacheEnabled: true,
@@ -963,7 +1347,14 @@ var plugin = (() => {
           overScrollMode: "never",
           onMessage: onSessionMessage,
           onShouldStartLoadWithRequest: allow,
-          onError: (event) => setError(event.nativeEvent?.description || "Could not load Nighty."),
+          onError: (event) => {
+            const description = event.nativeEvent?.description || "";
+            if (cleartext) {
+              setError(/secure connection|App Transport Security|-1022/i.test(description) ? "iOS blocked this insecure address before it could be opened." : description || "Could not load this HTTP address.");
+              return;
+            }
+            setError(description || "Could not load Nighty.");
+          },
           onHttpError: (event) => setError(`Nighty returned HTTP ${event.nativeEvent?.statusCode}.`),
           onLoad: () => setError(""),
           onLoadEnd: () => webViewRef.current?.injectJavaScript?.(pageScript(sessionToken()) + loginScript())
@@ -1019,6 +1410,7 @@ var plugin = (() => {
         card(h(RN.View, { style: { padding: 14 } },
           field({ value: store.url, placeholder: "https://nighty.example", onChange: (value) => r.set("url", value), keyboardType: "url" }),
           store.url && !pageUrl(store.url) ? h(RN.Text, { style: { color: colors.danger, fontSize: 13, lineHeight: 18, marginTop: 8 } }, "Use an HTTP or HTTPS address without a username or password.") : null,
+          isHttpPage(store.url) ? h(RN.Text, { style: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 8 } }, "On iPhone this http address is downloaded and opened inside the page. iOS blocks insecure WebViews.") : null,
           h(RN.Pressable || RN.TouchableOpacity, { accessibilityRole: "button", onPress: () => { if (!openNighty()) openSheet(); }, style: ({ pressed } = {}) => ({ height: 48, borderRadius: 12, backgroundColor: pressed ? "#4752C4" : colors.accent, alignItems: "center", justifyContent: "center", marginTop: 12 }) }, h(RN.Text, { style: { color: "#FFFFFF", fontSize: 16, lineHeight: 20, fontWeight: "700" } }, "Open Nighty")),
           h(RN.Text, { style: { color: colors.muted, fontSize: 13, lineHeight: 18, marginTop: 8 } }, sessionToken() ? "Login saved for this address." : "Sign in once to save your login.")
         )),
@@ -1343,6 +1735,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "white", customIconUrl: "", showNightyButton: true, autoLogin: false, loginUsername: "", loginPassword: "", sessionHost: "", sessionToken: "", sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();

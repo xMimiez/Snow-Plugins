@@ -8,7 +8,7 @@ These releases use **Bunny spec 3**. Install from the `manifest.json` URL, then 
 
 | Plugin | Current release | What it does | Install |
 | --- | --- | --- | --- |
-| [Silent Delete](BetterDelete/) | 1.0.2 | Puts Delete and Silent Delete Message in the Edit, Reply, and Forward group. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/BetterDelete/manifest.json) |
+| [Silent Delete](BetterDelete/) | 1.0.3 | Puts Delete and Silent Delete Message in the Edit, Reply, and Forward group. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/BetterDelete/manifest.json) |
 | [DebugConsole](DebugConsole/) | 2.2.1 | Live logs with clear/copy/search. Ignores Discord intl locale spam. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/DebugConsole/manifest.json) |
 | [Decor](Decor/) | 2.2.5 | Browse and equip Decor avatar decorations. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/Decor/manifest.json) |
 | [GifRoulette](GifRoulette/) | 2.2.1 | `/gifroulette` sends one random favorite GIF. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/GifRoulette/manifest.json) |
@@ -26,7 +26,7 @@ These releases use **Bunny spec 3**. Install from the `manifest.json` URL, then 
 | [InstallLinks](InstallLinks/) | 1.0.7 | `snow://` install-plugin links. Copies manifest URLs with manual installation steps. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/InstallLinks/manifest.json) |
 | [TokenUtils](TokenUtils/) | 1.0.2 | `/get-token` copy alert and `/token-info` username, display name, email, number. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/TokenUtils/manifest.json) |
 | [GlobalBadges](GlobalBadges/) | 1.1.1 | Profile badges from EquiBadges and ObaWorkshop BadgeVault. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/GlobalBadges/manifest.json) |
-| [NightyTab](NightyTab/) | 1.7.0 | Nighty in mobile settings, with an optional profile-bar button and Download Script replies. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/NightyTab/manifest.json) |
+| [NightyTab](NightyTab/) | 2.0.1 | Nighty in mobile settings, with an optional profile-bar button and Download Script replies. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/NightyTab/manifest.json) |
 | [PinDms](PinDms/) | 1.0.1 | Per-account DM categories, colors, ordering and collapsible sections for mobile. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/PinDms/manifest.json) |
 | [IconThemer](IconThemer/) | 1.0.2 | Icon packs and per-icon colors. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/IconThemer/manifest.json) |
 
