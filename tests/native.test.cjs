@@ -43,13 +43,13 @@ async function harness(defaults = {}, modules = []) {
 test('NightyTab bundle opens iOS http addresses through the cleartext loader',()=>{
     const manifest=JSON.parse(fs.readFileSync(path.join(root,'NightyTab/manifest.json'),'utf8'));
     const src=fs.readFileSync(path.join(root,'NightyTab/index.js'),'utf8');
-    assert.equal(manifest.version,'2.0.3');
-    assert.match(src,/"version": "2\.0\.3"/);
+    assert.equal(manifest.version,'2.0.4');
+    assert.match(src,/"version": "2\.0\.4"/);
     assert.doesNotMatch(src,/Open in Safari/);
     assert.match(src,/function loadCleartextPage/);
     assert.match(src,/function isHttpPage/);
     assert.match(src,/NIGHTY_HTTP/);
-    assert.match(src,/baseUrl: src/);
+    assert.match(src,/baseUrl: "http:\/\/localhost\/"/);
     assert.match(src,/isHttpPage\(src\)/);
 });
 
@@ -64,7 +64,7 @@ test('all Bunny spec-3 artifacts export definePlugin and match the hosted manife
         assert.equal(manifest.type,'plugin');
         assert.equal(manifest.main,'index.js');
         assert.equal(manifest.id,meta.id);
-        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.3');
+        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.4');
         else assert.equal(manifest.version,meta.version);
         assert.equal(manifest.display.name,meta.name);
         assert(manifest.display.authors.some(a=>a.id==='957164619061932045'));
@@ -215,11 +215,12 @@ test('Nighty cleartext loader inlines same-origin files and keeps other origins'
     assert.equal(loaded.files,3);
     assert.match(loaded.html,/body\{color:red\}/);
     assert.match(loaded.html,/NIGHTY_HTTP/);
+    assert.match(loaded.html,/<script>\(\(\) =>/);
+    assert.match(loaded.html,/URL\.createObjectURL/);
+    assert.match(loaded.html,/http:\/\/10\.0\.0\.8:5123\/assets\/chunk\.js/);
     assert.match(loaded.html,/https:\/\/cdn\.example\/lib\.js/);
     assert.doesNotMatch(loaded.html,/src="\/app\.css"/);
-    const encoded=[...loaded.html.matchAll(/data:text\/javascript;charset=utf-8,([^"]+)/g)].map(item=>decodeURIComponent(item[1]));
-    assert.equal(encoded.length,2);
-    assert.match(encoded.join('\n'),/http:\/\/10\.0\.0\.8:5123\/assets\/chunk\.js/);
+    assert.doesNotMatch(loaded.html,/<script type="module" src="http:\/\/10\.0\.0\.8/);
     await assert.rejects(loadCleartextPage('http://10.0.0.8:5123/',async url=>files[url],{maxAssets:1}),/too many files/);
 });
 

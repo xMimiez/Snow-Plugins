@@ -822,10 +822,14 @@ var plugin = (() => {
       return String(code).replace(/<\/style/gi, '<\\/style>');
   }
 
-  function bridgeScript() {
+  function bridgeScript(page) {
+      const href = JSON.stringify(new URL(page).href);
+      const origin = JSON.stringify(new URL(page).origin);
       return `(() => { try {
   if (window.__mimeNightyHttp) return;
   window.__mimeNightyHttp = true;
+  var PAGE = ${href};
+  var ORIGIN = ${origin};
   var pending = Object.create(null);
   var seq = 0;
   window.__mimeNightyHttpResult = function (msg) {
@@ -862,13 +866,20 @@ var plugin = (() => {
       if (data && typeof data.access_token === 'string') window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'NIGHTY_TOKEN', token: data.access_token }));
     } catch (e) {}
   }
+  function absUrl(raw) {
+    try {
+      var next = new URL(raw || '', PAGE);
+      if (next.hostname === 'localhost' || next.hostname === '127.0.0.1') return new URL(next.pathname + next.search + next.hash, PAGE).href;
+      return next.href;
+    } catch (e) { return String(raw || ''); }
+  }
   function localHttp(url) {
-    try { var next = new URL(url, location.href); return next.protocol === 'http:' && next.origin === location.origin; } catch (e) { return false; }
+    try { return new URL(absUrl(url)).origin === ORIGIN; } catch (e) { return false; }
   }
   var origFetch = window.fetch;
   window.fetch = function (input, init) {
     var raw = typeof input === 'string' ? input : (input && input.url) || '';
-    var abs; try { abs = new URL(raw, location.href).href; } catch (e) { abs = raw; }
+    var abs = absUrl(raw);
     if (!localHttp(abs)) return origFetch ? origFetch.apply(this, arguments) : Promise.reject(new Error('fetch unavailable'));
     var method = (init && init.method) || (input && input.method) || 'GET';
     var headers = headersOf((init && init.headers) || (input && input.headers));
@@ -884,7 +895,7 @@ var plugin = (() => {
     XHR.prototype.open = function (method, url) { this.__mimeHttp = { method: method, url: url }; return open.apply(this, arguments); };
     XHR.prototype.send = function (body) {
       var info = this.__mimeHttp || {};
-      var abs; try { abs = new URL(info.url || '', location.href).href; } catch (e) { abs = info.url || ''; }
+      var abs = absUrl(info.url || '');
       if (!localHttp(abs)) return send.apply(this, arguments);
       var xhr = this;
       call(abs, info.method, {}, body).then(function (msg) {
@@ -916,7 +927,12 @@ var plugin = (() => {
               else classic.push(assets.get(abs));
               return '';
           }
-          if (module) return `<script type="module">${escapeScript(rewriteSpecifiers(code, page))}</script>`;
+          if (module) {
+              const inline = `${page}#inline-module-${modules.length}`;
+              assets.set(inline, rewriteSpecifiers(code, page));
+              modules.push(inline);
+              return '';
+          }
           return full;
       });
       const styles = [];
@@ -929,16 +945,15 @@ var plugin = (() => {
           if (rel.includes('stylesheet')) styles.push(assets.get(abs));
           return '';
       });
-      const imports = {};
+      const scripts = {};
       for (const [url, code] of assets) {
           if (isStylesheet(url, html, page)) continue;
-          imports[url] = 'data:text/javascript;charset=utf-8,' + encodeURIComponent(rewriteSpecifiers(code, url));
+          scripts[url] = rewriteSpecifiers(code, url);
       }
-      const map = Object.keys(imports).length ? `<script type="importmap">${JSON.stringify({ imports })}</script>` : '';
-      const moduleTags = modules.map(url => `<script type="module" src="${escapeAttr(url)}"></script>`).join('');
+      const moduleBoot = modules.length ? `<script>${escapeScript(`(function(){var files=${JSON.stringify(scripts)};var entries=${JSON.stringify(modules)};var keys=Object.keys(files);var blobs={};for(var i=0;i<keys.length;i++)blobs[keys[i]]=URL.createObjectURL(new Blob([files[keys[i]]],{type:'text/javascript'}));var imports={};for(var j=0;j<keys.length;j++)imports[keys[j]]=blobs[keys[j]];var map=document.createElement('script');map.type='importmap';map.textContent=JSON.stringify({imports:imports});document.head.appendChild(map);for(var k=0;k<entries.length;k++){var el=document.createElement('script');el.type='module';el.src=blobs[entries[k]];document.head.appendChild(el);}})();`)}</script>` : '';
       const classicTags = classic.map(code => `<script>${escapeScript(code)}</script>`).join('');
       const styleTags = styles.map(code => `<style>${escapeStyle(code)}</style>`).join('');
-      const block = `<base href="${escapeAttr(page)}">${bridgeScript()}${styleTags}${classicTags}${map}${moduleTags}`;
+      const block = `<base href="${escapeAttr(page)}"><script>${escapeScript(bridgeScript(page))}</script>${styleTags}${classicTags}${moduleBoot}`;
       if (/<head[^>]*>/i.test(body)) return body.replace(/<head[^>]*>/i, match => match + block);
       return block + body;
   }
@@ -1197,14 +1212,23 @@ var plugin = (() => {
         if (setCookie) rememberCookies(new URL(url).host, { headers: { get: (name) => name === "set-cookie" ? setCookie : "" } });
         return { response: { ok: status >= 200 && status < 300, status, headers: { forEach() {} } }, text };
       };
+      const safeHeaders = (() => {
+        if (!headers) return void 0;
+        const next = {};
+        for (const key of Object.keys(headers)) {
+          if (key.toLowerCase() === "cookie") continue;
+          next[key] = headers[key];
+        }
+        return Object.keys(next).length ? next : void 0;
+      })();
       try {
-        const response = await fetch(url, { method, ...headers ? { headers } : {}, ...body != null ? { body } : {} });
+        const response = await fetch(url, { method, ...safeHeaders ? { headers: safeHeaders } : {}, ...body != null ? { body } : {} });
         rememberCookies(new URL(url).host, response);
         return { response, text: await response.text() };
       } catch (error) {
         if (error?.name === "AbortError") throw error;
         try {
-          const xhr = await xhrText(url, method, headers, body);
+          const xhr = await xhrText(url, method, safeHeaders, body);
           return finish(xhr.status, xhr.text, xhr.setCookie);
         } catch (xhrError) {
           if (xhrError?.name === "AbortError") throw xhrError;
@@ -1326,12 +1350,15 @@ var plugin = (() => {
       }, [src, pageToken, cleartext]);
       const allow = (req) => {
         const url = req?.url || "";
-        if (!url || url === "about:blank" || cleartext && (url.startsWith("data:") || url.startsWith("blob:"))) return true;
-        if (cleartext && req?.isTopFrame && req?.navigationType === "reload") {
-          setPageToken((value) => value + 1);
+        if (!url || url === "about:blank" || url.startsWith("about:") || url.startsWith("data:") || url.startsWith("blob:")) return true;
+        if (cleartext) {
+          if (/^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i.test(url)) return true;
+          if (req?.isTopFrame && req?.navigationType === "reload") {
+            setPageToken((value) => value + 1);
+            return false;
+          }
           return false;
         }
-        if (cleartext && isHttpPage(url) && url !== src) return false;
         return url === src || !!pageUrl(url);
       };
       return h(
@@ -1340,8 +1367,8 @@ var plugin = (() => {
         !src ? h(Text, null, "Set a valid HTTP or HTTPS URL in Nighty Tab settings.") : !WebView ? h(Text, null, "WebView is unavailable in this Snow build.") : cleartext && !html ? h(Text, null, error || "Opening the HTTP address…") : h(WebView, {
           key: `${src}:${cleartext ? "http" : "https"}:${pageToken}:${html.length}:${savedSession ? "signed-in" : "signed-out"}:${store.autoLogin && store.loginUsername && store.loginPassword ? "auto" : "manual"}`,
           ref: webViewRef,
-          source: cleartext ? { html, baseUrl: src } : { uri: src, ...savedSession ? { headers: { Cookie: `access_token=${savedSession}` } } : {} },
-          style: { flex: 1, width: "100%", backgroundColor: "#080D1B" },
+          source: cleartext ? { html, baseUrl: "http://localhost/" } : { uri: src, ...savedSession ? { headers: { Cookie: `access_token=${savedSession}` } } : {} },
+          style: { flex: 1, width: "100%", backgroundColor: "#080D1B", opacity: cleartext ? 0.99 : 1 },
           containerStyle: { flex: 1, backgroundColor: "#080D1B" },
           originWhitelist: ["*", "http://*", "https://*"],
           javaScriptEnabled: true,
@@ -1370,10 +1397,7 @@ var plugin = (() => {
           onShouldStartLoadWithRequest: allow,
           onError: (event) => {
             const description = event.nativeEvent?.description || "";
-            if (cleartext) {
-              setError(/secure connection|App Transport Security|-1022|Network request failed/i.test(description) ? "iOS blocked this http address inside Discord." : description || "Could not load this HTTP address.");
-              return;
-            }
+            if (cleartext) return;
             setError(description || "Could not load Nighty.");
           },
           onHttpError: (event) => setError(`Nighty returned HTTP ${event.nativeEvent?.statusCode}.`),
@@ -1756,6 +1780,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "white", customIconUrl: "", showNightyButton: true, autoLogin: false, loginUsername: "", loginPassword: "", sessionHost: "", sessionToken: "", sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.3", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.4", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();

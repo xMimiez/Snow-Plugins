@@ -130,10 +130,14 @@ function escapeStyle(code) {
     return String(code).replace(/<\/style/gi, '<\\/style>');
 }
 
-export function bridgeScript() {
+export function bridgeScript(page) {
+    const href = JSON.stringify(new URL(page).href);
+    const origin = JSON.stringify(new URL(page).origin);
     return `(() => { try {
 if (window.__mimeNightyHttp) return;
 window.__mimeNightyHttp = true;
+var PAGE = ${href};
+var ORIGIN = ${origin};
 var pending = Object.create(null);
 var seq = 0;
 window.__mimeNightyHttpResult = function (msg) {
@@ -170,13 +174,20 @@ function note(url, body) {
     if (data && typeof data.access_token === 'string') window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'NIGHTY_TOKEN', token: data.access_token }));
   } catch (e) {}
 }
+function absUrl(raw) {
+  try {
+    var next = new URL(raw || '', PAGE);
+    if (next.hostname === 'localhost' || next.hostname === '127.0.0.1') return new URL(next.pathname + next.search + next.hash, PAGE).href;
+    return next.href;
+  } catch (e) { return String(raw || ''); }
+}
 function localHttp(url) {
-  try { var next = new URL(url, location.href); return next.protocol === 'http:' && next.origin === location.origin; } catch (e) { return false; }
+  try { return new URL(absUrl(url)).origin === ORIGIN; } catch (e) { return false; }
 }
 var origFetch = window.fetch;
 window.fetch = function (input, init) {
   var raw = typeof input === 'string' ? input : (input && input.url) || '';
-  var abs; try { abs = new URL(raw, location.href).href; } catch (e) { abs = raw; }
+  var abs = absUrl(raw);
   if (!localHttp(abs)) return origFetch ? origFetch.apply(this, arguments) : Promise.reject(new Error('fetch unavailable'));
   var method = (init && init.method) || (input && input.method) || 'GET';
   var headers = headersOf((init && init.headers) || (input && input.headers));
@@ -192,7 +203,7 @@ if (XHR && XHR.prototype) {
   XHR.prototype.open = function (method, url) { this.__mimeHttp = { method: method, url: url }; return open.apply(this, arguments); };
   XHR.prototype.send = function (body) {
     var info = this.__mimeHttp || {};
-    var abs; try { abs = new URL(info.url || '', location.href).href; } catch (e) { abs = info.url || ''; }
+    var abs = absUrl(info.url || '');
     if (!localHttp(abs)) return send.apply(this, arguments);
     var xhr = this;
     call(abs, info.method, {}, body).then(function (msg) {
@@ -224,7 +235,12 @@ export function buildCleartextDocument(html, page, files) {
             else classic.push(assets.get(abs));
             return '';
         }
-        if (module) return `<script type="module">${escapeScript(rewriteSpecifiers(code, page))}</script>`;
+        if (module) {
+            const inline = `${page}#inline-module-${modules.length}`;
+            assets.set(inline, rewriteSpecifiers(code, page));
+            modules.push(inline);
+            return '';
+        }
         return full;
     });
     const styles = [];
@@ -237,16 +253,15 @@ export function buildCleartextDocument(html, page, files) {
         if (rel.includes('stylesheet')) styles.push(assets.get(abs));
         return '';
     });
-    const imports = {};
+    const scripts = {};
     for (const [url, code] of assets) {
         if (isStylesheet(url, html, page)) continue;
-        imports[url] = 'data:text/javascript;charset=utf-8,' + encodeURIComponent(rewriteSpecifiers(code, url));
+        scripts[url] = rewriteSpecifiers(code, url);
     }
-    const map = Object.keys(imports).length ? `<script type="importmap">${JSON.stringify({ imports })}</script>` : '';
-    const moduleTags = modules.map(url => `<script type="module" src="${escapeAttr(url)}"></script>`).join('');
+    const moduleBoot = modules.length ? `<script>${escapeScript(`(function(){var files=${JSON.stringify(scripts)};var entries=${JSON.stringify(modules)};var keys=Object.keys(files);var blobs={};for(var i=0;i<keys.length;i++)blobs[keys[i]]=URL.createObjectURL(new Blob([files[keys[i]]],{type:'text/javascript'}));var imports={};for(var j=0;j<keys.length;j++)imports[keys[j]]=blobs[keys[j]];var map=document.createElement('script');map.type='importmap';map.textContent=JSON.stringify({imports:imports});document.head.appendChild(map);for(var k=0;k<entries.length;k++){var el=document.createElement('script');el.type='module';el.src=blobs[entries[k]];document.head.appendChild(el);}})();`)}</script>` : '';
     const classicTags = classic.map(code => `<script>${escapeScript(code)}</script>`).join('');
     const styleTags = styles.map(code => `<style>${escapeStyle(code)}</style>`).join('');
-    const block = `<base href="${escapeAttr(page)}">${bridgeScript()}${styleTags}${classicTags}${map}${moduleTags}`;
+    const block = `<base href="${escapeAttr(page)}"><script>${escapeScript(bridgeScript(page))}</script>${styleTags}${classicTags}${moduleBoot}`;
     if (/<head[^>]*>/i.test(body)) return body.replace(/<head[^>]*>/i, match => match + block);
     return block + body;
 }
