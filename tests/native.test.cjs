@@ -43,8 +43,8 @@ async function harness(defaults = {}, modules = []) {
 test('NightyTab bundle opens iOS http addresses through the cleartext loader',()=>{
     const manifest=JSON.parse(fs.readFileSync(path.join(root,'NightyTab/manifest.json'),'utf8'));
     const src=fs.readFileSync(path.join(root,'NightyTab/index.js'),'utf8');
-    assert.equal(manifest.version,'2.0.4');
-    assert.match(src,/"version": "2\.0\.4"/);
+    assert.equal(manifest.version,'2.0.5');
+    assert.match(src,/"version": "2\.0\.5"/);
     assert.doesNotMatch(src,/Open in Safari/);
     assert.match(src,/function loadCleartextPage/);
     assert.match(src,/function isHttpPage/);
@@ -64,7 +64,7 @@ test('all Bunny spec-3 artifacts export definePlugin and match the hosted manife
         assert.equal(manifest.type,'plugin');
         assert.equal(manifest.main,'index.js');
         assert.equal(manifest.id,meta.id);
-        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.4');
+        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.5');
         else assert.equal(manifest.version,meta.version);
         assert.equal(manifest.display.name,meta.name);
         assert(manifest.display.authors.some(a=>a.id==='957164619061932045'));
@@ -216,8 +216,9 @@ test('Nighty cleartext loader inlines same-origin files and keeps other origins'
     assert.match(loaded.html,/body\{color:red\}/);
     assert.match(loaded.html,/NIGHTY_HTTP/);
     assert.match(loaded.html,/<script>\(\(\) =>/);
-    assert.match(loaded.html,/URL\.createObjectURL/);
+    assert.match(loaded.html,/<script type="module">/);
     assert.match(loaded.html,/http:\/\/10\.0\.0\.8:5123\/assets\/chunk\.js/);
+    assert.doesNotMatch(loaded.html,/URL\.createObjectURL/);
     assert.match(loaded.html,/https:\/\/cdn\.example\/lib\.js/);
     assert.doesNotMatch(loaded.html,/src="\/app\.css"/);
     assert.doesNotMatch(loaded.html,/<script type="module" src="http:\/\/10\.0\.0\.8/);

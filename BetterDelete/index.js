@@ -873,7 +873,7 @@ var plugin = (() => {
     const payload = { content: text, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] };
     if (typeof api?.deleteMessage === "function") await api.deleteMessage(channelId, messageId);
     else await deleteOnServer(api, discord, channelId, messageId);
-    await sendReplacement(api, discord, channelId, payload, messageId);
+    void sendReplacement(api, discord, channelId, payload, messageId);
     return text;
   }
   function patchMessageSheet(r, transform) {
@@ -971,6 +971,6 @@ var plugin = (() => {
   BetterDelete.defaults = { enabled: true, replacement: "redacted eh" };
 
   // BetterDelete.entry.js
-  var BetterDelete_entry_default = register({ "id": "mime.betterdelete", "name": "Silent Delete", "description": "Puts Delete and Silent Delete Message in the Edit, Reply, and Forward group. Silent Delete hides your message from other message loggers.", "version": "1.0.4", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/BetterDelete" }, BetterDelete);
+  var BetterDelete_entry_default = register({ "id": "mime.betterdelete", "name": "Silent Delete", "description": "Puts Delete and Silent Delete Message in the Edit, Reply, and Forward group. Silent Delete hides your message from other message loggers.", "version": "1.0.5", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/BetterDelete" }, BetterDelete);
   return __toCommonJS(BetterDelete_entry_exports);
 })();

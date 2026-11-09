@@ -231,14 +231,12 @@ export function buildCleartextDocument(html, page, files) {
         if (src) {
             const abs = resolveAgainst(page, src);
             if (!abs || !sameOrigin(page, abs) || !assets.has(abs)) return full;
-            if (module) modules.push(abs);
+            if (module) modules.push(rewriteSpecifiers(assets.get(abs), abs));
             else classic.push(assets.get(abs));
             return '';
         }
         if (module) {
-            const inline = `${page}#inline-module-${modules.length}`;
-            assets.set(inline, rewriteSpecifiers(code, page));
-            modules.push(inline);
+            modules.push(rewriteSpecifiers(code, page));
             return '';
         }
         return full;
@@ -253,17 +251,17 @@ export function buildCleartextDocument(html, page, files) {
         if (rel.includes('stylesheet')) styles.push(assets.get(abs));
         return '';
     });
-    const scripts = {};
-    for (const [url, code] of assets) {
-        if (isStylesheet(url, html, page)) continue;
-        scripts[url] = rewriteSpecifiers(code, url);
-    }
-    const moduleBoot = modules.length ? `<script>${escapeScript(`(function(){var files=${JSON.stringify(scripts)};var entries=${JSON.stringify(modules)};var keys=Object.keys(files);var blobs={};for(var i=0;i<keys.length;i++)blobs[keys[i]]=URL.createObjectURL(new Blob([files[keys[i]]],{type:'text/javascript'}));var imports={};for(var j=0;j<keys.length;j++)imports[keys[j]]=blobs[keys[j]];var map=document.createElement('script');map.type='importmap';map.textContent=JSON.stringify({imports:imports});document.head.appendChild(map);for(var k=0;k<entries.length;k++){var el=document.createElement('script');el.type='module';el.src=blobs[entries[k]];document.head.appendChild(el);}})();`)}</script>` : '';
+    const moduleTags = modules.map(code => `<script type="module">${escapeScript(code)}</script>`).join('');
     const classicTags = classic.map(code => `<script>${escapeScript(code)}</script>`).join('');
     const styleTags = styles.map(code => `<style>${escapeStyle(code)}</style>`).join('');
-    const block = `<base href="${escapeAttr(page)}"><script>${escapeScript(bridgeScript(page))}</script>${styleTags}${classicTags}${moduleBoot}`;
-    if (/<head[^>]*>/i.test(body)) return body.replace(/<head[^>]*>/i, match => match + block);
-    return block + body;
+    const head = `<base href="${escapeAttr(page)}"><script>${escapeScript(bridgeScript(page))}</script>${styleTags}${classicTags}`;
+    if (/<head[^>]*>/i.test(body)) body = body.replace(/<head[^>]*>/i, match => match + head);
+    else body = head + body;
+    if (moduleTags) {
+        if (/<\/body>/i.test(body)) return body.replace(/<\/body>/i, moduleTags + '</body>');
+        return body + moduleTags;
+    }
+    return body;
 }
 
 export async function loadCleartextPage(pageHref, fetchText, options = {}) {

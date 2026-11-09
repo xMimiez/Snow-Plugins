@@ -282,7 +282,8 @@ export async function runBetterDelete(api, discord, channelId, messageId, conten
     const payload = { content: text, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] };
     if (typeof api?.deleteMessage === 'function') await api.deleteMessage(channelId, messageId);
     else await deleteOnServer(api, discord, channelId, messageId);
-    await sendReplacement(api, discord, channelId, payload, messageId);
+    // Equicord awaits only deleteMessage. _sendMessage is not awaited.
+    void sendReplacement(api, discord, channelId, payload, messageId);
     return text;
 }
 

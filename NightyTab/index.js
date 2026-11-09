@@ -923,14 +923,12 @@ var plugin = (() => {
           if (src) {
               const abs = resolveAgainst(page, src);
               if (!abs || !sameOrigin(page, abs) || !assets.has(abs)) return full;
-              if (module) modules.push(abs);
+              if (module) modules.push(rewriteSpecifiers(assets.get(abs), abs));
               else classic.push(assets.get(abs));
               return '';
           }
           if (module) {
-              const inline = `${page}#inline-module-${modules.length}`;
-              assets.set(inline, rewriteSpecifiers(code, page));
-              modules.push(inline);
+              modules.push(rewriteSpecifiers(code, page));
               return '';
           }
           return full;
@@ -945,17 +943,17 @@ var plugin = (() => {
           if (rel.includes('stylesheet')) styles.push(assets.get(abs));
           return '';
       });
-      const scripts = {};
-      for (const [url, code] of assets) {
-          if (isStylesheet(url, html, page)) continue;
-          scripts[url] = rewriteSpecifiers(code, url);
-      }
-      const moduleBoot = modules.length ? `<script>${escapeScript(`(function(){var files=${JSON.stringify(scripts)};var entries=${JSON.stringify(modules)};var keys=Object.keys(files);var blobs={};for(var i=0;i<keys.length;i++)blobs[keys[i]]=URL.createObjectURL(new Blob([files[keys[i]]],{type:'text/javascript'}));var imports={};for(var j=0;j<keys.length;j++)imports[keys[j]]=blobs[keys[j]];var map=document.createElement('script');map.type='importmap';map.textContent=JSON.stringify({imports:imports});document.head.appendChild(map);for(var k=0;k<entries.length;k++){var el=document.createElement('script');el.type='module';el.src=blobs[entries[k]];document.head.appendChild(el);}})();`)}</script>` : '';
+      const moduleTags = modules.map(code => `<script type="module">${escapeScript(code)}</script>`).join('');
       const classicTags = classic.map(code => `<script>${escapeScript(code)}</script>`).join('');
       const styleTags = styles.map(code => `<style>${escapeStyle(code)}</style>`).join('');
-      const block = `<base href="${escapeAttr(page)}"><script>${escapeScript(bridgeScript(page))}</script>${styleTags}${classicTags}${moduleBoot}`;
-      if (/<head[^>]*>/i.test(body)) return body.replace(/<head[^>]*>/i, match => match + block);
-      return block + body;
+      const head = `<base href="${escapeAttr(page)}"><script>${escapeScript(bridgeScript(page))}</script>${styleTags}${classicTags}`;
+      if (/<head[^>]*>/i.test(body)) body = body.replace(/<head[^>]*>/i, match => match + head);
+      else body = head + body;
+      if (moduleTags) {
+          if (/<\/body>/i.test(body)) return body.replace(/<\/body>/i, moduleTags + '</body>');
+          return body + moduleTags;
+      }
+      return body;
   }
 
   async function loadCleartextPage(pageHref, fetchText, options = {}) {
@@ -1158,7 +1156,7 @@ var plugin = (() => {
     }
     function pageScript(token) {
       const saved = JSON.stringify(cleanToken(token) || "");
-      return `${sessionScript(token)}(() => { try { var saved = ${saved}; var apply = function () { var meta = document.querySelector('meta[name="viewport"]'); if (!meta) { meta = document.createElement('meta'); meta.name = 'viewport'; document.head.appendChild(meta); } meta.content = 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'; var style = document.getElementById('mime-nighty-mobile-fit'); if (!style) { style = document.createElement('style'); style.id = 'mime-nighty-mobile-fit'; style.textContent = 'html,body,#root,#app{width:100%!important;max-width:100vw!important;margin-left:0!important;margin-right:0!important;overflow-x:hidden!important}*,*:before,*:after{box-sizing:border-box}'; document.head.appendChild(style); } document.documentElement.style.touchAction = 'pan-y'; if (document.body) { document.body.style.touchAction = 'pan-y'; document.body.style.marginBottom = '0'; } }; var restore = function () { if (!saved) return; var key = 'mime-nighty-restored'; var login = document.querySelector('input[type="password"]'); try { if (!login) { if (document.readyState !== 'loading') sessionStorage.removeItem(key); return; } var marker = saved.slice(-24); if (sessionStorage.getItem(key) === marker) return; sessionStorage.setItem(key, marker); location.reload(); } catch (e) {} }; apply(); restore(); document.addEventListener('DOMContentLoaded', function () { apply(); restore(); }, { once: true }); } catch (e) {} return true; })();`;
+      return `${sessionScript(token)}(() => { try { var saved = ${saved}; var apply = function () { var meta = document.querySelector('meta[name="viewport"]'); if (!meta) { meta = document.createElement('meta'); meta.name = 'viewport'; document.head.appendChild(meta); } meta.content = 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'; var style = document.getElementById('mime-nighty-mobile-fit'); if (!style) { style = document.createElement('style'); style.id = 'mime-nighty-mobile-fit'; style.textContent = 'html,body,#root,#app{width:100%!important;max-width:100vw!important;margin-left:0!important;margin-right:0!important;overflow-x:hidden!important}*,*:before,*:after{box-sizing:border-box}'; document.head.appendChild(style); } document.documentElement.style.touchAction = 'pan-y'; if (document.body) { document.body.style.touchAction = 'pan-y'; document.body.style.marginBottom = '0'; } }; var restore = function () { if (!saved) return; var key = 'mime-nighty-restored'; var login = document.querySelector('input[type="password"]'); try { if (!login) { if (document.readyState !== 'loading') sessionStorage.removeItem(key); return; } var marker = saved.slice(-24); if (sessionStorage.getItem(key) === marker) return; sessionStorage.setItem(key, marker); if(!window.__mimeNightyHttp)location.reload(); } catch (e) {} }; apply(); restore(); document.addEventListener('DOMContentLoaded', function () { apply(); restore(); }, { once: true }); } catch (e) {} return true; })();`;
     }
     function saveNightyToken(token) {
       const host = pageHost();
@@ -1780,6 +1778,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "white", customIconUrl: "", showNightyButton: true, autoLogin: false, loginUsername: "", loginPassword: "", sessionHost: "", sessionToken: "", sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.4", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.5", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();
