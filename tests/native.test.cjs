@@ -699,6 +699,7 @@ test('BetterDelete moves Delete into the Edit group and sends the logger replace
     assert.deepEqual(calls,[
         ['delete',['222','111']],
         ['send',['222',{content:'redacted eh',tts:false,invalidEmojis:[],validNonShortcutEmojis:[]},{nonce:'111'}]],
+        ['delete',['222','333']],
     ]);
     const rest=[];
     const discord=async(path,options)=>{
@@ -707,10 +708,32 @@ test('BetterDelete moves Delete into the Edit group and sends the logger replace
         return {json:()=>[]};
     };
     await runBetterDelete({},discord,'222','111','secret');
-    assert.deepEqual(rest.map(row=>row[0]),['/channels/222/messages/111','/channels/222/messages']);
-    assert.equal(rest[0][1].method,'DELETE');
+    assert.deepEqual(rest.map(row=>[row[0],row[1]?.method]),[
+        ['/channels/222/messages/111','DELETE'],
+        ['/channels/222/messages','POST'],
+        ['/channels/222/messages/444','DELETE'],
+    ]);
     assert.equal(JSON.parse(rest[1][1].body).nonce,'111');
     assert.equal(JSON.parse(rest[1][1].body).content,'secret');
+    const nonceHits=[];
+    await runBetterDelete({
+        deleteMessage:async(...args)=>nonceHits.push(['delete',args]),
+        _sendMessage:async()=>({id:'111',nonce:'111'}),
+    },async(path,options)=>{
+        nonceHits.push(['rest',path,options?.method||'GET']);
+        if(!options?.method) return {json:()=>[{id:'111',nonce:'111'},{id:'555',nonce:'111'}]};
+        return {json:()=>[]};
+    },'222','111','secret');
+    assert.deepEqual(nonceHits.filter(row=>row[0]==='delete'),[
+        ['delete',['222','111']],
+        ['delete',['222','555']],
+    ]);
+    const stored=[];
+    await runBetterDelete({
+        deleteMessage:async(...args)=>stored.push(args),
+        _sendMessage:async()=>undefined,
+    },async()=>{throw new Error('REST should not run');},'222','111','secret',()=>({_array:[{id:'111',nonce:'111'},{id:'666',nonce:'111'}]}));
+    assert.deepEqual(stored,[['222','111'],['222','666']]);
     const menuCalls=[];
     const api={
         deleteMessage:async(...args)=>menuCalls.push(['delete',args]),
@@ -744,11 +767,12 @@ test('BetterDelete moves Delete into the Edit group and sends the logger replace
         return press(node.props?.children);
     };
     await press(rendered)();
-    await tick();
+    for(let i=0;i<40 && menuCalls.filter(row=>row[0]==='delete').length<2;i++) await new Promise(resolve=>setTimeout(resolve,50));
     assert.equal(toasts.length,0);
     assert.deepEqual(menuCalls,[
         ['delete',['222222222222222222','111111111111111111']],
         ['send',['222222222222222222',{content:'gone',tts:false,invalidEmojis:[],validNonShortcutEmojis:[]},{nonce:'111111111111111111'}]],
+        ['delete',['222222222222222222','333333333333333333']],
     ]);
     await Renderer.act(async()=>view.unmount());
     await r.dispose();

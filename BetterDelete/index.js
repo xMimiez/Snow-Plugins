@@ -828,6 +828,9 @@ var plugin = (() => {
     const text = String(value ?? "").trim();
     return (text || "redacted eh").slice(0, 2e3);
   }
+  var AFTER_ACK_MS = 300;
+  var LOOKUP_TRIES = 8;
+  var LOOKUP_GAP_MS = 150;
   function missingHttp(error) {
     return /unavailable|Invalid Discord API path/i.test(String(error?.message || error || ""));
   }
@@ -858,6 +861,36 @@ var plugin = (() => {
     }
     if (!clientOk && !restOk) throw clientError || new Error("Delete is unavailable");
   }
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  function listedMessages(bucket) {
+    if (!bucket) return [];
+    if (Array.isArray(bucket)) return bucket;
+    if (Array.isArray(bucket._array)) return bucket._array;
+    if (Array.isArray(bucket.messages)) return bucket.messages;
+    if (Array.isArray(bucket.body)) return bucket.body;
+    if (typeof bucket.toArray === "function") {
+      const list = bucket.toArray();
+      if (Array.isArray(list)) return list;
+    }
+    return [];
+  }
+  function replacementIdFrom(bucket, nonce) {
+    const nonceText = String(nonce);
+    for (const message of listedMessages(bucket)) {
+      const id = message?.id == null ? "" : String(message.id);
+      if (!id || id === nonceText) continue;
+      if (String(message?.nonce ?? "") === nonceText) return id;
+    }
+    return "";
+  }
+  function messageIdOf(result) {
+    if (result == null || result === false) return "";
+    if (typeof result === "string" || typeof result === "number") return String(result);
+    const id = result.id ?? result.body?.id ?? result.message?.id ?? result.body?.message?.id;
+    return id == null ? "" : String(id);
+  }
   async function sendReplacement(api, discord, channelId, payload, messageId) {
     const nonce = messageId;
     if (typeof api?._sendMessage === "function") return api._sendMessage(channelId, payload, { nonce });
@@ -868,13 +901,74 @@ var plugin = (() => {
     }
     throw new Error("Replacement send is unavailable");
   }
-  async function runBetterDelete(api, discord, channelId, messageId, content) {
+  function idFromLookup(found, nonce) {
+    if (typeof found === "string" || typeof found === "number") {
+      const id = String(found);
+      return id && id !== String(nonce) ? id : "";
+    }
+    return replacementIdFrom(found, nonce);
+  }
+  async function findReplacementId(discord, channelId, nonce, lookup) {
+    if (typeof lookup === "function") {
+      try {
+        const id = idFromLookup(await lookup(), nonce);
+        if (id) return id;
+      } catch {
+      }
+    }
+    if (typeof discord !== "function") return "";
+    try {
+      const result = await discord(`/channels/${channelId}/messages?limit=15`);
+      const body = typeof result?.json === "function" ? await result.json() : result;
+      return replacementIdFrom(body, nonce);
+    } catch {
+      return "";
+    }
+  }
+  async function waitForReplacementId(result, discord, channelId, nonce, lookup) {
+    const nonceText = String(nonce);
+    const immediate = messageIdOf(result);
+    if (immediate && immediate !== nonceText) return immediate;
+    for (let attempt = 0; attempt < LOOKUP_TRIES; attempt++) {
+      const found = await findReplacementId(discord, channelId, nonce, lookup);
+      if (found && found !== nonceText) return found;
+      if (attempt < LOOKUP_TRIES - 1) await delay(LOOKUP_GAP_MS);
+    }
+    return "";
+  }
+  async function deleteReplacement(api, discord, channelId, id) {
+    if (typeof api?.deleteMessage === "function") {
+      try {
+        await api.deleteMessage(channelId, id);
+        return;
+      } catch (error) {
+        if (alreadyGone(error)) return;
+        if (typeof discord !== "function") throw error;
+      }
+    }
+    if (typeof discord !== "function") throw new Error("The replacement was sent, but it could not be deleted");
+    try {
+      await discord(`/channels/${channelId}/messages/${id}`, { method: "DELETE" });
+    } catch (error) {
+      if (alreadyGone(error) || missingHttp(error)) return;
+      throw error;
+    }
+  }
+  async function runBetterDelete(api, discord, channelId, messageId, content, lookup) {
     const text = replacementText(content);
     const payload = { content: text, tts: false, invalidEmojis: [], validNonShortcutEmojis: [] };
     if (typeof api?.deleteMessage === "function") await api.deleteMessage(channelId, messageId);
     else await deleteOnServer(api, discord, channelId, messageId);
-    void sendReplacement(api, discord, channelId, payload, messageId);
+    const sent = await sendReplacement(api, discord, channelId, payload, messageId);
+    const replacementId = await waitForReplacementId(sent, discord, channelId, messageId, lookup);
+    if (!replacementId || replacementId === String(messageId)) throw new Error("The replacement was sent, but its new id was not found");
+    await delay(AFTER_ACK_MS);
+    await deleteReplacement(api, discord, channelId, replacementId);
     return text;
+  }
+  function messagesInChannel(r, channelId) {
+    const store = r.byStore("MessageStore") || r.find("getMessages");
+    return store?.getMessages?.(channelId);
   }
   function patchMessageSheet(r, transform) {
     const sheets = r.find("openLazy", "hideActionSheet");
@@ -911,7 +1005,7 @@ var plugin = (() => {
       if (busy.has(messageId)) return;
       busy.add(messageId);
       try {
-        await runBetterDelete(messageActions(r), r.discord.bind(r), channelId, messageId, r.store.replacement);
+        await runBetterDelete(messageActions(r), r.discord.bind(r), channelId, messageId, r.store.replacement, () => messagesInChannel(r, channelId));
       } finally {
         busy.delete(messageId);
       }
@@ -935,7 +1029,7 @@ var plugin = (() => {
           h(Toggle, {
             setting: "enabled",
             label: "Silent Delete",
-            subLabel: "Deletes the message, then sends the replacement with that message id as the nonce, the same way Equicord does."
+            subLabel: "Deletes the message, sends the replacement with that id as the nonce, then deletes the replacement."
           }),
           h(Input, {
             label: "Replacement message",
@@ -971,6 +1065,6 @@ var plugin = (() => {
   BetterDelete.defaults = { enabled: true, replacement: "redacted eh" };
 
   // BetterDelete.entry.js
-  var BetterDelete_entry_default = register({ "id": "mime.betterdelete", "name": "Silent Delete", "description": "Puts Delete and Silent Delete Message in the Edit, Reply, and Forward group. Silent Delete hides your message from other message loggers.", "version": "1.0.5", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/BetterDelete" }, BetterDelete);
+  var BetterDelete_entry_default = register({ "id": "mime.betterdelete", "name": "Silent Delete", "description": "Puts Delete and Silent Delete Message in the Edit, Reply, and Forward group. Silent Delete hides your message from other message loggers.", "version": "1.0.6", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/BetterDelete" }, BetterDelete);
   return __toCommonJS(BetterDelete_entry_exports);
 })();
