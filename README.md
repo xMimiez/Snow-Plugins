@@ -8,6 +8,7 @@ These releases use **Bunny spec 3**. Install from the `manifest.json` URL, then 
 
 | Plugin | Current release | What it does | Install |
 | --- | --- | --- | --- |
+| [HideQuestPopup](HideQuestPopup/) | 1.0.0 | Always hides the quest popup above the You bar. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/HideQuestPopup/manifest.json) |
 | [Silent Delete](BetterDelete/) | 1.0.6 | Puts Delete and Silent Delete Message in the Edit, Reply, and Forward group. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/BetterDelete/manifest.json) |
 | [DebugConsole](DebugConsole/) | 2.2.1 | Live logs with clear/copy/search. Ignores Discord intl locale spam. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/DebugConsole/manifest.json) |
 | [Decor](Decor/) | 2.2.5 | Browse and equip Decor avatar decorations. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/Decor/manifest.json) |

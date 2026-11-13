@@ -1,0 +1,22 @@
+{
+  "spec": 3,
+  "type": "plugin",
+  "id": "mime.hidequestpopup",
+  "version": "1.0.0",
+  "display": {
+    "name": "HideQuestPopup",
+    "description": "Always hides the quest popup above the You bar.",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.js",
+  "extras": {
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/HideQuestPopup",
+    "bunny": {}
+  }
+}

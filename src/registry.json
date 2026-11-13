@@ -416,5 +416,21 @@
     ],
     "license": "GPL-3.0-or-later",
     "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/BetterDelete"
+  },
+  {
+    "folder": "HideQuestPopup",
+    "module": "hide-quest-popup",
+    "id": "mime.hidequestpopup",
+    "name": "HideQuestPopup",
+    "description": "Always hides the quest popup above the You bar.",
+    "version": "1.0.0",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ],
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/HideQuestPopup"
   }
 ]

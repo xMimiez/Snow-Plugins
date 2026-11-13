@@ -55,7 +55,7 @@ test('NightyTab bundle opens iOS http addresses through the cleartext loader',()
 
 test('all Bunny spec-3 artifacts export definePlugin and match the hosted manifest', async()=>{
     const registry=JSON.parse(fs.readFileSync(path.join(root,'src/registry.json')));
-    assert.equal(registry.length,21);
+    assert.equal(registry.length,22);
     for(const meta of registry){
         const manifest=JSON.parse(fs.readFileSync(path.join(root,meta.folder,'manifest.json')));
         const bytes=fs.readFileSync(path.join(root,meta.folder,manifest.main));
@@ -145,6 +145,45 @@ test('Decor create UI recovers from upload failure and prevents duplicate submis
     try { await Renderer.act(async()=>{tree=Renderer.create(React.createElement(p.CreateDecorationPage));});await Renderer.act(async()=>labeled('Choose image').props.onPress());await Renderer.act(async()=>tree.root.findByType('RNInput').props.onChangeText('Name'));const submit=labeled('Create decoration');await Renderer.act(async()=>{submit.props.onPress();submit.props.onPress();await tick();});assert.equal(sends,1);assert(tree.root.findAllByType('Pressable').some(b=>b.props.accessibilityLabel==='Creating…'&&b.props.disabled));await Renderer.act(async()=>{xhr.status=503;xhr.onload();await tick();});assert(tree.root.findAllByType('Pressable').some(b=>b.props.accessibilityLabel==='Create decoration'&&!b.props.disabled));assert.match(JSON.stringify(tree.toJSON()),/HTTP 503/); }finally{await Renderer.act(async()=>tree?.unmount());p.stop();await r.dispose();global.XMLHttpRequest=oldXHR;global.FormData=oldForm;}
 });
 test('Decor stop aborts an in-flight upload',async()=>{const {default:factory}=await import('../src/plugins/decor.js');const {encode64,encodePng}=await import('../src/image-conversion.js');const {r}=await harness({tokens:{},token:'fake'});const p=factory(r),oldXHR=global.XMLHttpRequest,oldForm=global.FormData;let aborted=false;global.FormData=class{append(){}};global.XMLHttpRequest=class{open(){}setRequestHeader(){}send(){}abort(){aborted=true;}};try{const pending=p.createDecorationUpload({base64:encode64(encodePng(new Uint8Array([0,0,0,255]),1,1))},'Test');await tick();p.stop();await assert.rejects(pending,/cancelled|stopped/);assert(aborted);}finally{await r.dispose();global.XMLHttpRequest=oldXHR;global.FormData=oldForm;}});
+test('HideQuestPopup always removes the You bar quest dock and leaves Quest Home', async () => {
+    const { default: factory, isQuestPopup, isMobileDockKey, blocksDockDelivery } = await import('../src/plugins/hide-quest-popup.js');
+    assert.equal(isQuestPopup(function QuestBar() {}, {}), true);
+    assert.equal(isQuestPopup(function QuestHome() {}, { questContent: 12 }), false);
+    assert.equal(isQuestPopup(function Card() {}, { questContent: 13 }), true);
+    assert.equal(isQuestPopup(function Card() {}, { questContent: 'QUEST_BAR_MOBILE' }), true);
+    assert.equal(isQuestPopup(function Card() {}, { placement: 'MOBILE_HOME_DOCK_AREA' }), true);
+    assert.equal(isQuestPopup(function Card() {}, { placement: 2, questId: '1' }), true);
+    assert.equal(isQuestPopup(function Card() {}, { placement: 2 }), false);
+    assert.equal(isQuestPopup(function Icon() {}, { accessibilityLabel: 'Quests' }), false);
+    assert.equal(isMobileDockKey('MOBILE_HOME_DOCK_AREA'), true);
+    assert.equal(isMobileDockKey(1), false);
+    assert.equal(blocksDockDelivery('function C(e){return "getQuestDeliveryDataForPlacement"}', [2]), true);
+    assert.equal(blocksDockDelivery('function C(e){return "getQuestDeliveryDataForPlacement"}', [1]), false);
+    assert.equal(blocksDockDelivery('function S(e){return "MOBILE_HOME_DOCK_AREA"}', [13]), true);
+    assert.equal(blocksDockDelivery('function unrelated(){}', [2]), false);
+    const decisions = new Map([[2, { questId: 'dock' }], [1, { questId: 'desktop' }]]);
+    const delivered = new Map([[2, { quest: { id: 'dock' } }], [1, { quest: { id: 'desktop' } }]]);
+    const { r } = await harness({}, [{ questAdDecisionByPlacement: decisions, questToDeliverForPlacement: delivered }]);
+    factory(r).start();
+    function QuestBar() { return null; }
+    QuestBar.displayName = 'QuestBar';
+    function You() { return null; }
+    try {
+        assert.equal(React.createElement(QuestBar, { questId: '1' }), false);
+        assert.equal(React.createElement(function QuestHome() {}, { questContent: 12 }).type.name, 'QuestHome');
+        assert.equal(React.createElement(function Icon() {}, { accessibilityLabel: 'Quests' }).type.name, 'Icon');
+        const kept = React.createElement(You, null, React.createElement(function Label() {}, { accessibilityLabel: 'You' }));
+        assert.equal(kept.type, You);
+        assert.equal(decisions.get(2), undefined);
+        assert.deepEqual(decisions.get(1), { questId: 'desktop' });
+        assert.equal(delivered.get(2), undefined);
+        assert.equal(delivered.get(1).quest.id, 'desktop');
+    } finally {
+        await r.dispose();
+    }
+    assert.deepEqual(decisions.get(2), { questId: 'dock' });
+    assert.equal(React.createElement(QuestBar, { questId: '1' }).type, QuestBar);
+});
 test('invite commands do nothing before confirmation and preserve server features on pause/resume',async()=>{
     const {PauseInvitesForever}=await import('../src/plugins/mobile-ports.js');const {r,commands,sheets}=await harness();const p=PauseInvitesForever(r);let requests=[];r.discord=async(url,opts)=>{requests.push({url,...opts});return{json:()=>({features:['COMMUNITY','INVITES_DISABLED','NEWS']})};};p.start();await commands.get('pauseinvites').execute([],{channel:{guild_id:'123456789012345678'}});assert.equal(requests.length,0);assert.equal(sheets.size,1);
     for(const pause of [true,false]){requests=[];let tree;await Renderer.act(async()=>{tree=Renderer.create(React.createElement(p.Confirm,{guildId:'123456789012345678',pause,close:()=>{}}));});await Renderer.act(async()=>{const b=tree.root.findAllByType('Pressable').find(b=>b.props.accessibilityLabel===(pause?'Pause invites':'Resume invites'));b.props.onPress();b.props.onPress();await tick();});assert.equal(requests.length,2);assert.equal(requests[1].method,'PATCH');assert.deepEqual(JSON.parse(requests[1].body).features,pause?['COMMUNITY','NEWS','INVITES_DISABLED']:['COMMUNITY','NEWS']);await Renderer.act(async()=>tree.unmount());}await r.dispose();
