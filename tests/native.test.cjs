@@ -145,8 +145,8 @@ test('Decor create UI recovers from upload failure and prevents duplicate submis
     try { await Renderer.act(async()=>{tree=Renderer.create(React.createElement(p.CreateDecorationPage));});await Renderer.act(async()=>labeled('Choose image').props.onPress());await Renderer.act(async()=>tree.root.findByType('RNInput').props.onChangeText('Name'));const submit=labeled('Create decoration');await Renderer.act(async()=>{submit.props.onPress();submit.props.onPress();await tick();});assert.equal(sends,1);assert(tree.root.findAllByType('Pressable').some(b=>b.props.accessibilityLabel==='Creating…'&&b.props.disabled));await Renderer.act(async()=>{xhr.status=503;xhr.onload();await tick();});assert(tree.root.findAllByType('Pressable').some(b=>b.props.accessibilityLabel==='Create decoration'&&!b.props.disabled));assert.match(JSON.stringify(tree.toJSON()),/HTTP 503/); }finally{await Renderer.act(async()=>tree?.unmount());p.stop();await r.dispose();global.XMLHttpRequest=oldXHR;global.FormData=oldForm;}
 });
 test('Decor stop aborts an in-flight upload',async()=>{const {default:factory}=await import('../src/plugins/decor.js');const {encode64,encodePng}=await import('../src/image-conversion.js');const {r}=await harness({tokens:{},token:'fake'});const p=factory(r),oldXHR=global.XMLHttpRequest,oldForm=global.FormData;let aborted=false;global.FormData=class{append(){}};global.XMLHttpRequest=class{open(){}setRequestHeader(){}send(){}abort(){aborted=true;}};try{const pending=p.createDecorationUpload({base64:encode64(encodePng(new Uint8Array([0,0,0,255]),1,1))},'Test');await tick();p.stop();await assert.rejects(pending,/cancelled|stopped/);assert(aborted);}finally{await r.dispose();global.XMLHttpRequest=oldXHR;global.FormData=oldForm;}});
-test('HideQuestPopup always removes the You bar quest dock and leaves Quest Home', async () => {
-    const { default: factory, isQuestPopup, isMobileDockKey, blocksDockDelivery } = await import('../src/plugins/hide-quest-popup.js');
+test('HideQuestPopup presses Hide This for the You bar quest and leaves Quest Home', async () => {
+    const { default: factory, isQuestPopup, isMobileDockKey, blocksDockDelivery, isDismissFunction, questDismissedFromBar, collectDockQuestIds, dismissDockQuest } = await import('../src/plugins/hide-quest-popup.js');
     assert.equal(isQuestPopup(function QuestBar() {}, {}), true);
     assert.equal(isQuestPopup(function QuestHome() {}, { questContent: 12 }), false);
     assert.equal(isQuestPopup(function Card() {}, { questContent: 13 }), true);
@@ -155,33 +155,80 @@ test('HideQuestPopup always removes the You bar quest dock and leaves Quest Home
     assert.equal(isQuestPopup(function Card() {}, { placement: 2, questId: '1' }), true);
     assert.equal(isQuestPopup(function Card() {}, { placement: 2 }), false);
     assert.equal(isQuestPopup(function Icon() {}, { accessibilityLabel: 'Quests' }), false);
+    function QuestDockContextMenuActionSheet() {}
+    assert.equal(isQuestPopup(QuestDockContextMenuActionSheet, { questContent: 13 }), false);
     assert.equal(isMobileDockKey('MOBILE_HOME_DOCK_AREA'), true);
     assert.equal(isMobileDockKey(1), false);
     assert.equal(blocksDockDelivery('function C(e){return "getQuestDeliveryDataForPlacement"}', [2]), true);
     assert.equal(blocksDockDelivery('function C(e){return "getQuestDeliveryDataForPlacement"}', [1]), false);
     assert.equal(blocksDockDelivery('function S(e){return "MOBILE_HOME_DOCK_AREA"}', [13]), true);
     assert.equal(blocksDockDelivery('function unrelated(){}', [2]), false);
-    const decisions = new Map([[2, { questId: 'dock' }], [1, { questId: 'desktop' }]]);
-    const delivered = new Map([[2, { quest: { id: 'dock' } }], [1, { quest: { id: 'desktop' } }]]);
-    const { r } = await harness({}, [{ questAdDecisionByPlacement: decisions, questToDeliverForPlacement: delivered }]);
+    const dockId = '123456789012345678';
+    const enrolledId = '223456789012345678';
+    const dismissedId = '323456789012345678';
+    const expiredId = '423456789012345678';
+    const now = Date.UTC(2026, 10, 13);
+    const quests = new Map([
+        [enrolledId, { id: enrolledId, userStatus: { enrolledAt: '2026-11-01', dismissedQuestContent: 0 } }],
+        [dismissedId, { id: dismissedId, userStatus: { dismissedQuestContent: 2 } }],
+        [expiredId, { id: expiredId, config: { expiresAt: '2020-01-01' }, userStatus: {} }],
+    ]);
+    assert.equal(questDismissedFromBar(quests.get(dismissedId)), true);
+    assert.equal(questDismissedFromBar(quests.get(enrolledId)), false);
+    const decisions = new Map([[2, { questId: dockId }], [1, { questId: 'desktop' }]]);
+    const delivered = new Map([[2, { quest: { id: dockId } }], [1, { quest: { id: '999' } }]]);
+    assert.deepEqual(collectDockQuestIds({ questAdDecisionByPlacement: decisions, questToDeliverForPlacement: delivered, quests }, now).sort(), [dockId, enrolledId].sort());
+    const clientCalls = [];
+    async function dismissQuest(questId, content) {
+        clientCalls.push([questId, content]);
+        // QUESTS_DISMISS_CONTENT_BEGIN QUESTS_DISMISS_CONTENT
+    }
+    assert.equal(isDismissFunction(dismissQuest), true);
+    assert.equal(await dismissDockQuest({ dismiss: dismissQuest, questId: dockId }), 'client');
+    assert.deepEqual(clientCalls, [[dockId, 13]]);
+    const httpCalls = [];
+    const http = await dismissDockQuest({
+        discord: async (path, options) => { httpCalls.push({ path, options }); return { json: () => ({ dismissedQuestContent: 2 }) }; },
+        questId: enrolledId,
+        publish: body => httpCalls.push(body),
+    });
+    assert.equal(http, 'http');
+    assert.equal(httpCalls[0].path, `/quests/${enrolledId}/dismissible-content/13/dismiss`);
+    assert.equal(httpCalls[0].options.method, 'POST');
+    assert.deepEqual(httpCalls[1], { dismissedQuestContent: 2 });
+    assert.equal(await dismissDockQuest({ discord: async () => { throw new Error('no'); }, questId: '12' }), false);
+    const { r, events } = await harness({}, [{ questAdDecisionByPlacement: decisions, questToDeliverForPlacement: delivered, quests }]);
+    r.metro.modules = [{ dismissQuest }];
+    const requests = [];
+    r.discord = async (path, options) => { requests.push({ path, options }); return { json: () => ({}) }; };
     factory(r).start();
     function QuestBar() { return null; }
     QuestBar.displayName = 'QuestBar';
     function You() { return null; }
     try {
+        await tick();
         assert.equal(React.createElement(QuestBar, { questId: '1' }), false);
+        assert.equal(React.createElement(QuestDockContextMenuActionSheet, { questContent: 13 }).type, QuestDockContextMenuActionSheet);
         assert.equal(React.createElement(function QuestHome() {}, { questContent: 12 }).type.name, 'QuestHome');
         assert.equal(React.createElement(function Icon() {}, { accessibilityLabel: 'Quests' }).type.name, 'Icon');
         const kept = React.createElement(You, null, React.createElement(function Label() {}, { accessibilityLabel: 'You' }));
         assert.equal(kept.type, You);
-        assert.equal(decisions.get(2), undefined);
+        assert.equal(decisions.get(2).questId, dockId);
         assert.deepEqual(decisions.get(1), { questId: 'desktop' });
-        assert.equal(delivered.get(2), undefined);
-        assert.equal(delivered.get(1).quest.id, 'desktop');
+        assert.equal(requests.length, 0);
+        assert.deepEqual([...new Set(clientCalls.map(call => call[0]))].sort(), [dockId, enrolledId].sort());
+        assert.ok(clientCalls.every(call => call[1] === 13));
+        const before = clientCalls.length;
+        events.get('CONNECTION_OPEN').forEach(fn => fn({ type: 'CONNECTION_OPEN' }));
+        await tick();
+        events.get('CONNECTION_OPEN').forEach(fn => fn({ type: 'CONNECTION_OPEN' }));
+        await tick();
+        assert.equal(clientCalls.length, before + 2);
+        assert.ok(clientCalls.every(call => call[0] === dockId || call[0] === enrolledId));
     } finally {
         await r.dispose();
     }
-    assert.deepEqual(decisions.get(2), { questId: 'dock' });
+    assert.equal(decisions.get(2).questId, dockId);
     assert.equal(React.createElement(QuestBar, { questId: '1' }).type, QuestBar);
 });
 test('invite commands do nothing before confirmation and preserve server features on pause/resume',async()=>{

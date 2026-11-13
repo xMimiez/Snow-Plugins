@@ -2,10 +2,10 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.hidequestpopup",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "display": {
     "name": "HideQuestPopup",
-    "description": "Always hides the quest popup above the You bar.",
+    "description": "Always presses Hide This for the quest above the You bar.",
     "authors": [
       {
         "name": "Mime | N0_.q3",

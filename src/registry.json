@@ -422,8 +422,8 @@
     "module": "hide-quest-popup",
     "id": "mime.hidequestpopup",
     "name": "HideQuestPopup",
-    "description": "Always hides the quest popup above the You bar.",
-    "version": "1.0.0",
+    "description": "Always presses Hide This for the quest above the You bar.",
+    "version": "1.0.1",
     "authors": [
       {
         "name": "Mime | N0_.q3",
