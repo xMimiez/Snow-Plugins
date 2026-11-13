@@ -676,11 +676,13 @@ var plugin = (() => {
     const label = [props.accessibilityLabel, props.testID, props.nativeID].filter((value) => typeof value === "string").join(" ");
     return /quest/i.test(label) && /bar|dock|popup|promo|banner/i.test(`${label} ${name}`);
   }
+  function selectsDockQuest(source) {
+    if (typeof source !== "string" || source === "" || source.length > 8e3) return false;
+    return source.includes("getQuestDeliveryDataForPlacement") || source.includes("MOBILE_HOME_DOCK_AREA") || source.includes("questToDeliverForPlacement") || /\.get\([^)]*\)[\s\S]{0,180}\.quest\.id/.test(source);
+  }
   function blocksDockDelivery(source, args) {
-    if (typeof source !== "string" || !args?.length) return false;
-    if (!source.includes("getQuestDeliveryDataForPlacement") && !source.includes("MOBILE_HOME_DOCK_AREA")) return false;
-    const arg = args[0];
-    return isMobileDockKey(arg) || arg === 13 || arg === "QUEST_BAR_MOBILE";
+    if (!selectsDockQuest(source) || !args?.length) return false;
+    return args.some((arg) => isMobileDockKey(arg) || arg === 13 || arg === "QUEST_BAR_MOBILE");
   }
   function isDismissFunction(fn) {
     if (typeof fn !== "function") return false;
@@ -695,7 +697,15 @@ var plugin = (() => {
   function questIdFromProps(props) {
     return snowflake(idFrom(props));
   }
-  function collectDockQuestIds(holder, now = Date.now()) {
+  function readPlacement(map, key, rawGets) {
+    const raw = rawGets?.get?.(map);
+    try {
+      return typeof raw === "function" ? raw.call(map, key) : map.get(key);
+    } catch {
+      return void 0;
+    }
+  }
+  function collectDockQuestIds(holder, now = Date.now(), rawGets) {
     const ids = [];
     const seen = /* @__PURE__ */ new Set();
     const add = (value) => {
@@ -708,12 +718,7 @@ var plugin = (() => {
     for (const key of [...DOCK_MAPS, "earnedQuestForPlacement"]) {
       const map = holder[key];
       if (!map || typeof map.get !== "function") continue;
-      for (const placement of DOCK_KEYS) {
-        try {
-          add(map.get(placement));
-        } catch {
-        }
-      }
+      for (const placement of DOCK_KEYS) add(readPlacement(map, placement, rawGets));
     }
     let quests = holder.quests;
     if (typeof quests === "function") {
@@ -748,15 +753,57 @@ var plugin = (() => {
     if (typeof publish === "function" && body && typeof body === "object") publish(body);
     return "http";
   }
+  function isYouCluster(element) {
+    return /(^|\s)You(\s|$)/.test(nodeText(element, 0));
+  }
+  function isPage(element) {
+    const type = element?.type;
+    const name = typeof type === "string" ? type : componentName(type);
+    return /Scroll|List|Flash|Flat|Section|Home|Screen|Page/i.test(name);
+  }
+  function isDockCard(element) {
+    if (!element || typeof element !== "object" || isYouCluster(element) || isPage(element)) return false;
+    if (isQuestPopup(element.type, element.props)) return true;
+    const ids = /* @__PURE__ */ new Set();
+    collectQuestSignals(element, 0, ids);
+    if (ids.size > 1) return false;
+    const text = nodeText(element, 0);
+    return /get reward/i.test(text) && text.length < 320;
+  }
   function stripQuestPopups(element, React) {
     if (!element || typeof element !== "object" || !element.props) return element;
     if (isQuestPopup(element.type, element.props)) return false;
     const children = element.props.children;
     if (children == null) return element;
     const list = Array.isArray(children) ? children : [children];
-    if (!list.some((child) => child && typeof child === "object" && isQuestPopup(child.type, child.props))) return element;
-    const next = list.filter((child) => !(child && typeof child === "object" && isQuestPopup(child.type, child.props)));
+    const besideYou = list.some((child) => child && typeof child === "object" && isYouCluster(child));
+    if (!list.some((child) => child && typeof child === "object" && (isQuestPopup(child.type, child.props) || besideYou && isDockCard(child)))) return element;
+    const next = list.filter((child) => !(child && typeof child === "object" && (isQuestPopup(child.type, child.props) || besideYou && isDockCard(child) && !isYouCluster(child))));
     return React.cloneElement(element, { children: Array.isArray(children) ? next : next[0] ?? null });
+  }
+  function nodeText(element, depth) {
+    if (element == null || depth > 5) return "";
+    if (typeof element === "string" || typeof element === "number") return ` ${element} `;
+    if (Array.isArray(element)) return element.map((child) => nodeText(child, depth + 1)).join(" ");
+    if (typeof element !== "object") return "";
+    const props = element.props || {};
+    const bits = [props.accessibilityLabel, props.testID, props.nativeID, props.title, props.label].filter((value) => typeof value === "string").join(" ");
+    return ` ${bits} ${nodeText(props.children, depth + 1)} `;
+  }
+  function collectQuestSignals(element, depth, ids) {
+    if (!element || depth > 6) return;
+    if (Array.isArray(element)) {
+      for (const child of element) collectQuestSignals(child, depth, ids);
+      return;
+    }
+    if (typeof element !== "object") return;
+    const props = element.props;
+    if (!props || typeof props !== "object") return;
+    for (const candidate of [props.quest, props.questOrQuests]) {
+      const id = snowflake(idFrom(candidate));
+      if (id && (candidate.config || candidate.userStatus || candidate.user_status || candidate.assets)) ids.add(id);
+    }
+    collectQuestSignals(props.children, depth + 1, ids);
   }
   function snowflake(value) {
     const text = String(value ?? "");
@@ -819,8 +866,54 @@ var plugin = (() => {
     }
     return found;
   }
-  function findHolder(r) {
-    return r.find(...DOCK_MAPS) || r.find(DOCK_MAPS[0]) || r.find(DOCK_MAPS[1]) || r.byStore("QuestsStore") || r.byStore("QuestStore") || r.find("quests");
+  function looksLikeQuestStore(value) {
+    if (!value || typeof value !== "object") return false;
+    try {
+      return typeof value.getQuest === "function" || value.quests instanceof Map || value.questToDeliverForPlacement instanceof Map || value.questAdDecisionByPlacement instanceof Map;
+    } catch {
+      return false;
+    }
+  }
+  function findHolders(r) {
+    const found = [];
+    const push = (value) => {
+      if (looksLikeQuestStore(value) && !found.includes(value)) found.push(value);
+    };
+    push(r.find(...DOCK_MAPS));
+    push(r.find(DOCK_MAPS[0]));
+    push(r.find(DOCK_MAPS[1]));
+    push(r.byStore("QuestsStore"));
+    push(r.byStore("QuestStore"));
+    push(r.find("quests"));
+    const seen = /* @__PURE__ */ new Set();
+    const consider = (value) => {
+      if (!value || typeof value !== "object" && typeof value !== "function" || seen.has(value)) return;
+      seen.add(value);
+      push(value);
+      if (typeof value === "object") {
+        push(value.default);
+        push(value.A);
+        push(value.Z);
+        consider(value.exports);
+        consider(value.publicModule?.exports);
+      }
+    };
+    for (const map of [r.metro?.modules, r.metro?.cache, r.metro?.moduleCache]) {
+      if (!map) continue;
+      const values = typeof map.values === "function" ? map.values() : Object.values(map);
+      for (const item of values) consider(item);
+    }
+    return found;
+  }
+  function noteQuestIds(element, ids, depth = 0) {
+    if (!element || depth > 6 || typeof element !== "object") return;
+    if (Array.isArray(element)) {
+      for (const child of element) noteQuestIds(child, ids, depth);
+      return;
+    }
+    const id = questIdFromProps(element.props);
+    if (id) ids.add(id);
+    noteQuestIds(element.props?.children, ids, depth + 1);
   }
   function HideQuestPopup(r) {
     const { h, React } = r;
@@ -828,8 +921,10 @@ var plugin = (() => {
     const extraIds = /* @__PURE__ */ new Set();
     const attempts = /* @__PURE__ */ new Map();
     const inflight = /* @__PURE__ */ new Set();
+    const rawGets = /* @__PURE__ */ new WeakMap();
     let dismissFn = null;
     let queued = false;
+    let holders = [];
     const publish = (body) => {
       const dispatcher = r.common?.FluxDispatcher;
       if (typeof dispatcher?.dispatch === "function") {
@@ -841,15 +936,18 @@ var plugin = (() => {
     };
     async function hide() {
       if (!r.active) return;
-      const holder = findHolder(r);
-      const ids = collectDockQuestIds(holder);
+      if (!holders.length) holders = findHolders(r);
+      const ids = [];
+      for (const holder of holders) {
+        for (const id of collectDockQuestIds(holder, Date.now(), rawGets)) {
+          if (!ids.includes(id)) ids.push(id);
+        }
+      }
       for (const id of extraIds) if (!ids.includes(id)) ids.push(id);
       if (!dismissFn) dismissFn = findDismissFunction(r.metro);
       let dismissed = 0;
       for (const id of ids) {
         if (!r.active || inflight.has(id)) continue;
-        const known = holder?.quests?.get?.(id) || holder?.getQuest?.(id);
-        if (known && questDismissedFromBar(known)) continue;
         const tries = attempts.get(id) || 0;
         if (tries >= MAX_ATTEMPTS) continue;
         attempts.set(id, tries + 1);
@@ -861,7 +959,20 @@ var plugin = (() => {
             questId: id,
             publish
           });
-          if (how) dismissed++;
+          if (how) {
+            dismissed++;
+            for (const holder of holders) {
+              const quest = (holder.quests ? readPlacement(holder.quests, id, rawGets) : void 0) || holder.getQuest?.(id);
+              if (quest?.userStatus && typeof quest.userStatus === "object") {
+                const flags = Number(quest.userStatus.dismissedQuestContent) || 0;
+                quest.userStatus.dismissedQuestContent = flags | QUEST_BAR_DISMISS_FLAG;
+              }
+              try {
+                holder.emitChange?.();
+              } catch {
+              }
+            }
+          }
         } catch (error) {
           r.status.lastError = error?.message || String(error);
         } finally {
@@ -884,8 +995,7 @@ var plugin = (() => {
           if (!r.active || result == null || result === false) return;
           const next = stripQuestPopups(result, React);
           if (next !== result) {
-            const id = questIdFromProps(result.props);
-            if (id) extraIds.add(id);
+            noteQuestIds(result, extraIds);
             requestHide();
             return next;
           }
@@ -897,8 +1007,7 @@ var plugin = (() => {
               if (!r.active) return;
               const next = stripQuestPopups(element, React);
               if (next !== element) {
-                const id = questIdFromProps(element?.props);
-                if (id) extraIds.add(id);
+                noteQuestIds(element, extraIds);
                 requestHide();
                 return next;
               }
@@ -910,11 +1019,19 @@ var plugin = (() => {
         eachExport(r.metro, (parent, key, fn) => {
           if (!dismissFn && isDismissFunction(fn)) dismissFn = fn;
           const source = functionSource(fn);
-          if (source.length > 8e3 || source === "") return;
-          if (!source.includes("getQuestDeliveryDataForPlacement") && !source.includes("MOBILE_HOME_DOCK_AREA")) return;
+          if (!selectsDockQuest(source)) return;
           r.patch("instead", parent, key, (args, next) => blocksDockDelivery(source, args) ? null : next(...args));
         });
-        const holder = findHolder(r);
+        holders = findHolders(r);
+        for (const holder2 of holders) {
+          for (const key of [...DOCK_MAPS, "earnedQuestForPlacement"]) {
+            const map = holder2[key];
+            if (!map || typeof map.get !== "function" || rawGets.has(map)) continue;
+            rawGets.set(map, map.get);
+            r.patch("instead", map, "get", (args, next) => isMobileDockKey(args?.[0]) || args?.[0] === QUEST_BAR_MOBILE || args?.[0] === "QUEST_BAR_MOBILE" ? void 0 : next(...args));
+          }
+        }
+        const holder = holders[0];
         if (typeof holder?.addChangeListener === "function") {
           const listener = () => requestHide();
           try {
@@ -941,7 +1058,7 @@ var plugin = (() => {
         return h(
           Page,
           { title: "HideQuestPopup" },
-          h(Text, null, "Hide This runs on its own for the quest above the You bar."),
+          h(Text, null, "The quest card on the You bar is removed, and Hide This is pressed for that quest."),
           h(Text, { muted: true }, "Quest Home and the Quests button on your profile stay available.")
         );
       }
@@ -949,6 +1066,6 @@ var plugin = (() => {
   }
 
   // HideQuestPopup.entry.js
-  var HideQuestPopup_entry_default = register({ "id": "mime.hidequestpopup", "name": "HideQuestPopup", "description": "Always presses Hide This for the quest above the You bar.", "version": "1.0.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/HideQuestPopup" }, HideQuestPopup);
+  var HideQuestPopup_entry_default = register({ "id": "mime.hidequestpopup", "name": "HideQuestPopup", "description": "Always removes the quest card on the You bar.", "version": "1.0.2", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/HideQuestPopup" }, HideQuestPopup);
   return __toCommonJS(HideQuestPopup_entry_exports);
 })();

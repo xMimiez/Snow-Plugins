@@ -163,6 +163,9 @@ test('HideQuestPopup presses Hide This for the You bar quest and leaves Quest Ho
     assert.equal(blocksDockDelivery('function C(e){return "getQuestDeliveryDataForPlacement"}', [1]), false);
     assert.equal(blocksDockDelivery('function S(e){return "MOBILE_HOME_DOCK_AREA"}', [13]), true);
     assert.equal(blocksDockDelivery('function unrelated(){}', [2]), false);
+    const selector = 'function I(e,t,n){let r=t.get(n);if(null==r)return;let i=e.get(r.quest.id);return i}';
+    assert.equal(blocksDockDelivery(selector, [new Map(), new Map(), 2]), true);
+    assert.equal(blocksDockDelivery(selector, [new Map(), new Map(), 1]), false);
     const dockId = '123456789012345678';
     const enrolledId = '223456789012345678';
     const dismissedId = '323456789012345678';
@@ -213,17 +216,38 @@ test('HideQuestPopup presses Hide This for the You bar quest and leaves Quest Ho
         assert.equal(React.createElement(function Icon() {}, { accessibilityLabel: 'Quests' }).type.name, 'Icon');
         const kept = React.createElement(You, null, React.createElement(function Label() {}, { accessibilityLabel: 'You' }));
         assert.equal(kept.type, You);
-        assert.equal(decisions.get(2).questId, dockId);
+        assert.equal(decisions.get(2), undefined);
         assert.deepEqual(decisions.get(1), { questId: 'desktop' });
+        function Dock() { return null; }
+        function Tabs() { return null; }
+        function Screen() { return null; }
+        function List() { return null; }
+        function Card() { return null; }
+        const dock = React.createElement(Screen, null,
+            React.createElement(Dock, { quest: { id: dockId, config: { expiresAt: '2099-01-01' } } }, 'Get Reward!'),
+            React.createElement(Tabs, null, React.createElement(function YouTab() {}, { accessibilityLabel: 'You' })));
+        assert.equal(dock.props.children.length, 1);
+        assert.equal(dock.props.children[0].type, Tabs);
+        const home = React.createElement(Screen, null,
+            React.createElement(List, null,
+                React.createElement(Card, { questContent: 12, quest: { id: enrolledId, config: {} } }, 'Get Reward!'),
+                React.createElement(Card, { questContent: 12, quest: { id: '523456789012345678', config: {} } })),
+            React.createElement(Tabs, null, React.createElement(function YouTab() {}, { accessibilityLabel: 'You' })));
+        assert.equal(home.props.children.length, 2);
+        assert.equal(home.props.children[0].type, List);
         assert.equal(requests.length, 0);
         assert.deepEqual([...new Set(clientCalls.map(call => call[0]))].sort(), [dockId, enrolledId].sort());
         assert.ok(clientCalls.every(call => call[1] === 13));
         const before = clientCalls.length;
         events.get('CONNECTION_OPEN').forEach(fn => fn({ type: 'CONNECTION_OPEN' }));
         await tick();
+        const after = clientCalls.length;
+        assert.ok(after > before && after <= before + 2);
         events.get('CONNECTION_OPEN').forEach(fn => fn({ type: 'CONNECTION_OPEN' }));
         await tick();
-        assert.equal(clientCalls.length, before + 2);
+        events.get('CONNECTION_OPEN').forEach(fn => fn({ type: 'CONNECTION_OPEN' }));
+        await tick();
+        assert.equal(clientCalls.length, after);
         assert.ok(clientCalls.every(call => call[0] === dockId || call[0] === enrolledId));
     } finally {
         await r.dispose();
