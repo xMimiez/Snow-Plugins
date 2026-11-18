@@ -740,18 +740,22 @@ var plugin = (() => {
   }
   function spoilImageLinks(content) {
     if (typeof content !== "string" || !content) return content;
-    return content.replace(/https?:\/\/[^\s<]+/gi, (raw, offset) => {
+    return content.replace(/\|*https?:\/\/[^\s<]+/gi, (raw) => {
+      let start = 0;
+      while (start < raw.length && raw[start] === "|") start += 1;
       let end = raw.length;
-      while (end > 0 && /[),.;!?]/.test(raw[end - 1])) end -= 1;
-      const url = raw.slice(0, end);
-      const tail = raw.slice(end);
+      while (end > start && raw[end - 1] === "|") end -= 1;
+      let urlEnd = end;
+      while (urlEnd > start && /[),.;!?]/.test(raw[urlEnd - 1])) urlEnd -= 1;
+      const url = raw.slice(start, urlEnd);
+      const punct = raw.slice(urlEnd, end);
+      if (!url) return raw;
       const path = url.split("#")[0];
-      const imageLink = IMAGE_EXT.test(path) || isGifLink(url);
-      if (!imageLink) return raw;
-      const before = content.slice(Math.max(0, offset - 2), offset);
-      const after = content.slice(offset + end, offset + end + 2);
-      if (before === "||" && after === "||") return raw;
-      return `||${url}||${tail}`;
+      if (!(IMAGE_EXT.test(path) || isGifLink(url))) return raw;
+      const lead = start;
+      const trail = raw.length - end;
+      if (lead >= 2 || trail >= 2) return `||${url}||${punct}`;
+      return `${"|".repeat(lead)}||${url}||${punct}${"|".repeat(trail)}`;
     });
   }
   function componentName(type) {
@@ -1025,6 +1029,6 @@ var plugin = (() => {
   ChannelSpoilers.defaults = { channels: [] };
 
   // ChannelSpoilers.entry.js
-  var ChannelSpoilers_entry_default = register({ "id": "mime.channelspoilers", "name": "Channel Spoilers", "description": "Covers images, GIFs, and videos in chosen channels on this device.", "version": "1.0.6", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers" }, ChannelSpoilers);
+  var ChannelSpoilers_entry_default = register({ "id": "mime.channelspoilers", "name": "Channel Spoilers", "description": "Covers images, GIFs, and videos in chosen channels on this device.", "version": "1.0.7", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers" }, ChannelSpoilers);
   return __toCommonJS(ChannelSpoilers_entry_exports);
 })();

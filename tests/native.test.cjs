@@ -1109,6 +1109,12 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
     assert.equal(spoilImageLinks('https://tenor.com/view/cat'),'||https://tenor.com/view/cat||');
     assert.equal(spoilImageLinks('https://media.tenor.com/abc/cat.mp4'),'||https://media.tenor.com/abc/cat.mp4||');
     assert.equal(spoilImageLinks('https://media.discordapp.net/external/x/https/media.tenor.com/abc/cat.mp4'),'||https://media.discordapp.net/external/x/https/media.tenor.com/abc/cat.mp4||');
+    const signed=spoilImageLinks('look https://cdn.example/cat.png?ex=1&hm=2 please');
+    assert.equal(signed,'look ||https://cdn.example/cat.png?ex=1&hm=2|| please');
+    assert.equal(spoilImageLinks(signed),signed);
+    assert.equal(spoilImageLinks('||||https://tenor.com/view/cat||||'),'||https://tenor.com/view/cat||');
+    assert.equal(spoilImageLinks('||||||||https://media.tenor.com/abc/cat.mp4||||||||'),'||https://media.tenor.com/abc/cat.mp4||');
+    assert.equal(spoilImageLinks('https://cdn.example/cat.png.'), '||https://cdn.example/cat.png||.');
     assert.equal(channelSnowflake('12345678901234567'),'12345678901234567');
     assert.equal(channelSnowflake('1234'),'');
     const channel='123456789012345678';
@@ -1285,5 +1291,10 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
     const packed={attachments:[{id:'packed',url:'https://cdn.example/y'}]};
     native.updateRows('chat',[{channelId:channel,referencedMessage:{message:JSON.stringify(packed)}}]);
     assert.equal(JSON.parse(native.last[0].referencedMessage.message).attachments[0].isSpoiler,false);
+    const stacked='||||https://cdn.example/cat.png?ex=1&hm=2||||';
+    native.updateRows('chat',[{channelId:channel,content:stacked}]);
+    assert.equal(native.last[0].content,'||https://cdn.example/cat.png?ex=1&hm=2||');
+    native.updateRows('chat',JSON.parse(JSON.stringify(native.last)));
+    assert.equal(native.last[0].content,'||https://cdn.example/cat.png?ex=1&hm=2||');
     await r.dispose();
 });
