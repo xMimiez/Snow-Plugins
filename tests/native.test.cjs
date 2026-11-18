@@ -1107,6 +1107,8 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
     assert.equal(spoilImageLinks('clip https://cdn.example/clip.mp4'),'clip https://cdn.example/clip.mp4');
     assert.equal(spoilImageLinks('||https://cdn.example/cat.png||'),'||https://cdn.example/cat.png||');
     assert.equal(spoilImageLinks('https://tenor.com/view/cat'),'||https://tenor.com/view/cat||');
+    assert.equal(spoilImageLinks('https://media.tenor.com/abc/cat.mp4'),'||https://media.tenor.com/abc/cat.mp4||');
+    assert.equal(spoilImageLinks('https://media.discordapp.net/external/x/https/media.tenor.com/abc/cat.mp4'),'||https://media.discordapp.net/external/x/https/media.tenor.com/abc/cat.mp4||');
     assert.equal(channelSnowflake('12345678901234567'),'12345678901234567');
     assert.equal(channelSnowflake('1234'),'');
     const channel='123456789012345678';
@@ -1191,10 +1193,17 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
     assert.equal(native.last[2].content,'hi');
     assert.equal(native.last[3].spoiler,undefined);
     assert.equal(native.last[3].filename,'e.png');
-    assert.equal(native.last[4].embeds[0].video.spoiler,'true');
-    assert.equal(typeof native.last[4].embeds[0].video.spoiler,'string');
-    assert.equal(native.last[4].embeds[0].video.flags & 8,8);
-    assert.equal(native.last[4].embeds[0].video.url,'https://cdn.example/clip.mp4');
+    assert.equal(native.last[4].embeds.length,0);
+    const gifEmbed=native.last[4].attachments[0];
+    assert.equal(gifEmbed.filename,'SPOILER_gif.mp4');
+    assert.equal(gifEmbed.spoiler,'true');
+    assert.equal(typeof gifEmbed.spoiler,'string');
+    assert.equal(gifEmbed.flags & 8,8);
+    assert.equal(gifEmbed.is_spoiler,true);
+    assert.equal(gifEmbed.url,'https://cdn.example/clip.mp4');
+    assert.equal(gifEmbed.proxy_url,'https://cdn.example/clip.mp4');
+    assert.equal(gifEmbed.obscure,undefined);
+    assert.equal(gifEmbed.hidden,undefined);
     native.updateRows('chat',[
         {channelId:channel,content:'look https://cdn.example/cat.png please',embeds:[{type:'image',url:'https://cdn.example/cat.png',image:{url:'https://cdn.example/cat.png',proxy_url:'https://media.example/cat.png',width:40,height:40}}]},
         {channelId:channel,attachments:[{id:'gif1',filename:'dance.gif',content_type:'image/gif',url:'https://cdn.example/dance.gif?ex=1&hm=2',proxy_url:'https://media.example/dance.gif?ex=1&hm=2',spoiler:''}]},
@@ -1224,5 +1233,28 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
     assert.equal(gallery.media.is_spoiler,true);
     assert.equal(gallery.media.url,'https://cdn.example/a.png');
     assert.equal(gallery.media.proxy_url,'https://media.example/a.png');
+    native.updateRows('chat',[{
+        id:'m-gif',
+        channelId:channel,
+        content:'https://tenor.com/view/cat-gif-1',
+        embeds:[{
+            type:'gifv',
+            url:'https://tenor.com/view/cat-gif-1',
+            provider:{name:'Tenor'},
+            thumbnail:{url:'https://media.tenor.com/abc/cat.png',width:120,height:80},
+            video:{url:'https://media.tenor.com/abc/cat.mp4',proxy_url:'https://media.discordapp.net/external/x/cat.mp4',width:120,height:80},
+        }],
+    }]);
+    const linkedGif=native.last[0];
+    assert.equal(linkedGif.content,'||https://tenor.com/view/cat-gif-1||');
+    assert.equal(linkedGif.embeds.length,0);
+    assert.equal(linkedGif.attachments[0].filename,'SPOILER_gif.mp4');
+    assert.equal(linkedGif.attachments[0].spoiler,'true');
+    assert.equal(typeof linkedGif.attachments[0].spoiler,'string');
+    assert.equal(linkedGif.attachments[0].content_type,'video/mp4');
+    assert.equal(linkedGif.attachments[0].flags & 8,8);
+    assert.equal(linkedGif.attachments[0].url,'https://media.tenor.com/abc/cat.mp4');
+    assert.equal(linkedGif.attachments[0].proxy_url,'https://media.discordapp.net/external/x/cat.mp4');
+    assert.equal(linkedGif.attachments[0].obscure,undefined);
     await r.dispose();
 });

@@ -6,7 +6,8 @@ const IMAGE_EXT = /\.(png|jpe?g|gif|webp)(\?|#|$)/i;
 const VIDEO_EXT = /\.(mp4|mov|webm)(\?|#|$)/i;
 const MEDIA_TYPE = /^(image|video)\//i;
 const MEDIA_KIND = /^(image|gif|gifv|video)$/i;
-const MEDIA_NAME = /MessageImage|MessageVideo|ImageAttachment|VideoAttachment|MediaAttachment|EmbedMedia|MessageMedia|GifVideo|FastImage|MediaPlayer|Mosaic|EmbedImage|EmbedVideo|EmbedThumbnail|AttachmentImage|GalleryItem|CachedImage|MediaView|InlineMedia|GifImage|LazyImage|ZoomableImage|(?:^|[^a-z])(?:Gif|Video|Image)(?:[^a-z]|$)/i;
+const MEDIA_NAME = /MessageImage|MessageVideo|ImageAttachment|VideoAttachment|MediaAttachment|EmbedMedia|MessageMedia|GifVideo|Gifv|FastImage|MediaPlayer|Mosaic|EmbedImage|EmbedVideo|EmbedThumbnail|AttachmentImage|GalleryItem|CachedImage|MediaView|InlineMedia|GifImage|LazyImage|ZoomableImage|(?:^|[^a-z])(?:Gif|Video|Image)(?:[^a-z]|$)/i;
+const GIF_HOST = /(?:^|\.)(?:tenor\.com|tenor\.co|giphy\.com|gph\.is|imgur\.com|gfycat\.com|redgifs\.com)$/i;
 const SPOILER_FLAG = 8;
 
 
@@ -59,6 +60,90 @@ function attachmentRecord(item) {
         || typeof item.content_type === 'string' || typeof item.contentType === 'string';
 }
 
+// A GIF picked from Tenor or Giphy is a gifv embed played as video. Embed media has no spoiler flag.
+export function isGifLink(url) {
+    if (typeof url !== 'string' || !/^https?:/i.test(url)) return false;
+    const path = url.split('#')[0];
+    const host = path.replace(/^https?:\/\//i, '').split(/[/?]/)[0].replace(/^www\./i, '');
+    if (/\.gif(\?|$)/i.test(path)) return true;
+    if (GIF_HOST.test(host)) return true;
+    return /tenor\.com|giphy\.com|gph\.is|gfycat\.com|redgifs\.com/i.test(path) && /\.(gif|mp4|webm)(\?|$)/i.test(path);
+}
+
+function isGifEmbed(embed) {
+    if (!embed || typeof embed !== 'object') return false;
+    const type = String(embed.type || '').toLowerCase();
+    if (type === 'gifv' || type === 'gif') return true;
+    if (/tenor|giphy|imgur|gfycat|redgifs/i.test(embed.provider?.name || '')) return true;
+    return [embed.url, embed.video?.url, embed.video?.proxy_url, embed.image?.url, embed.thumbnail?.url].some(isGifLink);
+}
+
+function holdsGif(node) {
+    if (!node || typeof node !== 'object') return false;
+    if (isGifEmbed(node) || isGifLink(node.url) || isGifLink(node.proxy_url)) return true;
+    const nested = [node.media, node.image, node.video, node.thumbnail, node.file];
+    if (Array.isArray(node.items)) nested.push(...node.items);
+    if (Array.isArray(node.components)) nested.push(...node.components);
+    return nested.some(item => item && typeof item === 'object' && (
+        isGifLink(item.url) || isGifLink(item.proxy_url) || isGifLink(item.media?.url) || isGifLink(item.video?.url) || isGifEmbed(item)
+    ));
+}
+
+function spoilerId(seed) {
+    let hash = 2166136261;
+    const text = String(seed || 'gif');
+    for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    const body = (hash >>> 0).toString().padStart(10, '0');
+    return `8${body}${body}`.slice(0, 18);
+}
+
+// The native video cell already spoilers attachments. A linked GIF becomes one of those locally.
+function promoteGifEmbeds(node) {
+    if (!Array.isArray(node.embeds) || !node.embeds.length) return;
+    const kept = [];
+    const additions = [];
+    const attachments = Array.isArray(node.attachments) ? node.attachments : [];
+    for (const embed of node.embeds) {
+        if (!isGifEmbed(embed)) {
+            kept.push(embed);
+            continue;
+        }
+        const media = embed.video || embed.image || embed.thumbnail || null;
+        const proxy = media?.proxy_url || media?.proxyURL || media?.url || embed.url;
+        const source = media?.url || embed.url || proxy;
+        if (typeof proxy !== 'string' || !/^https?:/i.test(proxy)) {
+            kept.push(embed);
+            continue;
+        }
+        const existing = attachments.find(item => item && (item.url === source || item.url === proxy || item.proxy_url === proxy || item.proxy_url === source));
+        if (existing) {
+            markLocalSpoiler(existing);
+            continue;
+        }
+        const video = !!embed.video;
+        additions.push({
+            id: spoilerId(`${node.id || ''}:${source}`),
+            filename: video ? 'SPOILER_gif.mp4' : 'SPOILER_gif.gif',
+            size: Number(media?.size) || 0,
+            url: source,
+            proxy_url: proxy,
+            width: Number(media?.width) || 0,
+            height: Number(media?.height) || 0,
+            content_type: media?.content_type || media?.contentType || (video ? 'video/mp4' : 'image/gif'),
+            spoiler: 'true',
+            flags: SPOILER_FLAG,
+            is_spoiler: true,
+        });
+    }
+    node.embeds = kept;
+    if (!additions.length) return;
+    if (!Array.isArray(node.attachments)) node.attachments = [];
+    node.attachments.push(...additions);
+}
+
 // Link embeds are spoiled when the URL sits inside spoiler bars. Signed CDN URLs stay untouched.
 export function spoilImageLinks(content) {
     if (typeof content !== 'string' || !content) return content;
@@ -68,8 +153,7 @@ export function spoilImageLinks(content) {
         const url = raw.slice(0, end);
         const tail = raw.slice(end);
         const path = url.split('#')[0];
-        const host = path.replace(/^https?:\/\//i, '').split('/')[0].replace(/^www\./, '');
-        const imageLink = IMAGE_EXT.test(path) || (!VIDEO_EXT.test(path) && /(?:^|\.)(?:tenor\.com|giphy\.com|imgur\.com)$/i.test(host));
+        const imageLink = IMAGE_EXT.test(path) || isGifLink(url);
         if (!imageLink) return raw;
         const before = content.slice(Math.max(0, offset - 2), offset);
         const after = content.slice(offset + end, offset + end + 2);
@@ -161,11 +245,14 @@ export function spoilTree(node, channels, inherited = '', depth = 0) {
         mark(node.thumbnail);
         if (Array.isArray(node.attachments)) node.attachments.forEach(mark);
         if (Array.isArray(node.embeds)) node.embeds.forEach(embed => {
+            if (isGifEmbed(embed)) return;
             mark(embed);
             mark(embed?.image);
             mark(embed?.video);
             mark(embed?.thumbnail);
         });
+        promoteGifEmbeds(node);
+        if (typeof node.spoiler === 'boolean' && !node.spoiler && !attachmentRecord(node) && holdsGif(node)) node.spoiler = true;
         const items = node.items || node.components;
         if (Array.isArray(items)) items.forEach(markGallery);
     }

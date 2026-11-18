@@ -9,7 +9,7 @@ These releases use **Bunny spec 3**. Install from the `manifest.json` URL, then 
 | Plugin | Current release | What it does | Install |
 | --- | --- | --- | --- |
 | [Temp Delete](TempDelete/) | 1.0.3 | Hides a message on this device until Discord restarts. Shown under Delete Message on every message. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/TempDelete/manifest.json) |
-| [Channel Spoilers](ChannelSpoilers/) | 1.0.3 | Covers images, GIFs, and videos in chosen channels on this device. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/ChannelSpoilers/manifest.json) |
+| [Channel Spoilers](ChannelSpoilers/) | 1.0.4 | Covers images, GIFs, and videos in chosen channels on this device. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/ChannelSpoilers/manifest.json) |
 | [HideQuestPopup](HideQuestPopup/) | 1.0.4 | Always removes the quest card on the You bar. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/HideQuestPopup/manifest.json) |
 | [Silent Delete](BetterDelete/) | 1.0.6 | Puts Delete and Silent Delete Message in the Edit, Reply, and Forward group. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/BetterDelete/manifest.json) |
 | [DebugConsole](DebugConsole/) | 2.2.1 | Live logs with clear/copy/search. Ignores Discord intl locale spam. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/DebugConsole/manifest.json) |
