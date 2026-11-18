@@ -958,9 +958,15 @@ var plugin = (() => {
       },
       start() {
         ClockIcon.React = r.React;
-        ClockIcon.RN = r.RN;
+        let text;
+        try {
+          text = r.RN?.Text;
+        } catch {
+          text = void 0;
+        }
+        ClockIcon.RN = { Text: text };
         const svg = r.find("Svg", "Path", "Circle") || r.find("Svg", "Path");
-        if (svg?.Svg) ClockIcon.RN = { ...r.RN, Svg: svg.Svg, Circle: svg.Circle, Path: svg.Path };
+        if (svg?.Svg) ClockIcon.RN = { Text: text, Svg: svg.Svg, Circle: svg.Circle, Path: svg.Path };
         const icons = r.find("ClockIcon", "TrashIcon") || r.find("ClockIcon");
         if (typeof icons?.ClockIcon === "function") clockProp.Icon = icons.ClockIcon;
         messageStore = r.byStore("MessageStore") || r.find("getMessages", "getMessage") || r.find("getMessages");
@@ -980,9 +986,20 @@ var plugin = (() => {
           });
         }
         r.patchRows((rows) => stripHiddenRows(rows, hidden));
-        const modules = r.RN.NativeModules || {};
-        for (const key of Object.keys(modules)) {
-          const native = modules[key];
+        let moduleKeys = [];
+        try {
+          moduleKeys = Object.keys(r.RN?.NativeModules || {});
+        } catch {
+          moduleKeys = [];
+        }
+        for (const key of moduleKeys) {
+          if (key === "PushNotificationIOS" || key === "NativeEventEmitter") continue;
+          let native;
+          try {
+            native = r.RN.NativeModules[key];
+          } catch {
+            continue;
+          }
           if (typeof native?.updateRows !== "function") continue;
           let lastId;
           let lastRows;
@@ -1038,6 +1055,6 @@ var plugin = (() => {
   }
 
   // TempDelete.entry.js
-  var TempDelete_entry_default = register({ "id": "mime.tempdelete", "name": "Temp Delete", "description": "Hides a message on this device until Discord restarts.", "version": "1.0.2", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/TempDelete" }, TempDelete);
+  var TempDelete_entry_default = register({ "id": "mime.tempdelete", "name": "Temp Delete", "description": "Hides a message on this device until Discord restarts.", "version": "1.0.3", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/TempDelete" }, TempDelete);
   return __toCommonJS(TempDelete_entry_exports);
 })();

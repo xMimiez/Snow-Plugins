@@ -339,9 +339,13 @@ export default function TempDelete(r) {
         },
         start() {
             ClockIcon.React = r.React;
-            ClockIcon.RN = r.RN;
+            // Reading one named export is safe. Spreading React Native enumerates PushNotificationIOS,
+            // and that getter builds NativeEventEmitter with a null module on Discord 354.
+            let text;
+            try { text = r.RN?.Text; } catch { text = undefined; }
+            ClockIcon.RN = { Text: text };
             const svg = r.find('Svg', 'Path', 'Circle') || r.find('Svg', 'Path');
-            if (svg?.Svg) ClockIcon.RN = { ...r.RN, Svg: svg.Svg, Circle: svg.Circle, Path: svg.Path };
+            if (svg?.Svg) ClockIcon.RN = { Text: text, Svg: svg.Svg, Circle: svg.Circle, Path: svg.Path };
             const icons = r.find('ClockIcon', 'TrashIcon') || r.find('ClockIcon');
             if (typeof icons?.ClockIcon === 'function') clockProp.Icon = icons.ClockIcon;
             messageStore = r.byStore('MessageStore') || r.find('getMessages', 'getMessage') || r.find('getMessages');
@@ -361,9 +365,12 @@ export default function TempDelete(r) {
                 });
             }
             r.patchRows(rows => stripHiddenRows(rows, hidden));
-            const modules = r.RN.NativeModules || {};
-            for (const key of Object.keys(modules)) {
-                const native = modules[key];
+            let moduleKeys = [];
+            try { moduleKeys = Object.keys(r.RN?.NativeModules || {}); } catch { moduleKeys = []; }
+            for (const key of moduleKeys) {
+                if (key === 'PushNotificationIOS' || key === 'NativeEventEmitter') continue;
+                let native;
+                try { native = r.RN.NativeModules[key]; } catch { continue; }
                 if (typeof native?.updateRows !== 'function') continue;
                 let lastId;
                 let lastRows;

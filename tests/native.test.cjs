@@ -1077,6 +1077,23 @@ test('Temp Delete hides any message on this device until the plugin starts again
     await next.r.dispose();
 });
 
+test('Temp Delete start does not enumerate React Native exports',async()=>{
+    const {default:factory,ClockIcon}=await import('../src/plugins/temp-delete.js');
+    function Svg(){return null;}
+    function Circle(){return null;}
+    function Path(){return null;}
+    const {r}=await harness({},[{Svg,Circle,Path}]);
+    Object.defineProperty(r.RN,'PushNotificationIOS',{enumerable:true,get(){throw new Error('`new NativeEventEmitter()` requires a non-null argument.');}});
+    assert.throws(()=>{ ({...r.RN}); }, /NativeEventEmitter/);
+    assert.doesNotThrow(()=>factory(r).start());
+    assert.equal(ClockIcon.RN.Svg,Svg);
+    assert.equal(ClockIcon.RN.Circle,Circle);
+    assert.equal(ClockIcon.RN.Path,Path);
+    assert.equal(Object.hasOwn(ClockIcon.RN,'PushNotificationIOS'),false);
+    assert.equal(ClockIcon({color:'#F23F43',size:24}).type,Svg);
+    await r.dispose();
+});
+
 test('Channel Spoilers covers images, GIFs, and videos only in listed channels',async()=>{
     const {default:factory,isVisualMedia,channelSnowflake,spoilImageLinks}=await import('../src/plugins/channel-spoilers.js');
     for(const name of ['a.png','a.jpg','a.jpeg','a.gif','a.webp','a.mp4','a.mov','a.webm']) assert.equal(isVisualMedia({filename:name}),true,name);

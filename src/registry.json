@@ -439,7 +439,7 @@
     "id": "mime.tempdelete",
     "name": "Temp Delete",
     "description": "Hides a message on this device until Discord restarts.",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "authors": [
       {
         "name": "Mime | N0_.q3",
