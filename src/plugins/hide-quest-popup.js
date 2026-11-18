@@ -230,36 +230,58 @@ function functionSource(fn) {
     try { return Function.prototype.toString.call(fn); } catch { return ''; }
 }
 
+// Object.values() on a React Native export runs every getter. PushNotificationIOS
+// constructs NativeEventEmitter with a null native module on Discord 354 and throws.
+function readOwn(value) {
+    if (!value || (typeof value !== 'object' && typeof value !== 'function')) return [];
+    let keys;
+    try { keys = Object.keys(value); } catch { return []; }
+    const entries = [];
+    for (const key of keys) {
+        if (key === 'PushNotificationIOS' || key === 'NativeEventEmitter') continue;
+        try { entries.push([key, value[key]]); } catch { /* This getter is not a quest export. */ }
+    }
+    return entries;
+}
+
+function readChild(value, key) {
+    try { return value?.[key]; } catch { return undefined; }
+}
+
 function eachExport(metro, visit) {
     const seen = new Set();
     const consider = value => {
         if (!value || (typeof value !== 'object' && typeof value !== 'function') || seen.has(value)) return;
         seen.add(value);
         const target = typeof value === 'function' ? { default: value } : value;
-        for (const key of Object.keys(target)) {
-            if (typeof target[key] === 'function') visit(target, key, target[key]);
+        for (const [key, item] of readOwn(target)) {
+            if (typeof item === 'function') visit(target, key, item);
         }
-        if (value !== target) consider(value.exports);
-        consider(value.publicModule?.exports);
+        if (value !== target) consider(readChild(value, 'exports'));
+        consider(readChild(readChild(value, 'publicModule'), 'exports'));
     };
     const maps = [metro?.modules, metro?.cache, metro?.moduleCache];
     if (Array.isArray(metro)) maps.push(metro);
     for (const map of maps) {
         if (!map) continue;
-        const values = typeof map.values === 'function' ? map.values() : Object.values(map);
+        let values;
+        try { values = typeof map.values === 'function' ? map.values() : readOwn(map).map(([, item]) => item); }
+        catch { continue; }
         for (const item of values) consider(item);
     }
 }
 
-function findDismissFunction(metro) {
+export function findDismissFunction(metro) {
     let found = null;
-    eachExport(metro, (_parent, _key, fn) => {
-        if (!found && isDismissFunction(fn)) found = fn;
-    });
+    try {
+        eachExport(metro, (_parent, _key, fn) => {
+            if (!found && isDismissFunction(fn)) found = fn;
+        });
+    } catch { /* A module can still throw while Discord is loading. */ }
     if (found || typeof metro?.find !== 'function') return found;
     try {
-        const mod = metro.find(module => module && typeof module === 'object' && Object.values(module).some(isDismissFunction));
-        if (mod) found = Object.values(mod).find(isDismissFunction) || null;
+        const mod = metro.find(module => readOwn(module).some(([, fn]) => isDismissFunction(fn)));
+        if (mod) found = readOwn(mod).map(([, fn]) => fn).find(isDismissFunction) || null;
     } catch { /* metro find can throw while modules are still loading */ }
     return found;
 }
@@ -291,16 +313,18 @@ function findHolders(r) {
         seen.add(value);
         push(value);
         if (typeof value === 'object') {
-            push(value.default);
-            push(value.A);
-            push(value.Z);
-            consider(value.exports);
-            consider(value.publicModule?.exports);
+            push(readChild(value, 'default'));
+            push(readChild(value, 'A'));
+            push(readChild(value, 'Z'));
+            consider(readChild(value, 'exports'));
+            consider(readChild(readChild(value, 'publicModule'), 'exports'));
         }
     };
     for (const map of [r.metro?.modules, r.metro?.cache, r.metro?.moduleCache]) {
         if (!map) continue;
-        const values = typeof map.values === 'function' ? map.values() : Object.values(map);
+        let values;
+        try { values = typeof map.values === 'function' ? map.values() : readOwn(map).map(([, item]) => item); }
+        catch { continue; }
         for (const item of values) consider(item);
     }
     return found;
@@ -345,7 +369,10 @@ export default function HideQuestPopup(r) {
             }
         }
         for (const id of extraIds) if (!ids.includes(id)) ids.push(id);
-        if (!dismissFn) dismissFn = findDismissFunction(r.metro);
+        if (!dismissFn) {
+            try { dismissFn = findDismissFunction(r.metro); }
+            catch { dismissFn = null; }
+        }
         let dismissed = 0;
         for (const id of ids) {
             if (!r.active || inflight.has(id)) continue;

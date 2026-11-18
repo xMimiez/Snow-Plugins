@@ -146,7 +146,7 @@ test('Decor create UI recovers from upload failure and prevents duplicate submis
 });
 test('Decor stop aborts an in-flight upload',async()=>{const {default:factory}=await import('../src/plugins/decor.js');const {encode64,encodePng}=await import('../src/image-conversion.js');const {r}=await harness({tokens:{},token:'fake'});const p=factory(r),oldXHR=global.XMLHttpRequest,oldForm=global.FormData;let aborted=false;global.FormData=class{append(){}};global.XMLHttpRequest=class{open(){}setRequestHeader(){}send(){}abort(){aborted=true;}};try{const pending=p.createDecorationUpload({base64:encode64(encodePng(new Uint8Array([0,0,0,255]),1,1))},'Test');await tick();p.stop();await assert.rejects(pending,/cancelled|stopped/);assert(aborted);}finally{await r.dispose();global.XMLHttpRequest=oldXHR;global.FormData=oldForm;}});
 test('HideQuestPopup presses Hide This for the You bar quest and leaves Quest Home', async () => {
-    const { default: factory, isQuestPopup, isMobileDockKey, blocksDockDelivery, isDismissFunction, questDismissedFromBar, collectDockQuestIds, dismissDockQuest } = await import('../src/plugins/hide-quest-popup.js');
+    const { default: factory, isQuestPopup, isMobileDockKey, blocksDockDelivery, isDismissFunction, findDismissFunction, questDismissedFromBar, collectDockQuestIds, dismissDockQuest } = await import('../src/plugins/hide-quest-popup.js');
     assert.equal(isQuestPopup(function QuestBar() {}, {}), true);
     assert.equal(isQuestPopup(function QuestHome() {}, { questContent: 12 }), false);
     assert.equal(isQuestPopup(function Card() {}, { questContent: 13 }), true);
@@ -187,6 +187,10 @@ test('HideQuestPopup presses Hide This for the You bar quest and leaves Quest Ho
         // QUESTS_DISMISS_CONTENT_BEGIN QUESTS_DISMISS_CONTENT
     }
     assert.equal(isDismissFunction(dismissQuest), true);
+    const notifications = {};
+    Object.defineProperty(notifications, 'PushNotificationIOS', { enumerable: true, get() { throw new Error('`new NativeEventEmitter()` requires a non-null argument.'); } });
+    const metro = { modules: [notifications], find(pred) { return [notifications, { dismissQuest }].find(pred); } };
+    assert.equal(findDismissFunction(metro), dismissQuest);
     assert.equal(await dismissDockQuest({ dismiss: dismissQuest, questId: dockId }), 'client');
     assert.deepEqual(clientCalls, [[dockId, 13]]);
     const httpCalls = [];
