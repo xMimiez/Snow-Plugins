@@ -1275,5 +1275,15 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
     assert.equal(typeof replyGif.spoiler,'string');
     assert.equal(replyGif.url,'https://media.tenor.com/reply/a.mp4');
     assert.equal(replyGif.proxy_url,'https://media.example/reply.mp4');
+    native.updateRows('chat',[{
+        channelId:channel,
+        message:{referencedMessage:{message:{attachments:[{id:'only'}]}}},
+    }]);
+    const partial=native.last[0].message.referencedMessage.message.attachments[0];
+    assert.equal(partial.isSpoiler,false);
+    assert.equal(partial.spoiler,undefined);
+    const packed={attachments:[{id:'packed',url:'https://cdn.example/y'}]};
+    native.updateRows('chat',[{channelId:channel,referencedMessage:{message:JSON.stringify(packed)}}]);
+    assert.equal(JSON.parse(native.last[0].referencedMessage.message).attachments[0].isSpoiler,false);
     await r.dispose();
 });

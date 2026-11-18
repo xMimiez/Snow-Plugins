@@ -214,9 +214,39 @@ export function markLocalSpoiler(item) {
     if (attachmentRecord(item)) item.isSpoiler = true;
 }
 
-function keepAttachmentShape(item) {
-    if (!attachmentRecord(item) || typeof item.isSpoiler === 'boolean') return;
-    item.isSpoiler = item.is_spoiler === true || item.spoiler === true || item.spoiler === 'true';
+// Reply rows decode every attachment with a required isSpoiler Bool. Partial
+// referenced attachments often have no filename, so the key has to be written anyway.
+export function stampAttachment(item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+    const flags = typeof item.flags === 'number' ? item.flags : typeof item.flags === 'string' && /^\d+$/.test(item.flags) ? Number(item.flags) : 0;
+    item.isSpoiler = item.isSpoiler === true || item.is_spoiler === true || item.spoiler === true || item.spoiler === 'true' || (flags & SPOILER_FLAG) === SPOILER_FLAG;
+}
+
+function stampTree(node, depth = 0) {
+    if (depth > 16 || node == null) return;
+    if (Array.isArray(node)) {
+        node.forEach(item => stampTree(item, depth + 1));
+        return;
+    }
+    if (typeof node !== 'object') return;
+    let keys;
+    try { keys = Object.keys(node); } catch { return; }
+    for (const key of keys) {
+        let value;
+        try { value = node[key]; } catch { continue; }
+        if (typeof value === 'string' && value.includes('attachments')) {
+            try {
+                const parsed = JSON.parse(value);
+                if (parsed && typeof parsed === 'object') {
+                    stampTree(parsed, depth + 1);
+                    node[key] = JSON.stringify(parsed);
+                    continue;
+                }
+            } catch { /* This string is not a nested message. */ }
+        }
+        if (/attachments/i.test(key) && Array.isArray(value)) value.forEach(stampAttachment);
+        if (value && typeof value === 'object') stampTree(value, depth + 1);
+    }
 }
 
 export function spoilTree(node, channels, inherited = '', depth = 0) {
@@ -264,8 +294,7 @@ export function spoilTree(node, channels, inherited = '', depth = 0) {
         const items = node.items || node.components;
         if (Array.isArray(items)) items.forEach(markGallery);
     }
-    if (attachmentRecord(node)) keepAttachmentShape(node);
-    if (Array.isArray(node.attachments)) node.attachments.forEach(keepAttachmentShape);
+    stampTree(node);
     const nextChannel = inChannel ? channelId : inherited;
     for (const value of Object.values(node)) {
         if (value && typeof value === 'object') spoilTree(value, channels, nextChannel, depth + 1);

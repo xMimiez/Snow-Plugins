@@ -794,9 +794,45 @@ var plugin = (() => {
     item.is_spoiler = true;
     if (attachmentRecord(item)) item.isSpoiler = true;
   }
-  function keepAttachmentShape(item) {
-    if (!attachmentRecord(item) || typeof item.isSpoiler === "boolean") return;
-    item.isSpoiler = item.is_spoiler === true || item.spoiler === true || item.spoiler === "true";
+  function stampAttachment(item) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return;
+    const flags = typeof item.flags === "number" ? item.flags : typeof item.flags === "string" && /^\d+$/.test(item.flags) ? Number(item.flags) : 0;
+    item.isSpoiler = item.isSpoiler === true || item.is_spoiler === true || item.spoiler === true || item.spoiler === "true" || (flags & SPOILER_FLAG) === SPOILER_FLAG;
+  }
+  function stampTree(node, depth = 0) {
+    if (depth > 16 || node == null) return;
+    if (Array.isArray(node)) {
+      node.forEach((item) => stampTree(item, depth + 1));
+      return;
+    }
+    if (typeof node !== "object") return;
+    let keys;
+    try {
+      keys = Object.keys(node);
+    } catch {
+      return;
+    }
+    for (const key of keys) {
+      let value;
+      try {
+        value = node[key];
+      } catch {
+        continue;
+      }
+      if (typeof value === "string" && value.includes("attachments")) {
+        try {
+          const parsed = JSON.parse(value);
+          if (parsed && typeof parsed === "object") {
+            stampTree(parsed, depth + 1);
+            node[key] = JSON.stringify(parsed);
+            continue;
+          }
+        } catch {
+        }
+      }
+      if (/attachments/i.test(key) && Array.isArray(value)) value.forEach(stampAttachment);
+      if (value && typeof value === "object") stampTree(value, depth + 1);
+    }
   }
   function spoilTree(node, channels, inherited = "", depth = 0) {
     if (depth > 12 || !node || typeof node !== "object") return;
@@ -842,8 +878,7 @@ var plugin = (() => {
       const items = node.items || node.components;
       if (Array.isArray(items)) items.forEach(markGallery);
     }
-    if (attachmentRecord(node)) keepAttachmentShape(node);
-    if (Array.isArray(node.attachments)) node.attachments.forEach(keepAttachmentShape);
+    stampTree(node);
     const nextChannel = inChannel ? channelId : inherited;
     for (const value of Object.values(node)) {
       if (value && typeof value === "object") spoilTree(value, channels, nextChannel, depth + 1);
@@ -990,6 +1025,6 @@ var plugin = (() => {
   ChannelSpoilers.defaults = { channels: [] };
 
   // ChannelSpoilers.entry.js
-  var ChannelSpoilers_entry_default = register({ "id": "mime.channelspoilers", "name": "Channel Spoilers", "description": "Covers images, GIFs, and videos in chosen channels on this device.", "version": "1.0.5", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers" }, ChannelSpoilers);
+  var ChannelSpoilers_entry_default = register({ "id": "mime.channelspoilers", "name": "Channel Spoilers", "description": "Covers images, GIFs, and videos in chosen channels on this device.", "version": "1.0.6", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers" }, ChannelSpoilers);
   return __toCommonJS(ChannelSpoilers_entry_exports);
 })();
