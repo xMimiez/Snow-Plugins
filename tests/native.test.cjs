@@ -1073,11 +1073,18 @@ test('Temp Delete hides any message on this device until the plugin starts again
 });
 
 test('Channel Spoilers covers images, GIFs, and videos only in listed channels',async()=>{
-    const {default:factory,isVisualMedia,channelSnowflake}=await import('../src/plugins/channel-spoilers.js');
+    const {default:factory,isVisualMedia,channelSnowflake,spoilImageLinks}=await import('../src/plugins/channel-spoilers.js');
     for(const name of ['a.png','a.jpg','a.jpeg','a.gif','a.webp','a.mp4','a.mov','a.webm']) assert.equal(isVisualMedia({filename:name}),true,name);
     assert.equal(isVisualMedia({content_type:'image/gif'} ),true);
     assert.equal(isVisualMedia({contentType:'video/mp4'} ),true);
+    assert.equal(isVisualMedia({type:'gif',url:'https://cdn.example/anim'}),true);
+    assert.equal(isVisualMedia({type:'image',url:'https://cdn.example/pic',width:12}),true);
+    assert.equal(isVisualMedia({type:'gifv'}),true);
     assert.equal(isVisualMedia({filename:'notes.txt',content_type:'text/plain'}),false);
+    assert.equal(spoilImageLinks('see https://cdn.example/cat.png please'),'see ||https://cdn.example/cat.png|| please');
+    assert.equal(spoilImageLinks('clip https://cdn.example/clip.mp4'),'clip https://cdn.example/clip.mp4');
+    assert.equal(spoilImageLinks('||https://cdn.example/cat.png||'),'||https://cdn.example/cat.png||');
+    assert.equal(spoilImageLinks('https://tenor.com/view/cat'),'||https://tenor.com/view/cat||');
     assert.equal(channelSnowflake('12345678901234567'),'12345678901234567');
     assert.equal(channelSnowflake('1234'),'');
     const channel='123456789012345678';
@@ -1128,6 +1135,12 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
     assert.equal(tree.root.findAllByProps({testID:'mime-channel-spoiler'}).length,1);
     assert.equal(tree.root.findByType('Avatar').props.size,32);
     await Renderer.act(async()=>tree.unmount());
+    function PlainImage(props){
+        return React.createElement('Image',{source:{uri:'https://cdn.example/plain.png'},style:{width:220,height:180},message:props.message});
+    }
+    await Renderer.act(async()=>{tree=Renderer.create(React.createElement(PlainImage,{message:listedMessage}));});
+    assert.equal(tree.root.findAllByProps({testID:'mime-channel-spoiler'}).length,1);
+    await Renderer.act(async()=>tree.unmount());
     await Renderer.act(async()=>{tree=Renderer.create(React.createElement(Picture,{attachment:gif,message:{...listedMessage,channel_id:other}}));});
     assert.equal(tree.root.findAllByProps({testID:'mime-channel-spoiler'}).length,0);
     assert.equal(tree.root.findByType('MessageImage').props.attachment.id,'gif');
@@ -1143,6 +1156,7 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
     assert.equal(native.last[0].spoiler,'true');
     assert.equal(typeof native.last[0].spoiler,'string');
     assert.equal(native.last[0].flags & 8,8);
+    assert.equal(native.last[0].is_spoiler,true);
     assert.equal(native.last[0].obscure,undefined);
     assert.equal(native.last[0].hidden,undefined);
     assert.equal(native.last[1].spoiler,undefined);
@@ -1156,7 +1170,37 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
     assert.equal(native.last[3].spoiler,undefined);
     assert.equal(native.last[3].filename,'e.png');
     assert.equal(native.last[4].embeds[0].video.spoiler,'true');
+    assert.equal(typeof native.last[4].embeds[0].video.spoiler,'string');
     assert.equal(native.last[4].embeds[0].video.flags & 8,8);
     assert.equal(native.last[4].embeds[0].video.url,'https://cdn.example/clip.mp4');
+    native.updateRows('chat',[
+        {channelId:channel,content:'look https://cdn.example/cat.png please',embeds:[{type:'image',url:'https://cdn.example/cat.png',image:{url:'https://cdn.example/cat.png',proxy_url:'https://media.example/cat.png',width:40,height:40}}]},
+        {channelId:channel,attachments:[{id:'gif1',filename:'dance.gif',content_type:'image/gif',url:'https://cdn.example/dance.gif?ex=1&hm=2',proxy_url:'https://media.example/dance.gif?ex=1&hm=2',spoiler:''}]},
+        {channelId:channel,components:[{type:12,items:[{spoiler:false,media:{url:'https://cdn.example/a.png',proxy_url:'https://media.example/a.png',width:20,height:20}}]}]},
+    ]);
+    const linked=native.last[0];
+    assert.equal(linked.content,'look ||https://cdn.example/cat.png|| please');
+    assert.equal(linked.embeds[0].image.spoiler,'true');
+    assert.equal(typeof linked.embeds[0].image.spoiler,'string');
+    assert.equal(linked.embeds[0].image.is_spoiler,true);
+    assert.equal(linked.embeds[0].image.flags & 8,8);
+    assert.equal(linked.embeds[0].image.url,'https://cdn.example/cat.png');
+    assert.equal(linked.embeds[0].image.proxy_url,'https://media.example/cat.png');
+    const gifFile=native.last[1].attachments[0];
+    assert.equal(gifFile.filename,'SPOILER_dance.gif');
+    assert.equal(gifFile.spoiler,'true');
+    assert.equal(typeof gifFile.spoiler,'string');
+    assert.equal(gifFile.is_spoiler,true);
+    assert.equal(gifFile.flags & 8,8);
+    assert.equal(gifFile.url,'https://cdn.example/dance.gif?ex=1&hm=2');
+    assert.equal(gifFile.proxy_url,'https://media.example/dance.gif?ex=1&hm=2');
+    assert.equal(gifFile.obscure,undefined);
+    const gallery=native.last[2].components[0].items[0];
+    assert.equal(gallery.spoiler,true);
+    assert.equal(gallery.media.spoiler,'true');
+    assert.equal(typeof gallery.media.spoiler,'string');
+    assert.equal(gallery.media.is_spoiler,true);
+    assert.equal(gallery.media.url,'https://cdn.example/a.png');
+    assert.equal(gallery.media.proxy_url,'https://media.example/a.png');
     await r.dispose();
 });

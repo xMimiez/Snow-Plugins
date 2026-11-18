@@ -2,9 +2,13 @@ import { ui } from '../runtime.js';
 
 const SNOWFLAKE = /^\d{15,22}$/;
 const MEDIA_EXT = /\.(png|jpe?g|gif|webp|mp4|mov|webm)(\?|#|$)/i;
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp)(\?|#|$)/i;
+const VIDEO_EXT = /\.(mp4|mov|webm)(\?|#|$)/i;
 const MEDIA_TYPE = /^(image|video)\//i;
-const MEDIA_NAME = /MessageImage|MessageVideo|ImageAttachment|VideoAttachment|MediaAttachment|EmbedMedia|MessageMedia|GifVideo|FastImage|MediaPlayer|Mosaic|EmbedImage|EmbedVideo|(?:^|[^a-z])(?:Gif|Video)(?:[^a-z]|$)/i;
+const MEDIA_KIND = /^(image|gif|gifv|video)$/i;
+const MEDIA_NAME = /MessageImage|MessageVideo|ImageAttachment|VideoAttachment|MediaAttachment|EmbedMedia|MessageMedia|GifVideo|FastImage|MediaPlayer|Mosaic|EmbedImage|EmbedVideo|EmbedThumbnail|AttachmentImage|GalleryItem|CachedImage|MediaView|InlineMedia|GifImage|LazyImage|ZoomableImage|(?:^|[^a-z])(?:Gif|Video|Image)(?:[^a-z]|$)/i;
 const SPOILER_FLAG = 8;
+
 
 export function channelSnowflake(value) {
     const id = String(value ?? '').trim();
@@ -24,16 +28,54 @@ export function isListedChannel(channels, id) {
     return !!text && Array.isArray(channels) && channels.map(String).includes(text);
 }
 
+function mediaType(obj) {
+    return obj.content_type || obj.contentType || (typeof obj.type === 'string' ? obj.type : '');
+}
+
+function mediaName(obj) {
+    return [obj.filename, obj.name, obj.fileName, obj.url, obj.proxy_url, obj.proxyURL, obj.src, obj.uri, obj.source?.uri]
+        .filter(value => typeof value === 'string').join(' ');
+}
+
+export function isVideo(obj) {
+    const type = mediaType(obj);
+    const name = mediaName(obj);
+    return /^video\//i.test(type) || /^video$/i.test(type) || VIDEO_EXT.test(name);
+}
+
 export function isVisualMedia(obj) {
     if (!obj || typeof obj !== 'object' || Array.isArray(obj) || obj.props || obj.$$typeof) return false;
-    const type = obj.content_type || obj.contentType || (typeof obj.type === 'string' ? obj.type : '');
-    const name = [obj.filename, obj.name, obj.url, obj.proxy_url, obj.proxyURL, obj.src, obj.uri, obj.source?.uri]
-        .filter(value => typeof value === 'string').join(' ');
-    if (typeof type === 'string' && MEDIA_TYPE.test(type)) return true;
+    const type = mediaType(obj);
+    const name = mediaName(obj);
+    if (typeof type === 'string' && (MEDIA_TYPE.test(type) || MEDIA_KIND.test(type))) return true;
     if (MEDIA_EXT.test(name)) return true;
     // Embed images and inline players often have a URL plus a size and no file extension.
-    const url = obj.url || obj.proxy_url || obj.proxyURL || obj.src;
+    const url = obj.url || obj.proxy_url || obj.proxyURL || obj.src || obj.source?.uri;
     return typeof url === 'string' && /^https?:/i.test(url) && (obj.width || obj.height || obj.proxy_url || obj.proxyURL);
+}
+
+function attachmentRecord(item) {
+    return typeof item.filename === 'string' || typeof item.fileName === 'string'
+        || typeof item.content_type === 'string' || typeof item.contentType === 'string';
+}
+
+// Link embeds are spoiled when the URL sits inside spoiler bars. Signed CDN URLs stay untouched.
+export function spoilImageLinks(content) {
+    if (typeof content !== 'string' || !content) return content;
+    return content.replace(/https?:\/\/[^\s<]+/gi, (raw, offset) => {
+        let end = raw.length;
+        while (end > 0 && /[),.;!?]/.test(raw[end - 1])) end -= 1;
+        const url = raw.slice(0, end);
+        const tail = raw.slice(end);
+        const path = url.split('#')[0];
+        const host = path.replace(/^https?:\/\//i, '').split('/')[0].replace(/^www\./, '');
+        const imageLink = IMAGE_EXT.test(path) || (!VIDEO_EXT.test(path) && /(?:^|\.)(?:tenor\.com|giphy\.com|imgur\.com)$/i.test(host));
+        if (!imageLink) return raw;
+        const before = content.slice(Math.max(0, offset - 2), offset);
+        const after = content.slice(offset + end, offset + end + 2);
+        if (before === '||' && after === '||') return raw;
+        return `||${url}||${tail}`;
+    });
 }
 
 function componentName(type) {
@@ -69,16 +111,20 @@ function mediaPayload(props) {
     return isVisualMedia(props) ? props : null;
 }
 
-// Native chat decodes attachment.spoiler as a String. A boolean crashes the GIF row.
-// The blur itself is the IS_SPOILER flag (8). A filename string in spoiler does not cover the image.
+// Native chat decodes attachment.spoiler as a String. A boolean there crashes the GIF row.
+// Video cells honor flags bit 8. Image, GIF, and gallery cells honor a boolean spoiler or is_spoiler.
 export function markLocalSpoiler(item) {
     if (!item || typeof item !== 'object' || item.props || item.$$typeof) return;
-    for (const key of ['filename', 'name']) {
+    for (const key of ['filename', 'name', 'fileName']) {
         if (typeof item[key] === 'string' && item[key] && !/^SPOILER_/i.test(item[key])) item[key] = 'SPOILER_' + item[key];
     }
     if (typeof item.flags === 'number' && Number.isFinite(item.flags)) item.flags |= SPOILER_FLAG;
+    else if (typeof item.flags === 'string' && /^\d+$/.test(item.flags)) item.flags = String(Number(item.flags) | SPOILER_FLAG);
     else if (item.flags == null) item.flags = SPOILER_FLAG;
-    if (typeof item.spoiler !== 'string') item.spoiler = 'true';
+    // A boolean spoiler is the media-gallery bit. Attachment and video records stay strings.
+    if (typeof item.spoiler === 'boolean') item.spoiler = true;
+    else if (typeof item.spoiler !== 'string' || item.spoiler.length === 0) item.spoiler = 'true';
+    item.is_spoiler = true;
 }
 
 export function spoilTree(node, channels, inherited = '', depth = 0) {
@@ -93,9 +139,19 @@ export function spoilTree(node, channels, inherited = '', depth = 0) {
     const decorative = !!(node.avatar || node.avatarUrl || node.guildIcon || node.guild_icon)
         || (/avatar|guildicon|usericon/i.test(String(node.type || node.component || '')) && !node.attachment && !node.attachments);
     if (inChannel && !decorative) {
+        if (typeof node.content === 'string') node.content = spoilImageLinks(node.content);
         const mark = item => {
             if (!isVisualMedia(item)) return;
             markLocalSpoiler(item);
+        };
+        const markGallery = entry => {
+            if (!entry || typeof entry !== 'object') return;
+            mark(entry.media);
+            mark(entry.file);
+            mark(entry.image);
+            mark(entry.thumbnail);
+            if (typeof entry.spoiler === 'boolean') entry.spoiler = true;
+            else if ((entry.media || entry.file) && entry.spoiler == null && !attachmentRecord(entry)) entry.spoiler = true;
         };
         if (!node.attachments) mark(node);
         mark(node.attachment);
@@ -111,7 +167,7 @@ export function spoilTree(node, channels, inherited = '', depth = 0) {
             mark(embed?.thumbnail);
         });
         const items = node.items || node.components;
-        if (Array.isArray(items)) items.forEach(entry => mark(entry?.media || entry?.file));
+        if (Array.isArray(items)) items.forEach(markGallery);
     }
     const nextChannel = inChannel ? channelId : inherited;
     for (const value of Object.values(node)) {

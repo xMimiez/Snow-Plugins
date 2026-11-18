@@ -624,8 +624,11 @@ var plugin = (() => {
   // project:src/plugins/channel-spoilers.js
   var SNOWFLAKE = /^\d{15,22}$/;
   var MEDIA_EXT = /\.(png|jpe?g|gif|webp|mp4|mov|webm)(\?|#|$)/i;
+  var IMAGE_EXT = /\.(png|jpe?g|gif|webp)(\?|#|$)/i;
+  var VIDEO_EXT = /\.(mp4|mov|webm)(\?|#|$)/i;
   var MEDIA_TYPE = /^(image|video)\//i;
-  var MEDIA_NAME = /MessageImage|MessageVideo|ImageAttachment|VideoAttachment|MediaAttachment|EmbedMedia|MessageMedia|GifVideo|FastImage|MediaPlayer|Mosaic|EmbedImage|EmbedVideo|(?:^|[^a-z])(?:Gif|Video)(?:[^a-z]|$)/i;
+  var MEDIA_KIND = /^(image|gif|gifv|video)$/i;
+  var MEDIA_NAME = /MessageImage|MessageVideo|ImageAttachment|VideoAttachment|MediaAttachment|EmbedMedia|MessageMedia|GifVideo|FastImage|MediaPlayer|Mosaic|EmbedImage|EmbedVideo|EmbedThumbnail|AttachmentImage|GalleryItem|CachedImage|MediaView|InlineMedia|GifImage|LazyImage|ZoomableImage|(?:^|[^a-z])(?:Gif|Video|Image)(?:[^a-z]|$)/i;
   var SPOILER_FLAG = 8;
   function channelSnowflake(value) {
     const id = String(value ?? "").trim();
@@ -641,14 +644,40 @@ var plugin = (() => {
     const text = String(id || "");
     return !!text && Array.isArray(channels) && channels.map(String).includes(text);
   }
+  function mediaType(obj) {
+    return obj.content_type || obj.contentType || (typeof obj.type === "string" ? obj.type : "");
+  }
+  function mediaName(obj) {
+    return [obj.filename, obj.name, obj.fileName, obj.url, obj.proxy_url, obj.proxyURL, obj.src, obj.uri, obj.source?.uri].filter((value) => typeof value === "string").join(" ");
+  }
   function isVisualMedia(obj) {
     if (!obj || typeof obj !== "object" || Array.isArray(obj) || obj.props || obj.$$typeof) return false;
-    const type = obj.content_type || obj.contentType || (typeof obj.type === "string" ? obj.type : "");
-    const name = [obj.filename, obj.name, obj.url, obj.proxy_url, obj.proxyURL, obj.src, obj.uri, obj.source?.uri].filter((value) => typeof value === "string").join(" ");
-    if (typeof type === "string" && MEDIA_TYPE.test(type)) return true;
+    const type = mediaType(obj);
+    const name = mediaName(obj);
+    if (typeof type === "string" && (MEDIA_TYPE.test(type) || MEDIA_KIND.test(type))) return true;
     if (MEDIA_EXT.test(name)) return true;
-    const url = obj.url || obj.proxy_url || obj.proxyURL || obj.src;
+    const url = obj.url || obj.proxy_url || obj.proxyURL || obj.src || obj.source?.uri;
     return typeof url === "string" && /^https?:/i.test(url) && (obj.width || obj.height || obj.proxy_url || obj.proxyURL);
+  }
+  function attachmentRecord(item) {
+    return typeof item.filename === "string" || typeof item.fileName === "string" || typeof item.content_type === "string" || typeof item.contentType === "string";
+  }
+  function spoilImageLinks(content) {
+    if (typeof content !== "string" || !content) return content;
+    return content.replace(/https?:\/\/[^\s<]+/gi, (raw, offset) => {
+      let end = raw.length;
+      while (end > 0 && /[),.;!?]/.test(raw[end - 1])) end -= 1;
+      const url = raw.slice(0, end);
+      const tail = raw.slice(end);
+      const path = url.split("#")[0];
+      const host = path.replace(/^https?:\/\//i, "").split("/")[0].replace(/^www\./, "");
+      const imageLink = IMAGE_EXT.test(path) || !VIDEO_EXT.test(path) && /(?:^|\.)(?:tenor\.com|giphy\.com|imgur\.com)$/i.test(host);
+      if (!imageLink) return raw;
+      const before = content.slice(Math.max(0, offset - 2), offset);
+      const after = content.slice(offset + end, offset + end + 2);
+      if (before === "||" && after === "||") return raw;
+      return `||${url}||${tail}`;
+    });
   }
   function componentName(type) {
     if (!type || typeof type === "string") return typeof type === "string" ? type : "";
@@ -679,12 +708,15 @@ var plugin = (() => {
   }
   function markLocalSpoiler(item) {
     if (!item || typeof item !== "object" || item.props || item.$$typeof) return;
-    for (const key of ["filename", "name"]) {
+    for (const key of ["filename", "name", "fileName"]) {
       if (typeof item[key] === "string" && item[key] && !/^SPOILER_/i.test(item[key])) item[key] = "SPOILER_" + item[key];
     }
     if (typeof item.flags === "number" && Number.isFinite(item.flags)) item.flags |= SPOILER_FLAG;
+    else if (typeof item.flags === "string" && /^\d+$/.test(item.flags)) item.flags = String(Number(item.flags) | SPOILER_FLAG);
     else if (item.flags == null) item.flags = SPOILER_FLAG;
-    if (typeof item.spoiler !== "string") item.spoiler = "true";
+    if (typeof item.spoiler === "boolean") item.spoiler = true;
+    else if (typeof item.spoiler !== "string" || item.spoiler.length === 0) item.spoiler = "true";
+    item.is_spoiler = true;
   }
   function spoilTree(node, channels, inherited = "", depth = 0) {
     if (depth > 12 || !node || typeof node !== "object") return;
@@ -697,9 +729,19 @@ var plugin = (() => {
     const inChannel = channels.has(channelId);
     const decorative = !!(node.avatar || node.avatarUrl || node.guildIcon || node.guild_icon) || /avatar|guildicon|usericon/i.test(String(node.type || node.component || "")) && !node.attachment && !node.attachments;
     if (inChannel && !decorative) {
+      if (typeof node.content === "string") node.content = spoilImageLinks(node.content);
       const mark = (item) => {
         if (!isVisualMedia(item)) return;
         markLocalSpoiler(item);
+      };
+      const markGallery = (entry) => {
+        if (!entry || typeof entry !== "object") return;
+        mark(entry.media);
+        mark(entry.file);
+        mark(entry.image);
+        mark(entry.thumbnail);
+        if (typeof entry.spoiler === "boolean") entry.spoiler = true;
+        else if ((entry.media || entry.file) && entry.spoiler == null && !attachmentRecord(entry)) entry.spoiler = true;
       };
       if (!node.attachments) mark(node);
       mark(node.attachment);
@@ -715,7 +757,7 @@ var plugin = (() => {
         mark(embed?.thumbnail);
       });
       const items = node.items || node.components;
-      if (Array.isArray(items)) items.forEach((entry) => mark(entry?.media || entry?.file));
+      if (Array.isArray(items)) items.forEach(markGallery);
     }
     const nextChannel = inChannel ? channelId : inherited;
     for (const value of Object.values(node)) {
@@ -863,6 +905,6 @@ var plugin = (() => {
   ChannelSpoilers.defaults = { channels: [] };
 
   // ChannelSpoilers.entry.js
-  var ChannelSpoilers_entry_default = register({ "id": "mime.channelspoilers", "name": "Channel Spoilers", "description": "Covers images, GIFs, and videos in chosen channels on this device.", "version": "1.0.2", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers" }, ChannelSpoilers);
+  var ChannelSpoilers_entry_default = register({ "id": "mime.channelspoilers", "name": "Channel Spoilers", "description": "Covers images, GIFs, and videos in chosen channels on this device.", "version": "1.0.3", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers" }, ChannelSpoilers);
   return __toCommonJS(ChannelSpoilers_entry_exports);
 })();
