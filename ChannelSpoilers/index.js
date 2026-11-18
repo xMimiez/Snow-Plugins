@@ -729,7 +729,8 @@ var plugin = (() => {
         content_type: media?.content_type || media?.contentType || (video ? "video/mp4" : "image/gif"),
         spoiler: "true",
         flags: SPOILER_FLAG,
-        is_spoiler: true
+        is_spoiler: true,
+        isSpoiler: true
       });
     }
     node.embeds = kept;
@@ -791,6 +792,11 @@ var plugin = (() => {
     if (typeof item.spoiler === "boolean") item.spoiler = true;
     else if (typeof item.spoiler !== "string" || item.spoiler.length === 0) item.spoiler = "true";
     item.is_spoiler = true;
+    if (attachmentRecord(item)) item.isSpoiler = true;
+  }
+  function keepAttachmentShape(item) {
+    if (!attachmentRecord(item) || typeof item.isSpoiler === "boolean") return;
+    item.isSpoiler = item.is_spoiler === true || item.spoiler === true || item.spoiler === "true";
   }
   function spoilTree(node, channels, inherited = "", depth = 0) {
     if (depth > 12 || !node || typeof node !== "object") return;
@@ -836,6 +842,8 @@ var plugin = (() => {
       const items = node.items || node.components;
       if (Array.isArray(items)) items.forEach(markGallery);
     }
+    if (attachmentRecord(node)) keepAttachmentShape(node);
+    if (Array.isArray(node.attachments)) node.attachments.forEach(keepAttachmentShape);
     const nextChannel = inChannel ? channelId : inherited;
     for (const value of Object.values(node)) {
       if (value && typeof value === "object") spoilTree(value, channels, nextChannel, depth + 1);
@@ -982,6 +990,6 @@ var plugin = (() => {
   ChannelSpoilers.defaults = { channels: [] };
 
   // ChannelSpoilers.entry.js
-  var ChannelSpoilers_entry_default = register({ "id": "mime.channelspoilers", "name": "Channel Spoilers", "description": "Covers images, GIFs, and videos in chosen channels on this device.", "version": "1.0.4", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers" }, ChannelSpoilers);
+  var ChannelSpoilers_entry_default = register({ "id": "mime.channelspoilers", "name": "Channel Spoilers", "description": "Covers images, GIFs, and videos in chosen channels on this device.", "version": "1.0.5", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers" }, ChannelSpoilers);
   return __toCommonJS(ChannelSpoilers_entry_exports);
 })();

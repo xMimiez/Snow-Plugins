@@ -1200,6 +1200,7 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
     assert.equal(typeof gifEmbed.spoiler,'string');
     assert.equal(gifEmbed.flags & 8,8);
     assert.equal(gifEmbed.is_spoiler,true);
+    assert.equal(gifEmbed.isSpoiler,true);
     assert.equal(gifEmbed.url,'https://cdn.example/clip.mp4');
     assert.equal(gifEmbed.proxy_url,'https://cdn.example/clip.mp4');
     assert.equal(gifEmbed.obscure,undefined);
@@ -1222,6 +1223,7 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
     assert.equal(gifFile.spoiler,'true');
     assert.equal(typeof gifFile.spoiler,'string');
     assert.equal(gifFile.is_spoiler,true);
+    assert.equal(gifFile.isSpoiler,true);
     assert.equal(gifFile.flags & 8,8);
     assert.equal(gifFile.url,'https://cdn.example/dance.gif?ex=1&hm=2');
     assert.equal(gifFile.proxy_url,'https://media.example/dance.gif?ex=1&hm=2');
@@ -1256,5 +1258,22 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
     assert.equal(linkedGif.attachments[0].url,'https://media.tenor.com/abc/cat.mp4');
     assert.equal(linkedGif.attachments[0].proxy_url,'https://media.discordapp.net/external/x/cat.mp4');
     assert.equal(linkedGif.attachments[0].obscure,undefined);
+    assert.equal(linkedGif.attachments[0].isSpoiler,true);
+    native.updateRows('chat',[{
+        channelId:channel,
+        referencedMessage:{message:{
+            attachments:[{id:'note',filename:'note.txt',content_type:'text/plain',url:'https://cdn.example/note.txt'}],
+            embeds:[{type:'gifv',url:'https://tenor.com/view/reply',video:{url:'https://media.tenor.com/reply/a.mp4',proxy_url:'https://media.example/reply.mp4',width:12,height:12}}],
+        }},
+    }]);
+    const reply=native.last[0].referencedMessage.message;
+    assert.equal(reply.attachments[0].isSpoiler,false);
+    assert.equal(reply.attachments[0].spoiler,undefined);
+    const replyGif=reply.attachments[1];
+    assert.equal(replyGif.isSpoiler,true);
+    assert.equal(replyGif.spoiler,'true');
+    assert.equal(typeof replyGif.spoiler,'string');
+    assert.equal(replyGif.url,'https://media.tenor.com/reply/a.mp4');
+    assert.equal(replyGif.proxy_url,'https://media.example/reply.mp4');
     await r.dispose();
 });

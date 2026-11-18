@@ -136,6 +136,7 @@ function promoteGifEmbeds(node) {
             spoiler: 'true',
             flags: SPOILER_FLAG,
             is_spoiler: true,
+            isSpoiler: true,
         });
     }
     node.embeds = kept;
@@ -209,6 +210,13 @@ export function markLocalSpoiler(item) {
     if (typeof item.spoiler === 'boolean') item.spoiler = true;
     else if (typeof item.spoiler !== 'string' || item.spoiler.length === 0) item.spoiler = 'true';
     item.is_spoiler = true;
+    // The native reply row requires this camelCase Bool. spoiler itself stays a String.
+    if (attachmentRecord(item)) item.isSpoiler = true;
+}
+
+function keepAttachmentShape(item) {
+    if (!attachmentRecord(item) || typeof item.isSpoiler === 'boolean') return;
+    item.isSpoiler = item.is_spoiler === true || item.spoiler === true || item.spoiler === 'true';
 }
 
 export function spoilTree(node, channels, inherited = '', depth = 0) {
@@ -256,6 +264,8 @@ export function spoilTree(node, channels, inherited = '', depth = 0) {
         const items = node.items || node.components;
         if (Array.isArray(items)) items.forEach(markGallery);
     }
+    if (attachmentRecord(node)) keepAttachmentShape(node);
+    if (Array.isArray(node.attachments)) node.attachments.forEach(keepAttachmentShape);
     const nextChannel = inChannel ? channelId : inherited;
     for (const value of Object.values(node)) {
         if (value && typeof value === 'object') spoilTree(value, channels, nextChannel, depth + 1);
