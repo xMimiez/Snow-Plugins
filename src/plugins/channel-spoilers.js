@@ -3,7 +3,8 @@ import { ui } from '../runtime.js';
 const SNOWFLAKE = /^\d{15,22}$/;
 const MEDIA_EXT = /\.(png|jpe?g|gif|webp|mp4|mov|webm)(\?|#|$)/i;
 const MEDIA_TYPE = /^(image|video)\//i;
-const MEDIA_NAME = /MessageImage|MessageVideo|ImageAttachment|VideoAttachment|MediaAttachment|EmbedMedia|MessageMedia|GifVideo|(?:^|[^a-z])(?:Gif|Video)(?:[^a-z]|$)/i;
+const MEDIA_NAME = /MessageImage|MessageVideo|ImageAttachment|VideoAttachment|MediaAttachment|EmbedMedia|MessageMedia|GifVideo|FastImage|MediaPlayer|Mosaic|EmbedImage|EmbedVideo|(?:^|[^a-z])(?:Gif|Video)(?:[^a-z]|$)/i;
+const SPOILER_FLAG = 8;
 
 export function channelSnowflake(value) {
     const id = String(value ?? '').trim();
@@ -26,10 +27,13 @@ export function isListedChannel(channels, id) {
 export function isVisualMedia(obj) {
     if (!obj || typeof obj !== 'object' || Array.isArray(obj) || obj.props || obj.$$typeof) return false;
     const type = obj.content_type || obj.contentType || (typeof obj.type === 'string' ? obj.type : '');
-    const name = [obj.filename, obj.name, obj.url, obj.proxy_url, obj.src, obj.uri, obj.source?.uri]
+    const name = [obj.filename, obj.name, obj.url, obj.proxy_url, obj.proxyURL, obj.src, obj.uri, obj.source?.uri]
         .filter(value => typeof value === 'string').join(' ');
     if (typeof type === 'string' && MEDIA_TYPE.test(type)) return true;
-    return MEDIA_EXT.test(name);
+    if (MEDIA_EXT.test(name)) return true;
+    // Embed images and inline players often have a URL plus a size and no file extension.
+    const url = obj.url || obj.proxy_url || obj.proxyURL || obj.src;
+    return typeof url === 'string' && /^https?:/i.test(url) && (obj.width || obj.height || obj.proxy_url || obj.proxyURL);
 }
 
 function componentName(type) {
@@ -66,13 +70,15 @@ function mediaPayload(props) {
 }
 
 // Native chat decodes attachment.spoiler as a String. A boolean crashes the GIF row.
+// The blur itself is the IS_SPOILER flag (8). A filename string in spoiler does not cover the image.
 export function markLocalSpoiler(item) {
     if (!item || typeof item !== 'object' || item.props || item.$$typeof) return;
     for (const key of ['filename', 'name']) {
         if (typeof item[key] === 'string' && item[key] && !/^SPOILER_/i.test(item[key])) item[key] = 'SPOILER_' + item[key];
     }
-    const label = [item.filename, item.name].find(value => typeof value === 'string' && value) || 'Spoiler';
-    if (typeof item.spoiler !== 'string') item.spoiler = label;
+    if (typeof item.flags === 'number' && Number.isFinite(item.flags)) item.flags |= SPOILER_FLAG;
+    else if (item.flags == null) item.flags = SPOILER_FLAG;
+    if (typeof item.spoiler !== 'string') item.spoiler = 'true';
 }
 
 export function spoilTree(node, channels, inherited = '', depth = 0) {
@@ -94,8 +100,18 @@ export function spoilTree(node, channels, inherited = '', depth = 0) {
         if (!node.attachments) mark(node);
         mark(node.attachment);
         mark(node.media);
+        mark(node.image);
+        mark(node.video);
+        mark(node.thumbnail);
         if (Array.isArray(node.attachments)) node.attachments.forEach(mark);
-        if (Array.isArray(node.embeds)) node.embeds.forEach(mark);
+        if (Array.isArray(node.embeds)) node.embeds.forEach(embed => {
+            mark(embed);
+            mark(embed?.image);
+            mark(embed?.video);
+            mark(embed?.thumbnail);
+        });
+        const items = node.items || node.components;
+        if (Array.isArray(items)) items.forEach(entry => mark(entry?.media || entry?.file));
     }
     const nextChannel = inChannel ? channelId : inherited;
     for (const value of Object.values(node)) {
@@ -200,13 +216,27 @@ export default function ChannelSpoilers(r) {
                     return covered === result ? undefined : covered;
                 } finally { covering = false; }
             });
-            r.patchRows(rows => {
+            const spoilRows = rows => {
                 const channels = Array.isArray(r.store.channels) ? r.store.channels : [];
                 if (!channels.length || rows == null) return rows;
                 const next = JSON.parse(JSON.stringify(rows));
                 spoilTree(next, new Set(channels.map(String)));
                 return next;
-            });
+            };
+            r.patchRows(spoilRows);
+            const messages = r.byStore('MessageStore') || r.find('getMessages', 'getMessage') || r.find('getMessages');
+            const listedSet = () => new Set((Array.isArray(r.store.channels) ? r.store.channels : []).map(String));
+            const spoilStored = value => {
+                const channels = listedSet();
+                if (!channels.size || value == null) return;
+                try { spoilTree(value, channels); } catch { /* Keep the original message if a row is sealed. */ }
+            };
+            if (typeof messages?.getMessages === 'function') {
+                r.patch('after', messages, 'getMessages', (_args, result) => { if (r.active) spoilStored(result); });
+            }
+            if (typeof messages?.getMessage === 'function') {
+                r.patch('after', messages, 'getMessage', (_args, result) => { if (r.active) spoilStored(result); });
+            }
             r.status.channels = Array.isArray(r.store.channels) ? r.store.channels.length : 0;
         },
     };

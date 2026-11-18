@@ -973,6 +973,21 @@ test('Temp Delete hides any message on this device until the plugin starts again
     assert.deepEqual(labels(moved.props.children[0]),['Edit Message','Reply','Forward']);
     assert.deepEqual(labels(moved.props.children[1]),['Copy Text','Pin Message']);
     assert.deepEqual(labels(moved.props.children[2]),['Delete Message','Temp Delete']);
+    const tempRow=(()=>{
+        let found=null;
+        const walk=value=>{
+            if(!value||found)return;
+            if(Array.isArray(value)){value.forEach(walk);return;}
+            if(value.props?.label==='Temp Delete')found=value;
+            else if(value.props?.children)walk(value.props.children);
+        };
+        walk(moved);
+        return found;
+    })();
+    assert.equal(tempRow.props.variant,'danger');
+    assert.equal(tempRow.props.destructive,true);
+    assert.equal(tempRow.props.icon.displayName,'ClockIcon');
+    assert.equal(tempRow.props.onPress===moved.props.children[2].props.children[0].props.onPress,false);
     const again=placeTempDelete(React,moved,()=>{});
     assert.deepEqual(labels(again),labels(moved));
     const otherTree=React.createElement('Sheet',null,
@@ -1016,11 +1031,20 @@ test('Temp Delete hides any message on this device until the plugin starts again
         if(node.props?.label==='Temp Delete')return node.props.onPress;
         return press(node.props?.children);
     };
+    const dispatched=[];
+    r.common.FluxDispatcher.dispatch=event=>dispatched.push(event);
+    const rows=[{message},{id:'row',message:{id:'11',content:'stay',author:{id:'me'}}}];
+    native.updateRows('chat',rows);
     press(rendered)();
     await tick();
     assert.equal(closed,1);
     assert.equal(deleted,0);
     assert.equal(emitted,1);
+    assert.equal(dispatched[0].type,'MESSAGE_DELETE');
+    assert.equal(dispatched[0].id,'10');
+    assert.equal(dispatched[0].channelId,'20');
+    assert.equal(dispatched[0].mlDeleted,true);
+    assert.equal(native.last.some(row=>row.message?.id==='10'),false);
     assert.deepEqual(bucket._array.map(item=>item.id),['11']);
     assert.equal(store.getMessage('20','10'),undefined);
     assert.equal(store.getMessages('20')._array.some(item=>item.id==='10'),false);
@@ -1032,7 +1056,6 @@ test('Temp Delete hides any message on this device until the plugin starts again
     assert.equal(screen.toJSON().props.testID,'chat');
     assert.equal(screen.toJSON().children,null);
     await Renderer.act(async()=>screen.unmount());
-    const rows=[{message},{id:'row',message:{id:'11',content:'stay',author:{id:'me'}}}];
     native.updateRows('chat',rows);
     assert.equal(native.last.length,1);
     assert.equal(native.last[0].message.id,'11');
@@ -1110,18 +1133,26 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
         {channelId:other,filename:'b.png',content_type:'image/png'},
         {channelId:channel,content:'hi',attachments:[{filename:'c.webp',content_type:'image/webp'},{filename:'d.txt',content_type:'text/plain'}]},
         {channelId:channel,avatar:true,filename:'e.png',content_type:'image/png'},
+        {channelId:channel,embeds:[{type:'gifv',video:{url:'https://cdn.example/clip.mp4',width:120,height:80}}]},
     ]);
     assert.equal(native.last[0].filename,'SPOILER_a.gif');
-    assert.equal(native.last[0].spoiler,'SPOILER_a.gif');
+    assert.equal(native.last[0].spoiler,'true');
     assert.equal(typeof native.last[0].spoiler,'string');
+    assert.equal(native.last[0].flags & 8,8);
     assert.equal(native.last[0].obscure,undefined);
+    assert.equal(native.last[0].hidden,undefined);
     assert.equal(native.last[1].spoiler,undefined);
+    assert.equal(native.last[1].flags,undefined);
     assert.equal(native.last[2].attachments[0].filename,'SPOILER_c.webp');
-    assert.equal(native.last[2].attachments[0].spoiler,'SPOILER_c.webp');
+    assert.equal(native.last[2].attachments[0].spoiler,'true');
     assert.equal(typeof native.last[2].attachments[0].spoiler,'string');
+    assert.equal(native.last[2].attachments[0].flags & 8,8);
     assert.equal(native.last[2].attachments[1].spoiler,undefined);
     assert.equal(native.last[2].content,'hi');
     assert.equal(native.last[3].spoiler,undefined);
     assert.equal(native.last[3].filename,'e.png');
+    assert.equal(native.last[4].embeds[0].video.spoiler,'true');
+    assert.equal(native.last[4].embeds[0].video.flags & 8,8);
+    assert.equal(native.last[4].embeds[0].video.url,'https://cdn.example/clip.mp4');
     await r.dispose();
 });

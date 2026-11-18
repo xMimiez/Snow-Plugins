@@ -159,16 +159,53 @@ function insertAt(React, node, row, mode, state, depth = 0) {
     return changed ? React.cloneElement(node, props) : node;
 }
 
+// The sheet colors a row from its variant. A new row with only a label stays white and inherits the trash icon.
+export function ClockIcon(props) {
+    const React = ClockIcon.React;
+    const RN = ClockIcon.RN || {};
+    const color = props?.color || props?.fill || '#F23F43';
+    const size = Number(props?.size || props?.width || props?.height) || 24;
+    const Svg = RN.Svg;
+    const Circle = RN.Circle;
+    const Path = RN.Path;
+    if (React && Svg && Circle && Path) {
+        return React.createElement(Svg, { width: size, height: size, viewBox: '0 0 24 24' },
+            React.createElement(Circle, { cx: '12', cy: '12', r: '8', stroke: color, strokeWidth: '2', fill: 'none' }),
+            React.createElement(Path, { d: 'M12 8.5V12l2.5 1.5', stroke: color, strokeWidth: '2', fill: 'none', strokeLinecap: 'round' }));
+    }
+    if (!React) return null;
+    return React.createElement(RN.Text || 'Text', {
+        accessibilityLabel: 'Clock',
+        style: { color, fontSize: Math.max(16, Math.round(size * 0.85)), lineHeight: size, width: size, textAlign: 'center' },
+    }, '◷');
+}
+ClockIcon.displayName = 'ClockIcon';
+
+function clockProp(React, current) {
+    const Icon = clockProp.Icon || ClockIcon;
+    if (typeof current === 'function') return Icon;
+    if (current && typeof current === 'object') return React.createElement(Icon, { color: '#F23F43', size: 24 });
+    return Icon;
+}
+
 export function placeTempDelete(React, tree, onPress) {
     if (!tree || typeof onPress !== 'function' || findNode(tree, isTempDeleteRow)) return tree;
     const sample = findNode(tree, isPlainDeleteRow) || findNode(tree, isActionRow);
     if (!sample?.type) return tree;
-    const row = React.createElement(sample.type, {
+    const row = React.cloneElement(sample, {
         key: 'mime-temp-delete',
         label: 'Temp Delete',
         title: 'Temp Delete',
         accessibilityLabel: 'Temp Delete',
         onPress,
+        icon: clockProp(React, sample.props?.icon),
+        Icon: clockProp.Icon || ClockIcon,
+        IconComponent: clockProp.Icon || ClockIcon,
+        leading: clockProp(React, sample.props?.leading ?? sample.props?.icon),
+        variant: 'danger',
+        destructive: true,
+        danger: true,
+        color: 'text-danger',
     });
     const state = { done: false };
     const withDelete = insertAt(React, tree, row, 'delete', state);
@@ -263,6 +300,7 @@ export default function TempDelete(r) {
     const { h } = r;
     const { Page, Text } = ui(r);
     const hidden = new Set();
+    const refreshRows = [];
     let rawGetMessages = null;
     let messageStore = null;
 
@@ -272,9 +310,24 @@ export default function TempDelete(r) {
         hidden.add(id);
         const channelId = channelIdOf(message);
         if (rawGetMessages && channelId) {
-            try { dropStoredMessage(rawGetMessages(channelId), id); } catch (error) { r.error('Temp Delete', error); }
+            try {
+                const bucket = rawGetMessages(channelId);
+                dropStoredMessage(bucket, id);
+                bucket?.remove?.(id);
+                bucket?._map?.delete?.(id);
+            } catch (error) { r.error('Temp Delete', error); }
         }
+        // The native list keeps its own copy. A local delete event is what makes that row leave.
+        try {
+            const payload = { type: 'MESSAGE_DELETE', id, channelId, messageId: id, mlDeleted: true };
+            const guildId = message?.guild_id || message?.guildId;
+            if (guildId) payload.guildId = guildId;
+            r.common?.FluxDispatcher?.dispatch?.(payload);
+        } catch (error) { r.error('Temp Delete', error); }
         try { messageStore?.emitChange?.(); } catch (error) { r.error('Temp Delete', error); }
+        for (const refresh of refreshRows) {
+            try { refresh(); } catch (error) { r.error('Temp Delete', error); }
+        }
     }
 
     return {
@@ -285,6 +338,12 @@ export default function TempDelete(r) {
                 h(Text, { muted: true }, 'The message is removed on this device only. It comes back the next time Discord starts. Nothing is deleted on Discord’s servers.'));
         },
         start() {
+            ClockIcon.React = r.React;
+            ClockIcon.RN = r.RN;
+            const svg = r.find('Svg', 'Path', 'Circle') || r.find('Svg', 'Path');
+            if (svg?.Svg) ClockIcon.RN = { ...r.RN, Svg: svg.Svg, Circle: svg.Circle, Path: svg.Path };
+            const icons = r.find('ClockIcon', 'TrashIcon') || r.find('ClockIcon');
+            if (typeof icons?.ClockIcon === 'function') clockProp.Icon = icons.ClockIcon;
             messageStore = r.byStore('MessageStore') || r.find('getMessages', 'getMessage') || r.find('getMessages');
             if (typeof messageStore?.getMessages === 'function') rawGetMessages = messageStore.getMessages.bind(messageStore);
             if (messageStore && rawGetMessages) {
@@ -302,6 +361,21 @@ export default function TempDelete(r) {
                 });
             }
             r.patchRows(rows => stripHiddenRows(rows, hidden));
+            const modules = r.RN.NativeModules || {};
+            for (const key of Object.keys(modules)) {
+                const native = modules[key];
+                if (typeof native?.updateRows !== 'function') continue;
+                let lastId;
+                let lastRows;
+                r.patch('after', native, 'updateRows', args => {
+                    lastId = args?.[0];
+                    lastRows = args?.[1];
+                });
+                refreshRows.push(() => {
+                    if (lastRows == null) return;
+                    native.updateRows(lastId, lastRows);
+                });
+            }
             r.patch('after', r.React, 'createElement', (_args, result) => {
                 if (!r.active || !isHiddenMessageElement(result, hidden)) return;
                 return false;

@@ -625,7 +625,8 @@ var plugin = (() => {
   var SNOWFLAKE = /^\d{15,22}$/;
   var MEDIA_EXT = /\.(png|jpe?g|gif|webp|mp4|mov|webm)(\?|#|$)/i;
   var MEDIA_TYPE = /^(image|video)\//i;
-  var MEDIA_NAME = /MessageImage|MessageVideo|ImageAttachment|VideoAttachment|MediaAttachment|EmbedMedia|MessageMedia|GifVideo|(?:^|[^a-z])(?:Gif|Video)(?:[^a-z]|$)/i;
+  var MEDIA_NAME = /MessageImage|MessageVideo|ImageAttachment|VideoAttachment|MediaAttachment|EmbedMedia|MessageMedia|GifVideo|FastImage|MediaPlayer|Mosaic|EmbedImage|EmbedVideo|(?:^|[^a-z])(?:Gif|Video)(?:[^a-z]|$)/i;
+  var SPOILER_FLAG = 8;
   function channelSnowflake(value) {
     const id = String(value ?? "").trim();
     return SNOWFLAKE.test(id) ? id : "";
@@ -643,9 +644,11 @@ var plugin = (() => {
   function isVisualMedia(obj) {
     if (!obj || typeof obj !== "object" || Array.isArray(obj) || obj.props || obj.$$typeof) return false;
     const type = obj.content_type || obj.contentType || (typeof obj.type === "string" ? obj.type : "");
-    const name = [obj.filename, obj.name, obj.url, obj.proxy_url, obj.src, obj.uri, obj.source?.uri].filter((value) => typeof value === "string").join(" ");
+    const name = [obj.filename, obj.name, obj.url, obj.proxy_url, obj.proxyURL, obj.src, obj.uri, obj.source?.uri].filter((value) => typeof value === "string").join(" ");
     if (typeof type === "string" && MEDIA_TYPE.test(type)) return true;
-    return MEDIA_EXT.test(name);
+    if (MEDIA_EXT.test(name)) return true;
+    const url = obj.url || obj.proxy_url || obj.proxyURL || obj.src;
+    return typeof url === "string" && /^https?:/i.test(url) && (obj.width || obj.height || obj.proxy_url || obj.proxyURL);
   }
   function componentName(type) {
     if (!type || typeof type === "string") return typeof type === "string" ? type : "";
@@ -679,8 +682,9 @@ var plugin = (() => {
     for (const key of ["filename", "name"]) {
       if (typeof item[key] === "string" && item[key] && !/^SPOILER_/i.test(item[key])) item[key] = "SPOILER_" + item[key];
     }
-    const label = [item.filename, item.name].find((value) => typeof value === "string" && value) || "Spoiler";
-    if (typeof item.spoiler !== "string") item.spoiler = label;
+    if (typeof item.flags === "number" && Number.isFinite(item.flags)) item.flags |= SPOILER_FLAG;
+    else if (item.flags == null) item.flags = SPOILER_FLAG;
+    if (typeof item.spoiler !== "string") item.spoiler = "true";
   }
   function spoilTree(node, channels, inherited = "", depth = 0) {
     if (depth > 12 || !node || typeof node !== "object") return;
@@ -700,8 +704,18 @@ var plugin = (() => {
       if (!node.attachments) mark(node);
       mark(node.attachment);
       mark(node.media);
+      mark(node.image);
+      mark(node.video);
+      mark(node.thumbnail);
       if (Array.isArray(node.attachments)) node.attachments.forEach(mark);
-      if (Array.isArray(node.embeds)) node.embeds.forEach(mark);
+      if (Array.isArray(node.embeds)) node.embeds.forEach((embed) => {
+        mark(embed);
+        mark(embed?.image);
+        mark(embed?.video);
+        mark(embed?.thumbnail);
+      });
+      const items = node.items || node.components;
+      if (Array.isArray(items)) items.forEach((entry) => mark(entry?.media || entry?.file));
     }
     const nextChannel = inChannel ? channelId : inherited;
     for (const value of Object.values(node)) {
@@ -814,13 +828,34 @@ var plugin = (() => {
             covering = false;
           }
         });
-        r.patchRows((rows) => {
+        const spoilRows = (rows) => {
           const channels = Array.isArray(r.store.channels) ? r.store.channels : [];
           if (!channels.length || rows == null) return rows;
           const next = JSON.parse(JSON.stringify(rows));
           spoilTree(next, new Set(channels.map(String)));
           return next;
-        });
+        };
+        r.patchRows(spoilRows);
+        const messages = r.byStore("MessageStore") || r.find("getMessages", "getMessage") || r.find("getMessages");
+        const listedSet = () => new Set((Array.isArray(r.store.channels) ? r.store.channels : []).map(String));
+        const spoilStored = (value) => {
+          const channels = listedSet();
+          if (!channels.size || value == null) return;
+          try {
+            spoilTree(value, channels);
+          } catch {
+          }
+        };
+        if (typeof messages?.getMessages === "function") {
+          r.patch("after", messages, "getMessages", (_args, result) => {
+            if (r.active) spoilStored(result);
+          });
+        }
+        if (typeof messages?.getMessage === "function") {
+          r.patch("after", messages, "getMessage", (_args, result) => {
+            if (r.active) spoilStored(result);
+          });
+        }
         r.status.channels = Array.isArray(r.store.channels) ? r.store.channels.length : 0;
       }
     };
@@ -828,6 +863,6 @@ var plugin = (() => {
   ChannelSpoilers.defaults = { channels: [] };
 
   // ChannelSpoilers.entry.js
-  var ChannelSpoilers_entry_default = register({ "id": "mime.channelspoilers", "name": "Channel Spoilers", "description": "Covers images, GIFs, and videos in chosen channels on this device.", "version": "1.0.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers" }, ChannelSpoilers);
+  var ChannelSpoilers_entry_default = register({ "id": "mime.channelspoilers", "name": "Channel Spoilers", "description": "Covers images, GIFs, and videos in chosen channels on this device.", "version": "1.0.2", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers" }, ChannelSpoilers);
   return __toCommonJS(ChannelSpoilers_entry_exports);
 })();

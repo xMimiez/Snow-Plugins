@@ -2,7 +2,7 @@
   "spec": 3,
   "type": "plugin",
   "id": "mime.tempdelete",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "display": {
     "name": "Temp Delete",
     "description": "Hides a message on this device until Discord restarts.",
