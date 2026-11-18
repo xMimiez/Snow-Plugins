@@ -31,7 +31,7 @@ function iconHint(node) {
 }
 const ACTION_KEYS = ['actions', 'buttons', 'items', 'headerActions', 'trailingActions', 'toolbarItems'];
 const SETTINGS_MESSAGE_KEYS = ['SETTINGS', 'USER_SETTINGS', 'SETTINGS_TITLE', 'OPEN_SETTINGS', 'USER_SETTINGS_BUTTON'];
-const OTHER_MESSAGE_KEYS = ['QUESTS', 'SHOP', 'NITRO', 'COLLECTIBLES', 'COLLECTIBLES_SHOP', 'QUEST_HOME'];
+const OTHER_MESSAGE_KEYS = ['QUESTS', 'SHOP', 'COLLECTIBLES', 'COLLECTIBLES_SHOP', 'QUEST_HOME'];
 
 function textOf(value, depth = 0) {
     if (value == null || depth > 2) return '';
@@ -63,10 +63,14 @@ function isSettingsText(text) {
     if (/settings?|SettingsIcon|GearIcon|CogIcon|USER_SETTINGS|\b(gear|cog)\b/i.test(text)) return true;
     return settingsNeedles.some(word => text.includes(word));
 }
+// Nitro is its own profile control on Discord 354. It must not qualify a row, or the bar gets a second Nighty button.
+function isNitroOnly(text) {
+    return /nitro/i.test(text) && !/quest|shop|collectible/i.test(text);
+}
 function isOtherText(text) {
-    if (!text) return false;
-    if (/quest|shop|collectible|nitro|QuestIcon|ShopIcon|NitroIcon|CollectiblesIcon/i.test(text)) return true;
-    return otherNeedles.some(word => text.includes(word));
+    if (!text || isNitroOnly(text)) return false;
+    if (/quest|shop|collectible|QuestIcon|ShopIcon|CollectiblesIcon/i.test(text)) return true;
+    return otherNeedles.some(word => !isNitroOnly(word) && text.includes(word));
 }
 function pressProps(record) {
     if (!record || typeof record !== 'object' || record.subLabel || record.trailing) return false;
@@ -99,9 +103,17 @@ function controlKind(node) {
     if (isQuestOrShopControl(list[0])) return 'other-wrap';
     return '';
 }
+function isNightyMarker(node) {
+    if (!node || typeof node !== 'object') return false;
+    return node.key === 'mime-nighty-profile-button'
+        || node.id === 'mime-nighty-profile-button'
+        || node.props?.key === 'mime-nighty-profile-button'
+        || node.props?.testID === 'mime-nighty-profile-button'
+        || node.props?.id === 'mime-nighty-profile-button';
+}
 export function insertPlainAction(list, makeButton) {
     if (!Array.isArray(list) || list.length < 2 || list.length > 8) return list;
-    if (list.some(item => item?.key === 'mime-nighty-profile-button' || item?.id === 'mime-nighty-profile-button')) return list;
+    if (list.some(isNightyMarker)) return list;
     const kinds = list.map(plainKind);
     const index = kinds.indexOf('settings');
     if (index < 0 || !kinds.includes('other')) return list;
@@ -109,12 +121,12 @@ export function insertPlainAction(list, makeButton) {
     next.splice(index + 1, 0, makeButton(list[index]));
     return next;
 }
-// Adds a Nighty control beside Settings. Settings itself is not changed. Only a short row that also has Quests or Shop.
+// Adds one Nighty control beside Settings. A Nitro-only row does not qualify.
 export function insertNightySlot(React, element, makeButton) {
     const children = element?.props?.children;
     const list = Array.isArray(children) ? children.filter(Boolean) : null;
     if (!list || list.length < 2 || list.length > 8) return element;
-    if (list.some(node => node?.props?.testID === 'mime-nighty-profile-button')) return element;
+    if (list.some(isNightyMarker)) return element;
     const kinds = list.map(controlKind);
     const index = kinds.findIndex(kind => kind === 'settings' || kind === 'settings-wrap');
     if (index < 0 || !kinds.some(kind => kind === 'other' || kind === 'other-wrap')) return element;

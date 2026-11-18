@@ -43,8 +43,8 @@ async function harness(defaults = {}, modules = []) {
 test('NightyTab bundle opens iOS http addresses through the cleartext loader',()=>{
     const manifest=JSON.parse(fs.readFileSync(path.join(root,'NightyTab/manifest.json'),'utf8'));
     const src=fs.readFileSync(path.join(root,'NightyTab/index.js'),'utf8');
-    assert.equal(manifest.version,'2.0.5');
-    assert.match(src,/"version": "2\.0\.5"/);
+    assert.equal(manifest.version,'2.0.6');
+    assert.match(src,/"version": "2\.0\.6"/);
     assert.doesNotMatch(src,/Open in Safari/);
     assert.match(src,/function loadCleartextPage/);
     assert.match(src,/function isHttpPage/);
@@ -55,7 +55,7 @@ test('NightyTab bundle opens iOS http addresses through the cleartext loader',()
 
 test('all Bunny spec-3 artifacts export definePlugin and match the hosted manifest', async()=>{
     const registry=JSON.parse(fs.readFileSync(path.join(root,'src/registry.json')));
-    assert.equal(registry.length,22);
+    assert.equal(registry.length,24);
     for(const meta of registry){
         const manifest=JSON.parse(fs.readFileSync(path.join(root,meta.folder,'manifest.json')));
         const bytes=fs.readFileSync(path.join(root,meta.folder,manifest.main));
@@ -64,7 +64,7 @@ test('all Bunny spec-3 artifacts export definePlugin and match the hosted manife
         assert.equal(manifest.type,'plugin');
         assert.equal(manifest.main,'index.js');
         assert.equal(manifest.id,meta.id);
-        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.5');
+        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.6');
         else assert.equal(manifest.version,meta.version);
         assert.equal(manifest.display.name,meta.name);
         assert(manifest.display.authors.some(a=>a.id==='957164619061932045'));
@@ -641,6 +641,52 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     await Renderer.act(async()=>actions[2].onPress());
     assert.equal(sheets.size,1);
     await Renderer.act(async()=>tree.unmount());sheets.clear();
+    const countNighty=node=>{
+        let count=0;
+        const walk=value=>{
+            if(!value||typeof value!=='object')return;
+            if(value.props?.testID==='mime-nighty-profile-button')count++;
+            const kids=value.children;
+            if(Array.isArray(kids))kids.forEach(walk);
+        };
+        walk(node);
+        return count;
+    };
+    const nitroScreen=()=>React.createElement('View',{testID:'profile-v354'},[
+        React.createElement('View',{key:'nitro-row',testID:'nitro-row'},[
+            pressable('nitro','Nitro'),pressable('settings-nitro','Settings'),
+        ]),
+        React.createElement('View',{key:'quest-row',testID:'quest-row'},[
+            pressable('quests2','Quests'),pressable('shop2','Shop'),pressable('settings2','Settings'),
+        ]),
+    ]);
+    await Renderer.act(async()=>{tree=Renderer.create(nitroScreen());});
+    const profile=tree.toJSON();
+    assert.equal(countNighty(profile),1);
+    assert.deepEqual(profile.children[0].children.map(child=>child.props.accessibilityLabel),['Nitro','Settings']);
+    assert.equal(profile.children[1].children[3].props.accessibilityLabel,'Nighty');
+    assert.equal(profile.children[1].children[3].props.testID,'mime-nighty-profile-button');
+    await Renderer.act(async()=>tree.unmount());
+    const nested=()=>React.createElement('View',{testID:'outer'},[
+        React.createElement('View',{key:'inner',testID:'inner'},[
+            pressable('quests3','Quests'),pressable('settings3','Settings'),
+        ]),
+        pressable('nitro2','Nitro'),
+        pressable('settings4','Settings'),
+    ]);
+    await Renderer.act(async()=>{tree=Renderer.create(nested());});
+    assert.equal(countNighty(tree.toJSON()),1);
+    assert.equal(tree.toJSON().children[0].children[2].props.accessibilityLabel,'Nighty');
+    assert.deepEqual(tree.toJSON().children.slice(1).map(child=>child.props.accessibilityLabel),['Nitro','Settings']);
+    await Renderer.act(async()=>tree.unmount());
+    const nitroOnly=()=>React.createElement('View',null,[
+        React.createElement('Pressable',{key:'nitro',accessibilityLabel:{id:'NITRO',message:'Nitro'},onPress(){}}),
+        React.createElement('Pressable',{key:'settings',accessibilityLabel:{id:'USER_SETTINGS',message:'Settings'},onPress(){}}),
+    ]);
+    await Renderer.act(async()=>{tree=Renderer.create(nitroOnly());});
+    assert.equal(countNighty(tree.toJSON()),0);
+    assert.deepEqual(tree.toJSON().children.map(child=>child.props.accessibilityLabel.id),['NITRO','USER_SETTINGS']);
+    await Renderer.act(async()=>tree.unmount());
     await Renderer.act(async()=>{tree=Renderer.create(React.createElement(plugin.Settings));});
     assert(tree.root.findAllByType('Switch').some(row=>row.props.accessibilityLabel==='Profile Nighty button'&&row.props.value===true));
     await Renderer.act(async()=>tree.unmount());
@@ -896,4 +942,181 @@ test('GifRoulette and MoreCommands coexist with distinct SDK command names',asyn
     assert.deepEqual(await fixture.commands.get('gifroulette').execute([],{channel:{id:'ch'}}),{content:'https://example.com/favorite.gif'});
     assert.deepEqual(await fixture.commands.get('more-gifroulette').execute([],{channel:{id:'ch'}}),{content:'https://example.com/favorite.gif'});
     await fixture.r.dispose();
+});
+
+test('Temp Delete hides any message on this device until the plugin starts again',async()=>{
+    const {default:factory,placeTempDelete}=await import('../src/plugins/temp-delete.js');
+    function Row(props){return React.createElement('Text',null,props.label);}
+    Row.displayName='ActionSheetRow';
+    const nativeDelete=()=>{deleted++;};
+    let deleted=0;
+    const tree=React.createElement('Sheet',null,
+        React.createElement('Group',null,
+            React.createElement(Row,{key:'edit',label:'Edit Message',onPress(){}}),
+            React.createElement(Row,{key:'reply',label:'Reply',onPress(){}}),
+            React.createElement(Row,{key:'forward',label:'Forward',onPress(){}})),
+        React.createElement('Group',null,
+            React.createElement(Row,{key:'copy',label:'Copy Text',onPress(){}}),
+            React.createElement(Row,{key:'pin',label:'Pin Message',onPress(){}})),
+        React.createElement('Group',null,React.createElement(Row,{key:'delete',label:'Delete Message',onPress:nativeDelete})));
+    const labels=node=>{
+        const found=[];
+        const walk=value=>{
+            if(!value)return;
+            if(Array.isArray(value)){value.forEach(walk);return;}
+            if(value.props?.label)found.push(value.props.label);
+            if(value.props?.children)walk(value.props.children);
+        };
+        walk(node);
+        return found;
+    };
+    const moved=placeTempDelete(React,tree,()=>{});
+    assert.deepEqual(labels(moved.props.children[0]),['Edit Message','Reply','Forward']);
+    assert.deepEqual(labels(moved.props.children[1]),['Copy Text','Pin Message']);
+    assert.deepEqual(labels(moved.props.children[2]),['Delete Message','Temp Delete']);
+    const again=placeTempDelete(React,moved,()=>{});
+    assert.deepEqual(labels(again),labels(moved));
+    const otherTree=React.createElement('Sheet',null,
+        React.createElement('Group',null,
+            React.createElement(Row,{key:'reply',label:'Reply',onPress(){}}),
+            React.createElement(Row,{key:'forward',label:'Forward',onPress(){}})),
+        React.createElement('Group',null,React.createElement(Row,{key:'copy',label:'Copy Text',onPress(){}})));
+    const other=placeTempDelete(React,otherTree,()=>{});
+    assert.deepEqual(labels(other.props.children[0]),['Reply','Forward','Temp Delete']);
+    assert.deepEqual(labels(other.props.children[1]),['Copy Text']);
+    const besideSilent=React.createElement('Group',null,
+        React.createElement(Row,{key:'edit',label:'Edit Message',onPress(){}}),
+        React.createElement(Row,{key:'delete',label:'Delete Message',onPress(){}}),
+        React.createElement(Row,{key:'silent',label:'Silent Delete Message',onPress(){}}));
+    const underDelete=placeTempDelete(React,besideSilent,()=>{});
+    assert.deepEqual(labels(underDelete),['Edit Message','Delete Message','Temp Delete','Silent Delete Message']);
+    const message={id:'10',channel_id:'20',author:{id:'someone-else'},content:'hello'};
+    const bucket={_array:[message,{id:'11',channel_id:'20',author:{id:'me'},content:'stay'}]};
+    let emitted=0;
+    const store={storeName:'MessageStore',getMessages:()=>bucket,getMessage:(channel,id)=>bucket._array.find(item=>item.id===id&&item.channel_id===channel),emitChange(){emitted++;}};
+    let closed=0;
+    const sheets={openLazy(pending){return pending;},hideActionSheet(){closed++;}};
+    const api={deleteMessage(){deleted++;},getToken(){throw new Error('Must not read token');}};
+    const native={updateRows(id,value){this.last=value;}};
+    const {r}=await harness({},[store,sheets,api]);
+    r.RN.NativeModules.Chat=native;
+    const plugin=factory(r);
+    plugin.start();
+    let view;await Renderer.act(async()=>{view=Renderer.create(React.createElement(plugin.Settings));});
+    assert.match(JSON.stringify(view.toJSON()),/comes back the next time Discord starts/);
+    await Renderer.act(async()=>view.unmount());
+    const pending=sheets.openLazy(Promise.resolve({default(){return tree;}}),'MessageLongPressActionSheet',{message});
+    const wrapped=await pending;
+    const rendered=wrapped.default({message});
+    assert.deepEqual(labels(rendered.props.children[2]),['Delete Message','Temp Delete']);
+    const press=node=>{
+        if(!node)return null;
+        if(Array.isArray(node)){for(const child of node){const found=press(child);if(found)return found;}return null;}
+        if(node.props?.label==='Temp Delete')return node.props.onPress;
+        return press(node.props?.children);
+    };
+    press(rendered)();
+    await tick();
+    assert.equal(closed,1);
+    assert.equal(deleted,0);
+    assert.equal(emitted,1);
+    assert.deepEqual(bucket._array.map(item=>item.id),['11']);
+    assert.equal(store.getMessage('20','10'),undefined);
+    assert.equal(store.getMessages('20')._array.some(item=>item.id==='10'),false);
+    assert.equal(JSON.stringify(r.store).includes('10'),false);
+    assert.equal(React.createElement('Message',{message}),false);
+    assert.equal(React.createElement('Channel',{id:'10',name:'general'}).type,'Channel');
+    function ChatScreen(){return React.createElement('View',{testID:'chat'},React.createElement('Message',{message}));}
+    let screen;await Renderer.act(async()=>{screen=Renderer.create(React.createElement(ChatScreen));});
+    assert.equal(screen.toJSON().props.testID,'chat');
+    assert.equal(screen.toJSON().children,null);
+    await Renderer.act(async()=>screen.unmount());
+    const rows=[{message},{id:'row',message:{id:'11',content:'stay',author:{id:'me'}}}];
+    native.updateRows('chat',rows);
+    assert.equal(native.last.length,1);
+    assert.equal(native.last[0].message.id,'11');
+    await r.dispose();
+    bucket._array.unshift(message);
+    const next=await harness({},[store,sheets,api]);
+    factory(next.r).start();
+    assert.equal(store.getMessage('20','10').content,'hello');
+    assert.equal(React.createElement('Message',{message}).type,'Message');
+    await next.r.dispose();
+});
+
+test('Channel Spoilers covers images, GIFs, and videos only in listed channels',async()=>{
+    const {default:factory,isVisualMedia,channelSnowflake}=await import('../src/plugins/channel-spoilers.js');
+    for(const name of ['a.png','a.jpg','a.jpeg','a.gif','a.webp','a.mp4','a.mov','a.webm']) assert.equal(isVisualMedia({filename:name}),true,name);
+    assert.equal(isVisualMedia({content_type:'image/gif'} ),true);
+    assert.equal(isVisualMedia({contentType:'video/mp4'} ),true);
+    assert.equal(isVisualMedia({filename:'notes.txt',content_type:'text/plain'}),false);
+    assert.equal(channelSnowflake('12345678901234567'),'12345678901234567');
+    assert.equal(channelSnowflake('1234'),'');
+    const channel='123456789012345678';
+    const other='223456789012345678';
+    const native={updateRows(id,rows){this.last=rows;}};
+    const {r}=await harness({...factory.defaults});
+    r.RN.NativeModules.DCDChat=native;
+    const plugin=factory(r);
+    plugin.start();
+    let tree;await Renderer.act(async()=>{tree=Renderer.create(React.createElement(plugin.Settings));});
+    const field=()=>tree.root.findByType('RNInput');
+    const add=()=>tree.root.findByProps({accessibilityLabel:'Add'});
+    const typeAndAdd=async value=>{
+        await Renderer.act(async()=>{field().props.onChangeText(value);});
+        await Renderer.act(async()=>{add().props.onPress();});
+    };
+    await typeAndAdd('nope');
+    assert.match(JSON.stringify(tree.toJSON()),/No channels yet/);
+    assert.deepEqual(r.store.channels,[]);
+    await typeAndAdd(channel);
+    assert.deepEqual(r.store.channels,[channel]);
+    await typeAndAdd(channel);
+    assert.deepEqual(r.store.channels,[channel]);
+    await typeAndAdd('  '+other+'  ');
+    assert.deepEqual(r.store.channels,[channel,other]);
+    await Renderer.act(async()=>tree.root.findByProps({accessibilityLabel:'Remove '+other}).props.onPress());
+    assert.deepEqual(r.store.channels,[channel]);
+    await Renderer.act(async()=>tree.unmount());
+    function Picture(props){
+        return React.createElement('MessageImage',{attachment:props.attachment,message:props.message});
+    }
+    const gif={id:'gif',filename:'cat.gif',content_type:'image/gif',url:'https://cdn.example/cat.gif'};
+    const video={id:'vid',filename:'clip.mp4',content_type:'video/mp4'};
+    const listedMessage={id:'m1',channel_id:channel,author:{id:'u'},content:'pic',attachments:[gif]};
+    await Renderer.act(async()=>{tree=Renderer.create(React.createElement(Picture,{attachment:gif,message:listedMessage}));});
+    const cover=tree.root.findByProps({testID:'mime-channel-spoiler'});
+    assert.equal(cover.props.accessibilityLabel,'Spoiler');
+    await Renderer.act(async()=>cover.props.onPress());
+    assert.equal(tree.root.findAllByProps({testID:'mime-channel-spoiler'}).length,0);
+    assert.equal(tree.root.findByType('MessageImage').props.attachment.filename,'cat.gif');
+    await Renderer.act(async()=>tree.unmount());
+    function Album(props){
+        return React.createElement('View',null,
+            React.createElement('MessageVideo',{attachment:video,message:props.message}),
+            React.createElement('Avatar',{user:{id:'u'},size:32,source:{uri:'https://cdn.example/a.png'}}));
+    }
+    await Renderer.act(async()=>{tree=Renderer.create(React.createElement(Album,{message:listedMessage}));});
+    assert.equal(tree.root.findAllByProps({testID:'mime-channel-spoiler'}).length,1);
+    assert.equal(tree.root.findByType('Avatar').props.size,32);
+    await Renderer.act(async()=>tree.unmount());
+    await Renderer.act(async()=>{tree=Renderer.create(React.createElement(Picture,{attachment:gif,message:{...listedMessage,channel_id:other}}));});
+    assert.equal(tree.root.findAllByProps({testID:'mime-channel-spoiler'}).length,0);
+    assert.equal(tree.root.findByType('MessageImage').props.attachment.id,'gif');
+    await Renderer.act(async()=>tree.unmount());
+    native.updateRows('chat',[
+        {channelId:channel,filename:'a.gif',content_type:'image/gif'},
+        {channelId:other,filename:'b.png',content_type:'image/png'},
+        {channelId:channel,content:'hi',attachments:[{filename:'c.webp',content_type:'image/webp'},{filename:'d.txt',content_type:'text/plain'}]},
+        {channelId:channel,avatar:true,filename:'e.png',content_type:'image/png'},
+    ]);
+    assert.equal(native.last[0].spoiler,true);
+    assert.equal(native.last[0].obscure,true);
+    assert.equal(native.last[0].hidden,true);
+    assert.equal(native.last[1].spoiler,undefined);
+    assert.equal(native.last[2].attachments[0].spoiler,true);
+    assert.equal(native.last[2].attachments[1].spoiler,undefined);
+    assert.equal(native.last[2].content,'hi');
+    assert.equal(native.last[3].spoiler,undefined);
+    await r.dispose();
 });

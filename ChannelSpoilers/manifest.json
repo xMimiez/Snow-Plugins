@@ -1,0 +1,22 @@
+{
+  "spec": 3,
+  "type": "plugin",
+  "id": "mime.channelspoilers",
+  "version": "1.0.0",
+  "display": {
+    "name": "Channel Spoilers",
+    "description": "Covers images, GIFs, and videos in chosen channels on this device.",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.js",
+  "extras": {
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers",
+    "bunny": {}
+  }
+}

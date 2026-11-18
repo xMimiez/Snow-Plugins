@@ -1,0 +1,22 @@
+{
+  "spec": 3,
+  "type": "plugin",
+  "id": "mime.tempdelete",
+  "version": "1.0.0",
+  "display": {
+    "name": "Temp Delete",
+    "description": "Hides a message on this device until Discord restarts.",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ]
+  },
+  "main": "index.js",
+  "extras": {
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/TempDelete",
+    "bunny": {}
+  }
+}

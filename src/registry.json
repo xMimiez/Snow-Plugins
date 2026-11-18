@@ -432,5 +432,37 @@
     ],
     "license": "MIT",
     "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/HideQuestPopup"
+  },
+  {
+    "folder": "TempDelete",
+    "module": "temp-delete",
+    "id": "mime.tempdelete",
+    "name": "Temp Delete",
+    "description": "Hides a message on this device until Discord restarts.",
+    "version": "1.0.0",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ],
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/TempDelete"
+  },
+  {
+    "folder": "ChannelSpoilers",
+    "module": "channel-spoilers",
+    "id": "mime.channelspoilers",
+    "name": "Channel Spoilers",
+    "description": "Covers images, GIFs, and videos in chosen channels on this device.",
+    "version": "1.0.0",
+    "authors": [
+      {
+        "name": "Mime | N0_.q3",
+        "id": "957164619061932045"
+      }
+    ],
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers"
   }
 ]

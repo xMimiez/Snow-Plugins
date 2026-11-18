@@ -996,7 +996,7 @@ var plugin = (() => {
   }
   var ACTION_KEYS = ["actions", "buttons", "items", "headerActions", "trailingActions", "toolbarItems"];
   var SETTINGS_MESSAGE_KEYS = ["SETTINGS", "USER_SETTINGS", "SETTINGS_TITLE", "OPEN_SETTINGS", "USER_SETTINGS_BUTTON"];
-  var OTHER_MESSAGE_KEYS = ["QUESTS", "SHOP", "NITRO", "COLLECTIBLES", "COLLECTIBLES_SHOP", "QUEST_HOME"];
+  var OTHER_MESSAGE_KEYS = ["QUESTS", "SHOP", "COLLECTIBLES", "COLLECTIBLES_SHOP", "QUEST_HOME"];
   function textOf(value, depth = 0) {
     if (value == null || depth > 2) return "";
     if (typeof value === "string" || typeof value === "number") return String(value);
@@ -1026,10 +1026,13 @@ var plugin = (() => {
     if (/settings?|SettingsIcon|GearIcon|CogIcon|USER_SETTINGS|\b(gear|cog)\b/i.test(text)) return true;
     return settingsNeedles.some((word) => text.includes(word));
   }
+  function isNitroOnly(text) {
+    return /nitro/i.test(text) && !/quest|shop|collectible/i.test(text);
+  }
   function isOtherText(text) {
-    if (!text) return false;
-    if (/quest|shop|collectible|nitro|QuestIcon|ShopIcon|NitroIcon|CollectiblesIcon/i.test(text)) return true;
-    return otherNeedles.some((word) => text.includes(word));
+    if (!text || isNitroOnly(text)) return false;
+    if (/quest|shop|collectible|QuestIcon|ShopIcon|CollectiblesIcon/i.test(text)) return true;
+    return otherNeedles.some((word) => !isNitroOnly(word) && text.includes(word));
   }
   function pressProps(record) {
     if (!record || typeof record !== "object" || record.subLabel || record.trailing) return false;
@@ -1069,7 +1072,7 @@ var plugin = (() => {
   }
   function insertPlainAction(list, makeButton) {
     if (!Array.isArray(list) || list.length < 2 || list.length > 8) return list;
-    if (list.some((item) => item?.key === "mime-nighty-profile-button" || item?.id === "mime-nighty-profile-button")) return list;
+    if (list.some((item) => item?.key === "mime-nighty-profile-button" || item?.id === "mime-nighty-profile-button" || item?.props?.testID === "mime-nighty-profile-button")) return list;
     const kinds = list.map(plainKind);
     const index = kinds.indexOf("settings");
     if (index < 0 || !kinds.includes("other")) return list;
@@ -1081,7 +1084,7 @@ var plugin = (() => {
     const children = element?.props?.children;
     const list = Array.isArray(children) ? children.filter(Boolean) : null;
     if (!list || list.length < 2 || list.length > 8) return element;
-    if (list.some((node2) => node2?.props?.testID === "mime-nighty-profile-button")) return element;
+    if (list.some((node2) => node2?.key === "mime-nighty-profile-button" || node2?.props?.key === "mime-nighty-profile-button" || node2?.props?.testID === "mime-nighty-profile-button" || node2?.props?.id === "mime-nighty-profile-button")) return element;
     const kinds = list.map(controlKind);
     const index = kinds.findIndex((kind) => kind === "settings" || kind === "settings-wrap");
     if (index < 0 || !kinds.some((kind) => kind === "other" || kind === "other-wrap")) return element;
@@ -1778,6 +1781,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "white", customIconUrl: "", showNightyButton: true, autoLogin: false, loginUsername: "", loginPassword: "", sessionHost: "", sessionToken: "", sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.5", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.6", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();
