@@ -43,8 +43,8 @@ async function harness(defaults = {}, modules = []) {
 test('NightyTab bundle opens iOS http addresses through the cleartext loader',()=>{
     const manifest=JSON.parse(fs.readFileSync(path.join(root,'NightyTab/manifest.json'),'utf8'));
     const src=fs.readFileSync(path.join(root,'NightyTab/index.js'),'utf8');
-    assert.equal(manifest.version,'2.0.6');
-    assert.match(src,/"version": "2\.0\.6"/);
+    assert.equal(manifest.version,'2.0.7');
+    assert.match(src,/"version": "2\.0\.7"/);
     assert.doesNotMatch(src,/Open in Safari/);
     assert.match(src,/function loadCleartextPage/);
     assert.match(src,/function isHttpPage/);
@@ -64,7 +64,7 @@ test('all Bunny spec-3 artifacts export definePlugin and match the hosted manife
         assert.equal(manifest.type,'plugin');
         assert.equal(manifest.main,'index.js');
         assert.equal(manifest.id,meta.id);
-        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.6');
+        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.7');
         else assert.equal(manifest.version,meta.version);
         assert.equal(manifest.display.name,meta.name);
         assert(manifest.display.authors.some(a=>a.id==='957164619061932045'));
@@ -663,9 +663,8 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
     await Renderer.act(async()=>{tree=Renderer.create(nitroScreen());});
     const profile=tree.toJSON();
     assert.equal(countNighty(profile),1);
-    assert.deepEqual(profile.children[0].children.map(child=>child.props.accessibilityLabel),['Nitro','Settings']);
-    assert.equal(profile.children[1].children[3].props.accessibilityLabel,'Nighty');
-    assert.equal(profile.children[1].children[3].props.testID,'mime-nighty-profile-button');
+    assert.equal(profile.children[0].children[2].props.accessibilityLabel,'Nighty');
+    assert.equal(profile.children[1].children.some(child=>child?.props?.testID==='mime-nighty-profile-button'),false);
     await Renderer.act(async()=>tree.unmount());
     const nested=()=>React.createElement('View',{testID:'outer'},[
         React.createElement('View',{key:'inner',testID:'inner'},[
@@ -684,8 +683,8 @@ test('Nighty profile toggle adds a button beside Settings and removes it',async(
         React.createElement('Pressable',{key:'settings',accessibilityLabel:{id:'USER_SETTINGS',message:'Settings'},onPress(){}}),
     ]);
     await Renderer.act(async()=>{tree=Renderer.create(nitroOnly());});
-    assert.equal(countNighty(tree.toJSON()),0);
-    assert.deepEqual(tree.toJSON().children.map(child=>child.props.accessibilityLabel.id),['NITRO','USER_SETTINGS']);
+    assert.equal(countNighty(tree.toJSON()),1);
+    assert.equal(tree.toJSON().children[2].props.accessibilityLabel,'Nighty');
     await Renderer.act(async()=>tree.unmount());
     await Renderer.act(async()=>{tree=Renderer.create(React.createElement(plugin.Settings));});
     assert(tree.root.findAllByType('Switch').some(row=>row.props.accessibilityLabel==='Profile Nighty button'&&row.props.value===true));
@@ -995,7 +994,7 @@ test('Temp Delete hides any message on this device until the plugin starts again
     let emitted=0;
     const store={storeName:'MessageStore',getMessages:()=>bucket,getMessage:(channel,id)=>bucket._array.find(item=>item.id===id&&item.channel_id===channel),emitChange(){emitted++;}};
     let closed=0;
-    const sheets={openLazy(pending){return pending;},hideActionSheet(){closed++;}};
+    const sheets={openLazy(pending,key){this.seen=pending;this.key=key;return undefined;},hideActionSheet(){closed++;}};
     const api={deleteMessage(){deleted++;},getToken(){throw new Error('Must not read token');}};
     const native={updateRows(id,value){this.last=value;}};
     const {r}=await harness({},[store,sheets,api]);
@@ -1005,8 +1004,10 @@ test('Temp Delete hides any message on this device until the plugin starts again
     let view;await Renderer.act(async()=>{view=Renderer.create(React.createElement(plugin.Settings));});
     assert.match(JSON.stringify(view.toJSON()),/comes back the next time Discord starts/);
     await Renderer.act(async()=>view.unmount());
-    const pending=sheets.openLazy(Promise.resolve({default(){return tree;}}),'MessageLongPressActionSheet',{message});
-    const wrapped=await pending;
+    const returned=sheets.openLazy(Promise.resolve({default(){return tree;}}),'MessageLongPressActionSheet',{message});
+    assert.equal(returned,undefined);
+    assert.equal(sheets.key,'MessageLongPressActionSheet');
+    const wrapped=await sheets.seen;
     const rendered=wrapped.default({message});
     assert.deepEqual(labels(rendered.props.children[2]),['Delete Message','Temp Delete']);
     const press=node=>{
@@ -1110,13 +1111,17 @@ test('Channel Spoilers covers images, GIFs, and videos only in listed channels',
         {channelId:channel,content:'hi',attachments:[{filename:'c.webp',content_type:'image/webp'},{filename:'d.txt',content_type:'text/plain'}]},
         {channelId:channel,avatar:true,filename:'e.png',content_type:'image/png'},
     ]);
-    assert.equal(native.last[0].spoiler,true);
-    assert.equal(native.last[0].obscure,true);
-    assert.equal(native.last[0].hidden,true);
+    assert.equal(native.last[0].filename,'SPOILER_a.gif');
+    assert.equal(native.last[0].spoiler,'SPOILER_a.gif');
+    assert.equal(typeof native.last[0].spoiler,'string');
+    assert.equal(native.last[0].obscure,undefined);
     assert.equal(native.last[1].spoiler,undefined);
-    assert.equal(native.last[2].attachments[0].spoiler,true);
+    assert.equal(native.last[2].attachments[0].filename,'SPOILER_c.webp');
+    assert.equal(native.last[2].attachments[0].spoiler,'SPOILER_c.webp');
+    assert.equal(typeof native.last[2].attachments[0].spoiler,'string');
     assert.equal(native.last[2].attachments[1].spoiler,undefined);
     assert.equal(native.last[2].content,'hi');
     assert.equal(native.last[3].spoiler,undefined);
+    assert.equal(native.last[3].filename,'e.png');
     await r.dispose();
 });

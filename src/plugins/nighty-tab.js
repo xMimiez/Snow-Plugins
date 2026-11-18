@@ -31,7 +31,7 @@ function iconHint(node) {
 }
 const ACTION_KEYS = ['actions', 'buttons', 'items', 'headerActions', 'trailingActions', 'toolbarItems'];
 const SETTINGS_MESSAGE_KEYS = ['SETTINGS', 'USER_SETTINGS', 'SETTINGS_TITLE', 'OPEN_SETTINGS', 'USER_SETTINGS_BUTTON'];
-const OTHER_MESSAGE_KEYS = ['QUESTS', 'SHOP', 'COLLECTIBLES', 'COLLECTIBLES_SHOP', 'QUEST_HOME'];
+const OTHER_MESSAGE_KEYS = ['QUESTS', 'SHOP', 'NITRO', 'COLLECTIBLES', 'COLLECTIBLES_SHOP', 'QUEST_HOME'];
 
 function textOf(value, depth = 0) {
     if (value == null || depth > 2) return '';
@@ -63,14 +63,10 @@ function isSettingsText(text) {
     if (/settings?|SettingsIcon|GearIcon|CogIcon|USER_SETTINGS|\b(gear|cog)\b/i.test(text)) return true;
     return settingsNeedles.some(word => text.includes(word));
 }
-// Nitro is its own profile control on Discord 354. It must not qualify a row, or the bar gets a second Nighty button.
-function isNitroOnly(text) {
-    return /nitro/i.test(text) && !/quest|shop|collectible/i.test(text);
-}
 function isOtherText(text) {
-    if (!text || isNitroOnly(text)) return false;
-    if (/quest|shop|collectible|QuestIcon|ShopIcon|CollectiblesIcon/i.test(text)) return true;
-    return otherNeedles.some(word => !isNitroOnly(word) && text.includes(word));
+    if (!text) return false;
+    if (/quest|shop|collectible|nitro|QuestIcon|ShopIcon|NitroIcon|CollectiblesIcon/i.test(text)) return true;
+    return otherNeedles.some(word => text.includes(word));
 }
 function pressProps(record) {
     if (!record || typeof record !== 'object' || record.subLabel || record.trailing) return false;
@@ -341,10 +337,25 @@ export default function NightyTab(r) {
         if (typeof control === 'function') return h(control);
         return control || closeMark(onClose);
     }
+    // Discord 354 renders Nitro beside Settings and can mount that row twice. The first button stays.
+    let profileOwner = 0;
+    let profileSerial = 0;
+    function claimProfileButton() {
+        const idRef = React.useRef(0);
+        if (!idRef.current) idRef.current = ++profileSerial;
+        if (!profileOwner) profileOwner = idRef.current;
+        React.useEffect(() => {
+            const id = idRef.current;
+            return () => { if (profileOwner === id) profileOwner = 0; };
+        }, []);
+        return profileOwner === idRef.current;
+    }
     // Own pressable so the toolbar cannot drop the label. Settings' onPress is left untouched.
     function NightyProfileButton({ sample }) {
+        const shown = claimProfileButton();
         r.useRefresh();
         const [open, setOpen] = React.useState(false);
+        if (!shown) return null;
         const Modal = RN.Modal;
         const close = () => setOpen(false);
         return h(RN.Pressable || RN.TouchableOpacity, {

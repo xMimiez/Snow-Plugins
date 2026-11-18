@@ -996,7 +996,7 @@ var plugin = (() => {
   }
   var ACTION_KEYS = ["actions", "buttons", "items", "headerActions", "trailingActions", "toolbarItems"];
   var SETTINGS_MESSAGE_KEYS = ["SETTINGS", "USER_SETTINGS", "SETTINGS_TITLE", "OPEN_SETTINGS", "USER_SETTINGS_BUTTON"];
-  var OTHER_MESSAGE_KEYS = ["QUESTS", "SHOP", "COLLECTIBLES", "COLLECTIBLES_SHOP", "QUEST_HOME"];
+  var OTHER_MESSAGE_KEYS = ["QUESTS", "SHOP", "NITRO", "COLLECTIBLES", "COLLECTIBLES_SHOP", "QUEST_HOME"];
   function textOf(value, depth = 0) {
     if (value == null || depth > 2) return "";
     if (typeof value === "string" || typeof value === "number") return String(value);
@@ -1026,13 +1026,10 @@ var plugin = (() => {
     if (/settings?|SettingsIcon|GearIcon|CogIcon|USER_SETTINGS|\b(gear|cog)\b/i.test(text)) return true;
     return settingsNeedles.some((word) => text.includes(word));
   }
-  function isNitroOnly(text) {
-    return /nitro/i.test(text) && !/quest|shop|collectible/i.test(text);
-  }
   function isOtherText(text) {
-    if (!text || isNitroOnly(text)) return false;
-    if (/quest|shop|collectible|QuestIcon|ShopIcon|CollectiblesIcon/i.test(text)) return true;
-    return otherNeedles.some((word) => !isNitroOnly(word) && text.includes(word));
+    if (!text) return false;
+    if (/quest|shop|collectible|nitro|QuestIcon|ShopIcon|NitroIcon|CollectiblesIcon/i.test(text)) return true;
+    return otherNeedles.some((word) => text.includes(word));
   }
   function pressProps(record) {
     if (!record || typeof record !== "object" || record.subLabel || record.trailing) return false;
@@ -1668,9 +1665,25 @@ var plugin = (() => {
       if (node.props?.children != null) props.children = nativeControlTree(node.props.children, depth + 1, state);
       return React.cloneElement(node, props);
     }
+    var profileOwner = 0;
+    var profileSerial = 0;
+    function claimProfileButton() {
+      const idRef = React.useRef(0);
+      if (!idRef.current) idRef.current = ++profileSerial;
+      if (!profileOwner) profileOwner = idRef.current;
+      React.useEffect(() => {
+        const id = idRef.current;
+        return () => {
+          if (profileOwner === id) profileOwner = 0;
+        };
+      }, []);
+      return profileOwner === idRef.current;
+    }
     function NightyProfileButton({ sample }) {
+      const shown = claimProfileButton();
       r.useRefresh();
       const onPress = press();
+      if (!shown) return null;
       if (React.isValidElement(sample)) {
         const native = nativeControlTree(sample);
         return React.cloneElement(native, {
@@ -1781,6 +1794,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "white", customIconUrl: "", showNightyButton: true, autoLogin: false, loginUsername: "", loginPassword: "", sessionHost: "", sessionToken: "", sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.6", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.7", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();

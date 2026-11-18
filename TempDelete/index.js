@@ -923,9 +923,11 @@ var plugin = (() => {
           return false;
         });
         const sheets = r.find("openLazy", "hideActionSheet");
-        const patched = !!(sheets && r.patch("after", sheets, "openLazy", (args, result) => {
-          if (args?.[1] !== "MessageLongPressActionSheet" || !result?.then) return;
-          return result.then((module) => {
+        const patched = !!(sheets && r.patch("before", sheets, "openLazy", (args) => {
+          const pending = args?.[0];
+          const key = args?.find((value) => typeof value === "string" && /MessageLongPress/i.test(value));
+          if (!key || !pending?.then) return;
+          args[0] = pending.then((module) => {
             if (!r.active || typeof module?.default !== "function" || module.default.prototype?.isReactComponent) return module;
             const Original = module.default;
             function WithTempDelete(screenProps) {
@@ -959,6 +961,6 @@ var plugin = (() => {
   }
 
   // TempDelete.entry.js
-  var TempDelete_entry_default = register({ "id": "mime.tempdelete", "name": "Temp Delete", "description": "Hides a message on this device until Discord restarts.", "version": "1.0.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/TempDelete" }, TempDelete);
+  var TempDelete_entry_default = register({ "id": "mime.tempdelete", "name": "Temp Delete", "description": "Hides a message on this device until Discord restarts.", "version": "1.0.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/TempDelete" }, TempDelete);
   return __toCommonJS(TempDelete_entry_exports);
 })();

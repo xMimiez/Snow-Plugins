@@ -674,6 +674,14 @@ var plugin = (() => {
     }
     return isVisualMedia(props) ? props : null;
   }
+  function markLocalSpoiler(item) {
+    if (!item || typeof item !== "object" || item.props || item.$$typeof) return;
+    for (const key of ["filename", "name"]) {
+      if (typeof item[key] === "string" && item[key] && !/^SPOILER_/i.test(item[key])) item[key] = "SPOILER_" + item[key];
+    }
+    const label = [item.filename, item.name].find((value) => typeof value === "string" && value) || "Spoiler";
+    if (typeof item.spoiler !== "string") item.spoiler = label;
+  }
   function spoilTree(node, channels, inherited = "", depth = 0) {
     if (depth > 12 || !node || typeof node !== "object") return;
     if (Array.isArray(node)) {
@@ -687,9 +695,7 @@ var plugin = (() => {
     if (inChannel && !decorative) {
       const mark = (item) => {
         if (!isVisualMedia(item)) return;
-        item.spoiler = true;
-        item.obscure = true;
-        item.hidden = true;
+        markLocalSpoiler(item);
       };
       if (!node.attachments) mark(node);
       mark(node.attachment);
@@ -822,6 +828,6 @@ var plugin = (() => {
   ChannelSpoilers.defaults = { channels: [] };
 
   // ChannelSpoilers.entry.js
-  var ChannelSpoilers_entry_default = register({ "id": "mime.channelspoilers", "name": "Channel Spoilers", "description": "Covers images, GIFs, and videos in chosen channels on this device.", "version": "1.0.0", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers" }, ChannelSpoilers);
+  var ChannelSpoilers_entry_default = register({ "id": "mime.channelspoilers", "name": "Channel Spoilers", "description": "Covers images, GIFs, and videos in chosen channels on this device.", "version": "1.0.1", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/ChannelSpoilers" }, ChannelSpoilers);
   return __toCommonJS(ChannelSpoilers_entry_exports);
 })();

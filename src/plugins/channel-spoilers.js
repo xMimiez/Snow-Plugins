@@ -65,6 +65,16 @@ function mediaPayload(props) {
     return isVisualMedia(props) ? props : null;
 }
 
+// Native chat decodes attachment.spoiler as a String. A boolean crashes the GIF row.
+export function markLocalSpoiler(item) {
+    if (!item || typeof item !== 'object' || item.props || item.$$typeof) return;
+    for (const key of ['filename', 'name']) {
+        if (typeof item[key] === 'string' && item[key] && !/^SPOILER_/i.test(item[key])) item[key] = 'SPOILER_' + item[key];
+    }
+    const label = [item.filename, item.name].find(value => typeof value === 'string' && value) || 'Spoiler';
+    if (typeof item.spoiler !== 'string') item.spoiler = label;
+}
+
 export function spoilTree(node, channels, inherited = '', depth = 0) {
     if (depth > 12 || !node || typeof node !== 'object') return;
     if (Array.isArray(node)) {
@@ -79,9 +89,7 @@ export function spoilTree(node, channels, inherited = '', depth = 0) {
     if (inChannel && !decorative) {
         const mark = item => {
             if (!isVisualMedia(item)) return;
-            item.spoiler = true;
-            item.obscure = true;
-            item.hidden = true;
+            markLocalSpoiler(item);
         };
         if (!node.attachments) mark(node);
         mark(node.attachment);

@@ -307,9 +307,11 @@ export default function TempDelete(r) {
                 return false;
             });
             const sheets = r.find('openLazy', 'hideActionSheet');
-            const patched = !!(sheets && r.patch('after', sheets, 'openLazy', (args, result) => {
-                if (args?.[1] !== 'MessageLongPressActionSheet' || !result?.then) return;
-                return result.then(module => {
+            const patched = !!(sheets && r.patch('before', sheets, 'openLazy', args => {
+                const pending = args?.[0];
+                const key = args?.find(value => typeof value === 'string' && /MessageLongPress/i.test(value));
+                if (!key || !pending?.then) return;
+                args[0] = pending.then(module => {
                     if (!r.active || typeof module?.default !== 'function' || module.default.prototype?.isReactComponent) return module;
                     const Original = module.default;
                     function WithTempDelete(screenProps) {
