@@ -115,7 +115,7 @@ export function collectDockQuestIds(holder, now = Date.now(), rawGets) {
     if (typeof quests === 'function') {
         try { quests = quests.call(holder); } catch { quests = null; }
     }
-    const list = quests instanceof Map ? [...quests.values()] : (quests && typeof quests === 'object' ? Object.values(quests) : []);
+    const list = plainValues(quests);
     for (const quest of list) {
         if (!quest || typeof quest !== 'object') continue;
         if (questDismissedFromBar(quest) || isExpired(quest, now)) continue;
@@ -230,7 +230,22 @@ function functionSource(fn) {
     try { return Function.prototype.toString.call(fn); } catch { return ''; }
 }
 
-// Object.values() on a React Native export runs every getter. PushNotificationIOS
+function plainValues(value) {
+    if (!value || typeof value !== 'object') return [];
+    if (value instanceof Map) {
+        try { return [...value.values()]; } catch { return []; }
+    }
+    let keys;
+    try { keys = Object.keys(value); } catch { return []; }
+    const items = [];
+    for (const key of keys) {
+        if (key === 'PushNotificationIOS' || key === 'NativeEventEmitter') continue;
+        try { items.push(value[key]); } catch { /* A throwing getter is not a quest record. */ }
+    }
+    return items;
+}
+
+// Reading every property of a React Native export runs every getter. PushNotificationIOS
 // constructs NativeEventEmitter with a null native module on Discord 354 and throws.
 function readOwn(value) {
     if (!value || (typeof value !== 'object' && typeof value !== 'function')) return [];
@@ -278,11 +293,6 @@ export function findDismissFunction(metro) {
             if (!found && isDismissFunction(fn)) found = fn;
         });
     } catch { /* A module can still throw while Discord is loading. */ }
-    if (found || typeof metro?.find !== 'function') return found;
-    try {
-        const mod = metro.find(module => readOwn(module).some(([, fn]) => isDismissFunction(fn)));
-        if (mod) found = readOwn(mod).map(([, fn]) => fn).find(isDismissFunction) || null;
-    } catch { /* metro find can throw while modules are still loading */ }
     return found;
 }
 
@@ -361,50 +371,54 @@ export default function HideQuestPopup(r) {
 
     async function hide() {
         if (!r.active) return;
-        if (!holders.length) holders = findHolders(r);
-        const ids = [];
-        for (const holder of holders) {
-            for (const id of collectDockQuestIds(holder, Date.now(), rawGets)) {
-                if (!ids.includes(id)) ids.push(id);
-            }
-        }
-        for (const id of extraIds) if (!ids.includes(id)) ids.push(id);
-        if (!dismissFn) {
-            try { dismissFn = findDismissFunction(r.metro); }
-            catch { dismissFn = null; }
-        }
-        let dismissed = 0;
-        for (const id of ids) {
-            if (!r.active || inflight.has(id)) continue;
-            const tries = attempts.get(id) || 0;
-            if (tries >= MAX_ATTEMPTS) continue;
-            attempts.set(id, tries + 1);
-            inflight.add(id);
-            try {
-                const how = await dismissDockQuest({
-                    discord: (path, options) => r.discord(path, options),
-                    dismiss: dismissFn,
-                    questId: id,
-                    publish,
-                });
-                if (how) {
-                    dismissed++;
-                    for (const holder of holders) {
-                        const quest = (holder.quests ? readPlacement(holder.quests, id, rawGets) : undefined) || holder.getQuest?.(id);
-                        if (quest?.userStatus && typeof quest.userStatus === 'object') {
-                            const flags = Number(quest.userStatus.dismissedQuestContent) || 0;
-                            quest.userStatus.dismissedQuestContent = flags | QUEST_BAR_DISMISS_FLAG;
-                        }
-                        try { holder.emitChange?.(); } catch { /* a plain module has no flux emitter */ }
-                    }
+        try {
+            if (!holders.length) holders = findHolders(r);
+            const ids = [];
+            for (const holder of holders) {
+                for (const id of collectDockQuestIds(holder, Date.now(), rawGets)) {
+                    if (!ids.includes(id)) ids.push(id);
                 }
-            } catch (error) {
-                r.status.lastError = error?.message || String(error);
-            } finally {
-                inflight.delete(id);
             }
+            for (const id of extraIds) if (!ids.includes(id)) ids.push(id);
+            if (!dismissFn) {
+                try { dismissFn = findDismissFunction(r.metro); }
+                catch { dismissFn = null; }
+            }
+            let dismissed = 0;
+            for (const id of ids) {
+                if (!r.active || inflight.has(id)) continue;
+                const tries = attempts.get(id) || 0;
+                if (tries >= MAX_ATTEMPTS) continue;
+                attempts.set(id, tries + 1);
+                inflight.add(id);
+                try {
+                    const how = await dismissDockQuest({
+                        discord: (path, options) => r.discord(path, options),
+                        dismiss: dismissFn,
+                        questId: id,
+                        publish,
+                    });
+                    if (how) {
+                        dismissed++;
+                        for (const holder of holders) {
+                            const quest = (holder.quests ? readPlacement(holder.quests, id, rawGets) : undefined) || holder.getQuest?.(id);
+                            if (quest?.userStatus && typeof quest.userStatus === 'object') {
+                                const flags = Number(quest.userStatus.dismissedQuestContent) || 0;
+                                quest.userStatus.dismissedQuestContent = flags | QUEST_BAR_DISMISS_FLAG;
+                            }
+                            try { holder.emitChange?.(); } catch { /* a plain module has no flux emitter */ }
+                        }
+                    }
+                } catch (error) {
+                    r.status.lastError = error?.message || String(error);
+                } finally {
+                    inflight.delete(id);
+                }
+            }
+            if (dismissed) r.status.support = `Hide This sent for ${dismissed} quest${dismissed === 1 ? '' : 's'}`;
+        } catch (error) {
+            r.status.lastError = error?.message || String(error);
         }
-        if (dismissed) r.status.support = `Hide This sent for ${dismissed} quest${dismissed === 1 ? '' : 's'}`;
     }
 
     function requestHide() {

@@ -189,8 +189,13 @@ test('HideQuestPopup presses Hide This for the You bar quest and leaves Quest Ho
     assert.equal(isDismissFunction(dismissQuest), true);
     const notifications = {};
     Object.defineProperty(notifications, 'PushNotificationIOS', { enumerable: true, get() { throw new Error('`new NativeEventEmitter()` requires a non-null argument.'); } });
-    const metro = { modules: [notifications], find(pred) { return [notifications, { dismissQuest }].find(pred); } };
+    let findCalls = 0;
+    const metro = {
+        modules: [notifications, { dismissQuest }],
+        find() { findCalls++; throw new Error('`new NativeEventEmitter()` requires a non-null argument.'); },
+    };
     assert.equal(findDismissFunction(metro), dismissQuest);
+    assert.equal(findCalls, 0);
     assert.equal(await dismissDockQuest({ dismiss: dismissQuest, questId: dockId }), 'client');
     assert.deepEqual(clientCalls, [[dockId, 13]]);
     const httpCalls = [];
