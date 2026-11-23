@@ -43,14 +43,51 @@ async function harness(defaults = {}, modules = []) {
 test('NightyTab bundle opens iOS http addresses through the cleartext loader',()=>{
     const manifest=JSON.parse(fs.readFileSync(path.join(root,'NightyTab/manifest.json'),'utf8'));
     const src=fs.readFileSync(path.join(root,'NightyTab/index.js'),'utf8');
-    assert.equal(manifest.version,'2.0.7');
-    assert.match(src,/"version": "2\.0\.7"/);
+    assert.equal(manifest.version,'2.0.8');
+    assert.match(src,/"version": "2\.0\.8"/);
     assert.doesNotMatch(src,/Open in Safari/);
     assert.match(src,/function loadCleartextPage/);
     assert.match(src,/function isHttpPage/);
     assert.match(src,/NIGHTY_HTTP/);
     assert.match(src,/baseUrl: "http:\/\/localhost\/"/);
     assert.match(src,/isHttpPage\(src\)/);
+});
+
+test('NightyTab bundle adds one aligned button to a You bar built by a factory loaded before the plugin',async()=>{
+    const jsxHooks=new Map();
+    const {api}=await harness({showNightyButton:true,url:'https://example.com'});
+    api.api={react:{jsx:{onJsxCreate:(name,callback)=>jsxHooks.set(name,callback),deleteJsxCreate:name=>jsxHooks.delete(name)}}};
+    // Discord modules keep the factory they loaded with, so this one never sees the plugin's patches.
+    const create=React.createElement;
+    const context=vm.createContext({bunny:api,definePlugin:x=>x,console,URL,AbortController,setTimeout,clearTimeout});
+    vm.runInContext(fs.readFileSync(path.join(root,'NightyTab/index.js'),'utf8')+'\n;globalThis.result=plugin;',context);
+    const plugin=context.result.default;
+    await plugin.start();
+    try{
+        const Glyph=()=>create('View',{style:{width:24,height:24}});
+        const NavIcon=({IconComponent,accessibilityLabel,onPress,testID})=>create('Pressable',{accessibilityLabel,onPress,testID},create(IconComponent),create('Text',null,accessibilityLabel));
+        function YouScreenNavIconMeasurer({children}){return create('View',null,children);}
+        const icon=label=>create(NavIcon,{key:label,IconComponent:Glyph,accessibilityLabel:label,onPress(){}});
+        const bar=key=>{
+            const element=create(YouScreenNavIconMeasurer,{key},[icon('Quests'),icon('Nitro'),icon('Settings')]);
+            return jsxHooks.get('YouScreenNavIconMeasurer')(YouScreenNavIconMeasurer,element)||element;
+        };
+        const buttons=node=>!node||typeof node!=='object'?[]:(node.props?.testID==='mime-nighty-profile-button'?[node]:[]).concat(...(node.children||[]).map(buttons));
+        // Discord 354 can mount the row twice; only the first copy shows the button.
+        let tree;await Renderer.act(async()=>{tree=Renderer.create(create('View',null,bar('first'),bar('second')));});
+        const [first,second]=tree.toJSON().children;
+        assert.equal(buttons(tree.toJSON()).length,1);
+        assert.deepEqual(first.children.map(child=>child.props.accessibilityLabel),['Quests','Nitro','Settings','Nighty']);
+        assert.equal(buttons(second).length,0);
+        const box=first.children[3].children[0];
+        assert.equal(box.props.style.width,24);
+        assert.equal(box.props.style.height,24);
+        assert.equal(first.children[3].children[1].children[0],'Nighty');
+        // When the first copy unmounts, the remaining one takes the button over.
+        await Renderer.act(async()=>{tree.update(create('View',null,bar('second')));});
+        assert.equal(buttons(tree.toJSON()).length,1);
+        await Renderer.act(async()=>tree.unmount());
+    }finally{await plugin.stop();}
 });
 
 test('all Bunny spec-3 artifacts export definePlugin and match the hosted manifest', async()=>{
@@ -64,7 +101,7 @@ test('all Bunny spec-3 artifacts export definePlugin and match the hosted manife
         assert.equal(manifest.type,'plugin');
         assert.equal(manifest.main,'index.js');
         assert.equal(manifest.id,meta.id);
-        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.7');
+        if (meta.folder === 'NightyTab') assert.equal(manifest.version,'2.0.8');
         else assert.equal(manifest.version,meta.version);
         assert.equal(manifest.display.name,meta.name);
         assert(manifest.display.authors.some(a=>a.id==='957164619061932045'));

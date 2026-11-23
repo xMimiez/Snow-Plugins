@@ -1541,12 +1541,14 @@ var plugin = (() => {
         style: { width: selectedIconSize, height: selectedIconSize, ...iconTint() ? { tintColor: iconTint() } : {} }
       });
     }
+    // Discord's bar icons sit in a 24pt box. A taller box makes the Nighty control taller than its neighbours and drops its label.
+    const profileBarIconBox = 24;
     function profileImage() {
       const uri = iconUrl();
       if (!uri) return null;
       return h(
         RN.View,
-        { style: { width: selectedIconSize, height: selectedIconSize, alignItems: "center", justifyContent: "center" } },
+        { style: { width: profileBarIconBox, height: profileBarIconBox, alignItems: "center", justifyContent: "center", overflow: "visible" } },
         h(RN.Image, {
           source: { uri },
           resizeMode: "contain",
@@ -1665,29 +1667,35 @@ var plugin = (() => {
       if (node.props?.children != null) props.children = nativeControlTree(node.props.children, depth + 1, state);
       return React.cloneElement(node, props);
     }
-    var profileOwner = 0;
-    var profileSerial = 0;
+    // Mounted buttons in mount order; the first one shows. Claims happen in effects, so a render React
+    // throws away cannot keep ownership, and the next button takes over when the owner unmounts.
+    const profileButtons = /* @__PURE__ */ new Set();
     function claimProfileButton() {
-      const idRef = React.useRef(0);
-      if (!idRef.current) idRef.current = ++profileSerial;
-      if (!profileOwner) profileOwner = idRef.current;
-      React.useEffect(() => {
-        const id = idRef.current;
+      const [token] = React.useState(() => ({ refresh: null }));
+      const [, refresh] = React.useReducer((count) => count + 1, 0);
+      React.useLayoutEffect(() => {
+        token.refresh = refresh;
+        profileButtons.add(token);
+        refresh();
         return () => {
-          if (profileOwner === id) profileOwner = 0;
+          profileButtons.delete(token);
+          for (const other of profileButtons) other.refresh();
         };
       }, []);
-      return profileOwner === idRef.current;
+      const first = profileButtons.values().next().value;
+      return !first || first === token;
     }
     function NightyProfileButton({ sample }) {
       const shown = claimProfileButton();
       r.useRefresh();
       const onPress = press();
-      if (!shown) return null;
+      if (!shown || !r.active || !store.showNightyButton) return null;
       if (React.isValidElement(sample)) {
         const native = nativeControlTree(sample);
         return React.cloneElement(native, {
           key: "mime-nighty-profile-button",
+          // The sample is Settings; its ref must stay with Settings.
+          ref: null,
           accessibilityLabel: "Nighty",
           accessibilityHint: "Open Nighty",
           testID: "mime-nighty-profile-button",
@@ -1775,6 +1783,12 @@ var plugin = (() => {
       }] });
       r.status.messageMenu = patchLazySheet(r, (key, props) => key === "MessageLongPressActionSheet" && canDownload(store, props?.message) ? { key: "mime-nighty-download", label: "Download Script", icon: h(Icon), onPress: () => download(props.message) } : null);
       rememberMessages(r.common?.i18n?.Messages || r.find("Messages")?.Messages);
+      // Discord modules keep the JSX factory they loaded with, so the factory patches below miss a You tab that
+      // loaded before this plugin started. The loader's own hook is in place from launch and matches the bar by name.
+      r.hook(["YouScreenNavIconMeasurer"], (element) => {
+        const next = applyToolbar(element);
+        return next === element ? void 0 : next;
+      });
       const patched = watch(React, "createElement");
       for (const key of ["jsx", "jsxs"]) watch(React, key);
       const metro = r.B.metro;
@@ -1794,6 +1808,6 @@ var plugin = (() => {
   NightyTab.defaults = { url: "", scriptUtils: false, nightyPrefix: ".", iconType: "white", customIconUrl: "", showNightyButton: true, autoLogin: false, loginUsername: "", loginPassword: "", sessionHost: "", sessionToken: "", sessions: {} };
 
   // NightyTab.entry.js
-  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.7", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
+  var NightyTab_entry_default = register({ "id": "mime.nightytab", "name": "Nighty Tab", "description": "Open Nighty from Discord mobile settings or the profile action bar.", "version": "2.0.8", "authors": [{ "name": "Mime | N0_.q3", "id": "957164619061932045" }, { "name": "rico | wkcp", "id": "1361736124858630274" }], "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/NightyTab" }, NightyTab);
   return __toCommonJS(NightyTab_entry_exports);
 })();
