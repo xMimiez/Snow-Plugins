@@ -3,7 +3,7 @@
 import { ui } from '../runtime.js';
 import { registerSection } from '../settings-section.js';
 import { appendAction, patchLazySheet } from '../action-sheet.js';
-import { createInboxAdapter } from './pin-dms-list.js';
+import { createInboxAdapter, HEADER_HEIGHT } from './pin-dms-list.js';
 import { createPinData, sectionsFor, DEFAULT_COLOR, SWATCHES } from './pin-dms-data.js';
 
 export default function PinDms(r) {
@@ -98,13 +98,16 @@ export default function PinDms(r) {
             h(Button, { text: 'New category', onPress: guard(() => { close?.(); r.open('category-edit', Editor, { channelId }); }) }));
     }
     function Header({ section }) {
-        const uncategorized = section.id === 'uncategorized';
+        const uncategorized = section.id === 'uncategorized', muted = '#B5BAC1';
         return h(RN.Pressable, {
             accessibilityRole: 'button', accessibilityLabel: section.name,
-            accessibilityState: { expanded: !section.collapsed }, style: { height: 48, paddingHorizontal: 12, justifyContent: 'center' },
-            onPress: guard(() => uncategorized ? store.canCollapseDmSection && r.set('dmSectionCollapsed', !store.dmSectionCollapsed) : data.collapse(section.id)),
+            accessibilityState: { expanded: !section.collapsed }, style: { height: HEADER_HEIGHT, paddingLeft: 16, paddingRight: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+            onPress: guard(() => uncategorized ? r.set('dmSectionCollapsed', !store.dmSectionCollapsed) : data.collapse(section.id)),
             onLongPress: uncategorized ? undefined : () => r.open('category-actions', CategoryActions, { categoryId: section.id }),
-        }, h(Text, { heading: true, style: section.color != null ? { color: '#' + section.color.toString(16).padStart(6, '0') } : undefined }, `${section.collapsed ? '▸' : '▾'} ${section.name}`));
+        },
+            h(Text, { heading: true, style: { color: section.color != null ? '#' + section.color.toString(16).padStart(6, '0') : muted, marginLeft: 0, marginBottom: 0 } }, section.name),
+            // Equicord's collapse arrow, drawn from two borders: right when collapsed, down when expanded.
+            h(RN.View, { style: { width: 7, height: 7, borderRightWidth: 2, borderBottomWidth: 2, borderColor: muted, transform: [{ rotate: section.collapsed ? '-45deg' : '45deg' }] } }));
     }
     function DmRow({ id, close }) {
         const read = r.byStore('ReadStateStore');
@@ -126,7 +129,7 @@ export default function PinDms(r) {
                 : h(RN.ScrollView || RN.View, null, ...list.map(s => h(RN.View, { key: s.id }, h(Header, { section: s }), ...s.data.map(id => h(DmRow, { key: id, id, close }))))),
             close ? h(Button, { text: 'Close', onPress: close }) : null);
     }
-    const adaptList = createInboxAdapter(r, { data, recent, selected, getChannel, Header });
+    const adaptList = createInboxAdapter(r, { data, recent, getChannel, Header });
     function menuChannel(props) {
         if (props?.message) return null;
         const channel = props?.channel || getChannel(props?.channelId);
@@ -137,7 +140,7 @@ export default function PinDms(r) {
     function menuItem(props) {
         const channel = menuChannel(props);
         if (!channel) return null;
-        return { key: 'mime-pin-dms', label: 'Pin DMs', onPress: guard(() => r.open('channel-actions', ChannelActions, { channelId: channel.id })) };
+        return { key: 'mime-pin-dms', label: 'Pin DMs', iconName: 'PinIcon', onPress: guard(() => r.open('channel-actions', ChannelActions, { channelId: channel.id })) };
     }
     function patchChannelMenu() {
         // Rain permissionviewer/jumptotop show this module returning a second component.
@@ -167,21 +170,8 @@ export default function PinDms(r) {
         return h(Page, { title: 'Pin DMs', close },
             h(Button, { text: 'Open pinned DMs', onPress: () => r.open('pins', PinsPage, {}, { scrollable: false }) }),
             h(Button, { text: `Order: ${store.pinOrder === 1 ? 'Custom' : 'Most recent message'}`, onPress: () => r.set('pinOrder', store.pinOrder === 1 ? 0 : 1) }),
-            h(Toggle, { setting: 'canCollapseDmSection', label: 'Allow collapsing uncategorized DMs' }),
             h(Toggle, { setting: 'nativeList', label: 'Categories in compatible native DM lists' }),
-            h(Text, { muted: true }, `Hold a DM to add a category or pin it. ${r.status.nativeList ? 'Categories are connected to your DM list.' : 'Open your DM list to connect categories; Open pinned DMs is also available.'}`));
-    }
-    function wrapDmRow(element, props = element.props) {
-        const channel = props?.channel;
-        if (!isDm(channel)) return;
-        const open = guard(() => r.open('channel-actions', ChannelActions, { channelId: channel.id }));
-        return h(RN.Pressable, {
-            ...(element.key != null ? { key: element.key } : {}),
-            onPress: event => { event?.stopPropagation?.(); if (props.onPress) props.onPress(event); else openDm(channel.id); },
-            onLongPress: event => { event?.stopPropagation?.(); open(); },
-            accessibilityActions: [{ name: 'pin-dms', label: 'Pin DMs' }],
-            onAccessibilityAction: event => { if (event.nativeEvent.actionName === 'pin-dms') open(); },
-        }, element);
+            h(Text, { muted: true }, `Hold a DM and tap Pin DMs to add a category or pin it. ${r.status.nativeList ? 'Categories are connected to your DM list.' : 'Open your DM list to connect categories; Open pinned DMs is also available.'}`));
     }
     return { Settings, PinsPage, ChannelActions, CategoryActions, Editor, data, sections, adaptList, start() {
         r.status.settingsEntry = registerSection(r, { name: 'Pin DMs', items: [{ key: 'MIME_PIN_DMS', title: () => 'Pinned DMs', render: async () => ({ default: PinsPage }) }] });
@@ -192,10 +182,15 @@ export default function PinDms(r) {
         // Bind by export identity as well as name: production component names can be minified.
         const FlashList = r.D.FlashList || r.find('FlashList')?.FlashList;
         if (FlashList) r.patch('after', React, 'createElement', (args, result) => args[0] === FlashList ? adaptList(result) : undefined);
-        let rowModule;
-        try { rowModule = r.B.metro.findByTypeName?.('MessagesItemChannelContent'); } catch {}
-        const rowPatched = r.patch('after', rowModule, 'type', (args, result) => r.active && React.isValidElement(result) ? wrapDmRow(result, args[0]) : undefined);
-        if (!rowPatched) r.hook(['MessagesItemChannelContent'], element => wrapDmRow(element));
+        // Discord's Messages tab renders a memo'd LegendList through the JSX runtime, which only an identity hook sees.
+        const jsx = r.B.api?.react?.jsx, LegendList = r.find('AnimatedLegendList')?.AnimatedLegendList;
+        if (LegendList && jsx?.onJsxCreate && jsx.deleteJsxCreate) {
+            const adapt = (_type, element) => r.active ? adaptList(element) : undefined;
+            jsx.onJsxCreate(LegendList, adapt); r.own(() => jsx.deleteJsxCreate(LegendList, adapt));
+            // The list is already on screen when the plugin starts or stops; this store makes Discord render it again.
+            const redraw = () => r.byStore('UserGuildSettingsStore')?.emitChange?.();
+            redraw(); r.own(() => setTimeout(redraw));
+        }
     } };
 }
-PinDms.defaults = { pinOrder: 0, canCollapseDmSection: false, dmSectionCollapsed: false, userBasedCategoryList: {}, nativeList: true };
+PinDms.defaults = { pinOrder: 0, dmSectionCollapsed: false, userBasedCategoryList: {}, nativeList: true };

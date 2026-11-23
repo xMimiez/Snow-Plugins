@@ -19,8 +19,8 @@ export function sectionsFor(categories, settings, recentIds, selectedId, exists 
     return [
         ...categories.map(category => ({ ...category, data: categoryChannels(category, settings.pinOrder, recentIds)
             .filter(id => exists(id) && (!category.collapsed || id === selectedId)) })),
-        { id: 'uncategorized', name: 'Direct Messages', collapsed: !!settings.canCollapseDmSection && !!settings.dmSectionCollapsed,
-            data: settings.canCollapseDmSection && settings.dmSectionCollapsed ? [] : recentIds.filter(id => !pinned.has(id) && exists(id)) },
+        { id: 'uncategorized', name: 'Direct Messages', collapsed: !!settings.dmSectionCollapsed,
+            data: settings.dmSectionCollapsed ? [] : recentIds.filter(id => !pinned.has(id) && exists(id)) },
     ];
 }
 export function createPinData(r) {

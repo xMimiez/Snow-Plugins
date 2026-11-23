@@ -8,6 +8,13 @@ export function mapTree(React, node, transform) {
     return React.cloneElement(node, {}, mapTree(React, node.props.children, transform));
 }
 
+// Borrows the icon of a row already in the sheet: looking the icon component up in Metro initialises thousands of modules.
+function iconNamed(React, tree, name) {
+    let found;
+    mapTree(React, tree, node => { if (!found && node?.props?.icon?.props?.IconComponent?.name === name) found = node.props.icon; });
+    return found;
+}
+
 export function appendAction(r, tree, item) {
     let inserted = false;
     const name = node => node?.type?.displayName || node?.type?.name || node?.type?.type?.name;
@@ -16,8 +23,9 @@ export function appendAction(r, tree, item) {
         const sample = node.find(n => name(n) === 'ButtonRow' || name(n) === 'ActionSheetRow');
         if (!sample || node.some(n => n?.key === item.key)) return;
         inserted = true;
+        const icon = item.icon || (item.iconName && iconNamed(r.React, tree, item.iconName));
         const Row = name(sample) === 'ButtonRow' ? (r.D.Forms?.FormRow || r.C.Forms?.FormRow || sample.type) : sample.type;
-        return [...node, r.h(Row, { key: item.key, label: item.label, onPress: item.onPress, ...(item.icon ? { icon: item.icon, leading: item.icon } : {}) })];
+        return [...node, r.h(Row, { key: item.key, label: item.label, onPress: item.onPress, ...(icon ? { icon, leading: icon } : {}) })];
     });
     return inserted ? result : tree;
 }

@@ -1,7 +1,9 @@
 // Native list adapter for Pin DMs. SPDX-License-Identifier: GPL-3.0-or-later
 import { sectionsFor } from './pin-dms-data.js';
 
-export function createInboxAdapter(r, { data, recent, selected, getChannel, Header }) {
+export const HEADER_HEIGHT = 40;
+
+export function createInboxAdapter(r, { data, recent, getChannel, Header }) {
     const { React, h, store } = r;
     const recordId = value => {
         const id = typeof value === 'string' ? value : value?.channel?.id || value?.channelId || value?.id;
@@ -14,7 +16,9 @@ export function createInboxAdapter(r, { data, recent, selected, getChannel, Head
         if (!Array.isArray(props?.data) || !props.data.length || typeof props.renderItem !== 'function'
             || props.horizontal || props.numColumns > 1 || props.searchQuery || props.stickyHeaderIndices?.length || props.inverted) return null;
         const ids = props.data.map(recordId), dmIds = ids.filter(Boolean), inbox = recent().filter(id => [1, 3].includes(getChannel(id)?.type));
-        if (!dmIds.length || new Set(dmIds).size !== dmIds.length || dmIds.length !== inbox.length || !inbox.every(id => dmIds.includes(id))) return null;
+        // Discord's Messages list (kind: 'channel' rows) leaves hidden DMs out, so it may hold part of the inbox.
+        const messages = props.data.every((value, index) => !ids[index] || value?.kind === 'channel');
+        if (!dmIds.length || new Set(dmIds).size !== dmIds.length || !dmIds.every(id => inbox.includes(id)) || (!messages && dmIds.length !== inbox.length)) return null;
         const first = ids.findIndex(Boolean), last = ids.length - 1 - [...ids].reverse().findIndex(Boolean);
         if (ids.slice(first, last + 1).some(id => !id)) return null;
         return { ids, first, last };
@@ -36,7 +40,8 @@ export function createInboxAdapter(r, { data, recent, selected, getChannel, Head
         if (shape) {
             const entries = props.data.map((item, index) => ({ item, index, id: shape.ids[index], key: String(props.keyExtractor ? props.keyExtractor(item, index) : item?.key ?? item?.id ?? index) }));
             const byId = new Map(entries.filter(e => e.id).map(e => [e.id, e]));
-            const sections = sectionsFor(data.categories(), store, shape.ids.filter(Boolean), selected(), id => byId.has(id));
+            // No selected-DM exception here: on a phone the open chat is another screen, so a collapsed category hides every row.
+            const sections = sectionsFor(data.categories(), store, shape.ids.filter(Boolean), null, id => byId.has(id));
             rows.push(...entries.slice(0, shape.first));
             for (const section of sections) {
                 const headerIndex = rows.length;
@@ -82,11 +87,17 @@ export function createInboxAdapter(r, { data, recent, selected, getChannel, Head
         return React.cloneElement(original, {
             data: rows, ...(sourceRef ? { ref: bridgeRef } : {}), extraData: { host: props.extraData, pins: store.userBasedCategoryList, order: store.pinOrder, collapsed: store.dmSectionCollapsed },
             keyExtractor: row => row.key,
-            renderItem: info => info.item.header ? h(Header, { section: info.item.header }) : props.renderItem({ ...info, item: info.item.item, index: info.item.index }),
+            renderItem: info => info.item.header ? h(Header, { section: info.item.header }) : props.renderItem({ ...info, item: info.item.item, index: info.item.index, extraData: props.extraData }),
             getItemType: row => row.header ? 'mime-pin-header' : props.getItemType?.(row.item, row.index, props.extraData) ?? 'mime-original-row',
-            overrideItemLayout: props.overrideItemLayout ? (layout, row, _index, maxColumns) => row.header ? Object.assign(layout, { size: 48, span: 1 }) : props.overrideItemLayout(layout, row.item, row.index, maxColumns, props.extraData) : undefined,
+            overrideItemLayout: props.overrideItemLayout ? (layout, row, _index, maxColumns) => row.header ? Object.assign(layout, { size: HEADER_HEIGHT, span: 1 }) : props.overrideItemLayout(layout, row.item, row.index, maxColumns, props.extraData) : undefined,
+            // LegendList 2 calls (index, item, type); LegendList 3 calls (item, index, type).
+            getFixedItemSize: props.getFixedItemSize ? (a, b, type) => {
+                const row = typeof a === 'number' ? b : a;
+                if (row.header) return HEADER_HEIGHT;
+                return typeof a === 'number' ? props.getFixedItemSize(row.index, row.item, type) : props.getFixedItemSize(row.item, row.index, type);
+            } : undefined,
             getItemLayout: props.getItemLayout ? (_data, index) => {
-                const length = row => row.header ? 48 : props.getItemLayout(props.data, row.index).length;
+                const length = row => row.header ? HEADER_HEIGHT : props.getItemLayout(props.data, row.index).length;
                 const gap = (row, next) => {
                     if (row.header || next?.header || row.index + 1 >= props.data.length) return 0;
                     const here = props.getItemLayout(props.data, row.index), after = props.getItemLayout(props.data, row.index + 1);

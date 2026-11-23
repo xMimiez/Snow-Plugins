@@ -427,6 +427,7 @@ test('Nighty lazy menus stay bound to the opened message, recheck toggles and cl
     let sends=[];const http={get(){},put(){},del(){},post:async req=>sends.push(req)};
     const {r}=await harness({...factory.defaults,scriptUtils:true},[sheets,http]);const plugin=factory(r);plugin.start();
     function ActionSheetRow(){return null;}function ActionSheetRowGroup({children}){return children;}
+    const pinIcon=React.createElement('Icon',{IconComponent:function PinIcon(){}});
     const module={default:()=>React.createElement('View',null,React.createElement(ActionSheetRowGroup,null,[React.createElement(ActionSheetRow,{key:'original',label:'Original'})]))};
     for(const id of ['a','b']) sheets.openLazy(Promise.resolve(module),'MessageLongPressActionSheet',{message:{id,channel_id:'ch',attachments:[{}]}});
     const a=await opened[0].component,b=await opened[1].component;
@@ -490,7 +491,7 @@ test('Pin DMs FlashList keeps auxiliary rows, host callbacks, layouts and impera
     let tree;await Renderer.act(async()=>{tree=Renderer.create(p.adaptList(original),{createNodeMock:()=>({scrollToIndex:args=>{scrolled=args;},scrollToItem:args=>{scrolled=args;}})});});
     let list=tree.root.findByType('FlashList');assert.equal(list.props.data[0].item,values[0]);assert.equal(list.props.data.at(-1).item,values[3]);
     const b=list.props.data.find(row=>row.id==='b');assert.equal(list.props.renderItem({item:b}).props.index,2);assert.equal(list.props.initialScrollIndex,4);
-    assert.deepEqual(list.props.getItemLayout(list.props.data,4),{index:4,length:40,offset:176});
+    assert.deepEqual(list.props.getItemLayout(list.props.data,4),{index:4,length:40,offset:160});
     assert.equal(list.props.getItemType(b,2),'host');list.props.overrideItemLayout({},b,2);assert.deepEqual(layoutItem,{item:values[2],index:2});
     list.props.onViewableItemsChanged({viewableItems:[{item:list.props.data[1],index:1},{item:b,index:2}],changed:[{item:b,index:2}]});
     assert.equal(viewed.viewableItems.length,1);assert.equal(viewed.viewableItems[0].item,values[2]);assert.equal(viewed.viewableItems[0].key,'host-2');
@@ -504,16 +505,18 @@ test('Pin DMs augments nested native channel menus and creates a category from h
     const {default:factory}=await import('../src/plugins/pin-dms.js');
     const channel={id:'dm',type:1,recipients:['friend']};
     function ActionSheetRow(){return null;}function ActionSheetRowGroup({children}){return children;}
-    function Content(){return React.createElement('View',null,React.createElement(ActionSheetRowGroup,null,[React.createElement(ActionSheetRow,{key:'original',label:'Original'})]));}
+    const pinIcon=React.createElement('Icon',{IconComponent:function PinIcon(){}});
+    function Content(){return React.createElement('View',null,React.createElement(ActionSheetRowGroup,null,[React.createElement(ActionSheetRow,{key:'original',label:'Original'})]),React.createElement(ActionSheetRowGroup,null,[React.createElement(ActionSheetRow,{key:'pin',label:'Pin',icon:pinIcon})]));}
     const module={name:'ChannelLongPressActionSheet',default:props=>React.createElement(Content,props)},original=module.default;
     const {r,sheets,hooks}=await harness(factory.defaults,[module,{storeName:'ChannelStore',getChannel:id=>id==='dm'?channel:null},{storeName:'UserStore',getCurrentUser:()=>({id:'owner'})},{storeName:'PrivateChannelSortStore',getPrivateChannelIds:()=>['dm']}]);
     const p=factory(r);p.start();let tree;
     await Renderer.act(async()=>{tree=Renderer.create(module.default({channel}));});
-    assert.deepEqual(tree.root.findAllByType(ActionSheetRow).map(row=>row.props.label),['Original','Pin DMs']);
+    assert.deepEqual(tree.root.findAllByType(ActionSheetRow).map(row=>row.props.label),['Original','Pin DMs','Pin']);assert.equal(tree.root.findAllByType(ActionSheetRow)[1].props.icon,pinIcon);
     await Renderer.act(async()=>tree.root.findAllByType(ActionSheetRow)[1].props.onPress());assert.equal(sheets.size,1);
     await Renderer.act(async()=>tree.unmount());sheets.clear();
-    const wrapped=hooks.get('MessagesItemChannelContent')(null,React.createElement('DMContent',{channel}));
-    await Renderer.act(async()=>wrapped.props.onLongPress({stopPropagation(){}}));
+    await Renderer.act(async()=>{tree=Renderer.create(module.default({channel}));});
+    await Renderer.act(async()=>tree.root.findAllByType(ActionSheetRow)[1].props.onPress());await Renderer.act(async()=>tree.unmount());
+    assert.equal(hooks.has('MessagesItemChannelContent'),false);
     await Renderer.act(async()=>{tree=Renderer.create(React.createElement([...sheets.values()][0]));});
     await Renderer.act(async()=>tree.root.findAllByType('Pressable').find(button=>button.props.accessibilityLabel==='New category').props.onPress());
     await Renderer.act(async()=>tree.unmount());
@@ -540,13 +543,37 @@ test('Pin DMs preserves account isolation, categories, colors, moves, transfers 
 test('Pin DMs section projection matches recency/custom order, collapse and selected row rules',async()=>{
     const {sectionsFor}=await import('../src/plugins/pin-dms-data.js');
     const categories=[{id:'cat',name:'Pins',channels:['one','two','missing'],collapsed:false}];
-    const settings={pinOrder:0,canCollapseDmSection:true,dmSectionCollapsed:false};
+    const settings={pinOrder:0,dmSectionCollapsed:false};
     const recent=['three','two','one'];const exists=id=>id!=='missing';
     assert.deepEqual(sectionsFor(categories,settings,recent,'one',exists).map(s=>s.data),[['two','one'],['three']]);
     settings.pinOrder=1;assert.deepEqual(sectionsFor(categories,settings,recent,'one',exists)[0].data,['one','two']);
     categories[0].collapsed=true;settings.dmSectionCollapsed=true;
     assert.deepEqual(sectionsFor(categories,settings,recent,'one',exists).map(s=>s.data),[['one'],[]]);
-    settings.canCollapseDmSection=false;assert.deepEqual(sectionsFor(categories,settings,recent,'one',exists)[1].data,['three']);
+    settings.dmSectionCollapsed=false;assert.deepEqual(sectionsFor(categories,settings,recent,'one',exists)[1].data,['three']);
+});
+
+test('Pin DMs sections the Messages LegendList, sizes headers for both call orders and collapses Direct Messages on tap',async()=>{
+    const {default:factory}=await import('../src/plugins/pin-dms.js');const channels={a:{id:'a',type:1},b:{id:'b',type:3},hidden:{id:'hidden',type:1}};
+    const {r}=await harness(factory.defaults,[{storeName:'ChannelStore',getChannel:id=>channels[id]},{storeName:'UserStore',getCurrentUser:()=>({id:'owner'})},{storeName:'PrivateChannelSortStore',getPrivateChannelIds:()=>['a','b','hidden']},{storeName:'SelectedChannelStore',getChannelId:()=>'b'}]);
+    const p=factory(r);p.data.save(null,'Friends',0xff0000,'b');
+    const values=[{kind:'channel',channelId:'a',row:0},{kind:'channel',channelId:'b',row:1}];
+    const element=React.createElement('LegendList',{data:values,extraData:'host',renderItem:({item,extraData})=>React.createElement('DM',{item,extraData}),
+        getFixedItemSize:(index,item)=>{assert.equal(item,values[index]);return 53;}});
+    let tree;await Renderer.act(async()=>{tree=Renderer.create(p.adaptList(element));});
+    const names=()=>tree.root.findByType('LegendList').props.data.map(row=>row.header?.name||row.id);
+    let list=tree.root.findByType('LegendList');assert.deepEqual(names(),['Friends','b','Direct Messages','a']);
+    const [friends,b,dms]=list.props.data;
+    assert.equal(list.props.getFixedItemSize(0,friends),40);assert.equal(list.props.getFixedItemSize(friends,0),40);assert.equal(list.props.getFixedItemSize(1,b),53);
+    assert.equal(list.props.getItemType(friends),'mime-pin-header');assert.equal(list.props.renderItem({item:b}).props.extraData,'host');
+    let header;await Renderer.act(async()=>{header=Renderer.create(list.props.renderItem({item:friends}));});
+    assert.match(JSON.stringify(header.toJSON()),/#ff0000/);assert.match(JSON.stringify(header.toJSON()),/45deg/);
+    await Renderer.act(async()=>{header.update(list.props.renderItem({item:dms}));});
+    await Renderer.act(async()=>header.root.findByProps({accessibilityLabel:'Direct Messages'}).props.onPress());
+    assert.equal(r.store.dmSectionCollapsed,true);assert.deepEqual(names(),['Friends','b','Direct Messages']);
+    list=tree.root.findByType('LegendList');await Renderer.act(async()=>{header.update(list.props.renderItem({item:list.props.data[2]}));});
+    assert.match(JSON.stringify(header.toJSON()),/-45deg/);assert.equal(header.root.findByProps({accessibilityLabel:'Direct Messages'}).props.accessibilityState.expanded,false);
+    await Renderer.act(async()=>p.data.collapse(p.data.categories()[0].id));assert.deepEqual(names(),['Friends','Direct Messages']);
+    await Renderer.act(async()=>{header.unmount();tree.unmount();});await r.dispose();
 });
 
 test('Pin DMs native list wraps only supported private-channel shapes and updates without mutating rows',async()=>{

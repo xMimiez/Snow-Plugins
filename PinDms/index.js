@@ -448,128 +448,141 @@ var plugin = (() => {
     const colors = { background: "#111214", surface: "#1E1F22", surfacePressed: "#26272B", border: "#2B2D31", text: "#F2F3F5", muted: "#B5BAC1", accent: "#5865F2", danger: "#F23F43" };
     const palette = { "text-danger": colors.danger, "text-warning": "#FEE75C", "text-muted": colors.muted, "text-normal": colors.text };
     function Text({ children, muted = false, heading = false, color, style, ...props }) {
-        const resolved = palette[color] || (muted ? colors.muted : colors.text);
-        const base = heading
-            ? { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }
-            : { color: resolved, fontSize: muted ? 13 : 16, lineHeight: muted ? 18 : 21, fontWeight: muted ? "400" : "600" };
-        return h(RN.Text, { ...props, style: [base, style] }, children);
+      const resolved = palette[color] || (muted ? colors.muted : colors.text);
+      const base = heading ? { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } : { color: resolved, fontSize: muted ? 13 : 16, lineHeight: muted ? 18 : 21, fontWeight: muted ? "400" : "600" };
+      return h(RN.Text, { ...props, style: [base, style] }, children);
     }
     function Button({ text, onPress, disabled, variant = "primary", ...props }) {
-        const primary = variant !== "secondary";
-        return h(RN.Pressable || RN.TouchableOpacity, {
-            ...props,
-            accessibilityRole: "button",
-            accessibilityLabel: text,
-            accessibilityState: { disabled: !!disabled },
-            disabled: !!disabled,
-            onPress,
-            style: ({ pressed } = {}) => ({
-                minHeight: 48,
-                borderRadius: 12,
-                paddingHorizontal: 16,
-                backgroundColor: primary ? (pressed ? "#4752C4" : colors.accent) : (pressed ? colors.surfacePressed : colors.surface),
-                borderWidth: primary ? 0 : 1,
-                borderColor: colors.border,
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: disabled ? 0.5 : 1,
-            }),
-        }, h(RN.Text, { style: { color: primary ? "#FFFFFF" : colors.muted, fontSize: 16, lineHeight: 20, fontWeight: "700" } }, text));
+      const primary = variant !== "secondary";
+      return h(RN.Pressable || RN.TouchableOpacity, {
+        ...props,
+        accessibilityRole: "button",
+        accessibilityLabel: text,
+        accessibilityState: { disabled: !!disabled },
+        disabled: !!disabled,
+        onPress,
+        style: ({ pressed } = {}) => ({
+          minHeight: 48,
+          borderRadius: 12,
+          paddingHorizontal: 16,
+          backgroundColor: primary ? pressed ? "#4752C4" : colors.accent : pressed ? colors.surfacePressed : colors.surface,
+          borderWidth: primary ? 0 : 1,
+          borderColor: colors.border,
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: disabled ? 0.5 : 1
+        })
+      }, h(RN.Text, { style: { color: primary ? "#FFFFFF" : colors.muted, fontSize: 16, lineHeight: 20, fontWeight: "700" } }, text));
     }
     function Input({ value, onChange, label, secureTextEntry, style, ...props }) {
-        const field = h(RN.TextInput, {
-            ...props,
-            value: value == null ? "" : String(value),
-            onChangeText: onChange,
-            secureTextEntry: !!secureTextEntry,
-            placeholderTextColor: "#6D6F78",
-            autoCorrect: false,
-            selectionColor: colors.accent,
-            style: [{ minHeight: 50, color: colors.text, fontSize: 16, lineHeight: 21, backgroundColor: "#151619", borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 12 }, style],
-        });
-        if (!label) return field;
-        return h(RN.View, { style: { gap: 8 } },
-            h(RN.Text, { style: { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4 } }, label),
-            field);
+      const field = h(RN.TextInput, {
+        ...props,
+        value: value == null ? "" : String(value),
+        onChangeText: onChange,
+        secureTextEntry: !!secureTextEntry,
+        placeholderTextColor: "#6D6F78",
+        autoCorrect: false,
+        selectionColor: colors.accent,
+        style: [{ minHeight: 50, color: colors.text, fontSize: 16, lineHeight: 21, backgroundColor: "#151619", borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 12 }, style]
+      });
+      if (!label) return field;
+      return h(
+        RN.View,
+        { style: { gap: 8 } },
+        h(RN.Text, { style: { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4 } }, label),
+        field
+      );
     }
     function Toggle({ setting, label, subLabel }) {
-        r.useRefresh();
-        return h(RN.View, { style: { minHeight: 72, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, gap: 12 } },
-            h(RN.View, { style: { flex: 1 } },
-                h(RN.Text, { style: { color: colors.text, fontSize: 16, lineHeight: 21, fontWeight: "600", marginBottom: subLabel ? 3 : 0 } }, label),
-                subLabel ? h(RN.Text, { style: { color: colors.muted, fontSize: 14, lineHeight: 19 } }, subLabel) : null),
-            h(RN.Switch, {
-                accessibilityLabel: label,
-                value: !!store[setting],
-                onValueChange: value => r.set(setting, value),
-                trackColor: { false: "#3F4147", true: colors.accent },
-                thumbColor: "#FFFFFF",
-                ios_backgroundColor: "#3F4147",
-            }));
+      r.useRefresh();
+      return h(
+        RN.View,
+        { style: { minHeight: 72, flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 12, gap: 12 } },
+        h(
+          RN.View,
+          { style: { flex: 1 } },
+          h(RN.Text, { style: { color: colors.text, fontSize: 16, lineHeight: 21, fontWeight: "600", marginBottom: subLabel ? 3 : 0 } }, label),
+          subLabel ? h(RN.Text, { style: { color: colors.muted, fontSize: 14, lineHeight: 19 } }, subLabel) : null
+        ),
+        h(RN.Switch, {
+          accessibilityLabel: label,
+          value: !!store[setting],
+          onValueChange: (value) => r.set(setting, value),
+          trackColor: { false: "#3F4147", true: colors.accent },
+          thumbColor: "#FFFFFF",
+          ios_backgroundColor: "#3F4147"
+        })
+      );
     }
     function Slider({ value, onValueChange, ...props }) {
-        return h(Input, {
-            ...props,
-            value: String(value),
-            onChange: text => {
-                const next = Number(text);
-                onValueChange(Number.isFinite(next) ? next : 0);
-            },
-            keyboardType: "numeric",
-        });
+      return h(Input, {
+        ...props,
+        value: String(value),
+        onChange: (text) => {
+          const next = Number(text);
+          onValueChange(Number.isFinite(next) ? next : 0);
+        },
+        keyboardType: "numeric"
+      });
     }
     function card(rows) {
-        return h(RN.View, { style: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: "hidden" } }, ...rows);
+      return h(RN.View, { style: { backgroundColor: colors.surface, borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: "hidden" } }, ...rows);
     }
     function Page({ title, children, close }) {
-        const items = [];
-        const walk = value => {
-            if (value == null || value === false) return;
-            if (Array.isArray(value)) { value.forEach(walk); return; }
-            items.push(value);
-        };
-        walk(children);
-        const blocks = [];
-        let toggles = [];
-        const flush = () => {
-            if (!toggles.length) return;
-            const rows = [];
-            toggles.forEach((node, index) => {
-                if (index) rows.push(h(RN.View, { key: "divider-" + index, style: { height: 1, backgroundColor: colors.border, marginLeft: 16 } }));
-                rows.push(node);
-            });
-            blocks.push(card(rows));
-            toggles = [];
-        };
-        for (const child of items) {
-            if (child.type === Toggle) { toggles.push(child); continue; }
-            flush();
-            if (child.type === Input) {
-                blocks.push(card([h(RN.View, { key: "field", style: { padding: 14 } }, child)]));
-                continue;
-            }
-            blocks.push(child);
+      const items = [];
+      const walk = (value) => {
+        if (value == null || value === false) return;
+        if (Array.isArray(value)) {
+          value.forEach(walk);
+          return;
+        }
+        items.push(value);
+      };
+      walk(children);
+      const blocks = [];
+      let toggles = [];
+      const flush = () => {
+        if (!toggles.length) return;
+        const rows = [];
+        toggles.forEach((node, index) => {
+          if (index) rows.push(h(RN.View, { key: "divider-" + index, style: { height: 1, backgroundColor: colors.border, marginLeft: 16 } }));
+          rows.push(node);
+        });
+        blocks.push(card(rows));
+        toggles = [];
+      };
+      for (const child of items) {
+        if (child.type === Toggle) {
+          toggles.push(child);
+          continue;
         }
         flush();
-        const body = [];
-        if (title) body.push(h(RN.Text, { key: "title", accessibilityRole: "header", style: { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, title));
-        blocks.forEach((block, index) => {
-            if (body.length && !(title && index === 0)) body.push(h(RN.View, { key: "gap-" + index, style: { height: 22 } }));
-            body.push(block);
-        });
-        if (close) {
-            if (body.length) body.push(h(RN.View, { key: "gap-close", style: { height: 22 } }));
-            body.push(h(Button, { key: "close", text: "Close", variant: "secondary", onPress: close }));
+        if (child.type === Input) {
+          blocks.push(card([h(RN.View, { key: "field", style: { padding: 14 } }, child)]));
+          continue;
         }
-        return h(RN.ScrollView, {
-            style: { flex: 1, backgroundColor: colors.background },
-            contentContainerStyle: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 36 },
-            keyboardShouldPersistTaps: "handled",
-            showsVerticalScrollIndicator: false,
-        }, ...body);
+        blocks.push(child);
+      }
+      flush();
+      const body = [];
+      if (title) body.push(h(RN.Text, { key: "title", accessibilityRole: "header", style: { color: colors.muted, fontSize: 13, lineHeight: 18, fontWeight: "600", marginLeft: 4, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 } }, title));
+      blocks.forEach((block, index) => {
+        if (body.length && !(title && index === 0)) body.push(h(RN.View, { key: "gap-" + index, style: { height: 22 } }));
+        body.push(block);
+      });
+      if (close) {
+        if (body.length) body.push(h(RN.View, { key: "gap-close", style: { height: 22 } }));
+        body.push(h(Button, { key: "close", text: "Close", variant: "secondary", onPress: close }));
+      }
+      return h(RN.ScrollView, {
+        style: { flex: 1, backgroundColor: colors.background },
+        contentContainerStyle: { paddingHorizontal: 16, paddingTop: 18, paddingBottom: 36 },
+        keyboardShouldPersistTaps: "handled",
+        showsVerticalScrollIndicator: false
+      }, ...body);
     }
     return { Text, Button, Page, Input, Toggle, Slider };
-}
+  }
   function register(meta, factory) {
     const B = bunny;
     let runtime;
@@ -720,6 +733,13 @@ var plugin = (() => {
     if (!React.isValidElement(node) || node.props.children == null) return node;
     return React.cloneElement(node, {}, mapTree(React, node.props.children, transform));
   }
+  function iconNamed(React, tree, name) {
+    let found;
+    mapTree(React, tree, (node) => {
+      if (!found && node?.props?.icon?.props?.IconComponent?.name === name) found = node.props.icon;
+    });
+    return found;
+  }
   function appendAction(r, tree, item) {
     let inserted = false;
     const name = (node) => node?.type?.displayName || node?.type?.name || node?.type?.type?.name;
@@ -728,8 +748,9 @@ var plugin = (() => {
       const sample = node.find((n) => name(n) === "ButtonRow" || name(n) === "ActionSheetRow");
       if (!sample || node.some((n) => n?.key === item.key)) return;
       inserted = true;
+      const icon = item.icon || item.iconName && iconNamed(r.React, tree, item.iconName);
       const Row = name(sample) === "ButtonRow" ? r.D.Forms?.FormRow || r.C.Forms?.FormRow || sample.type : sample.type;
-      return [...node, r.h(Row, { key: item.key, label: item.label, onPress: item.onPress, ...item.icon ? { icon: item.icon, leading: item.icon } : {} })];
+      return [...node, r.h(Row, { key: item.key, label: item.label, onPress: item.onPress, ...icon ? { icon, leading: icon } : {} })];
     });
     return inserted ? result : tree;
   }
@@ -782,8 +803,8 @@ var plugin = (() => {
       {
         id: "uncategorized",
         name: "Direct Messages",
-        collapsed: !!settings.canCollapseDmSection && !!settings.dmSectionCollapsed,
-        data: settings.canCollapseDmSection && settings.dmSectionCollapsed ? [] : recentIds.filter((id) => !pinned.has(id) && exists(id))
+        collapsed: !!settings.dmSectionCollapsed,
+        data: settings.dmSectionCollapsed ? [] : recentIds.filter((id) => !pinned.has(id) && exists(id))
       }
     ];
   }
@@ -833,7 +854,8 @@ var plugin = (() => {
   }
 
   // project:src/plugins/pin-dms-list.js
-  function createInboxAdapter(r, { data, recent, selected, getChannel, Header }) {
+  var HEADER_HEIGHT = 40;
+  function createInboxAdapter(r, { data, recent, getChannel, Header }) {
     const { React, h, store } = r;
     const recordId = (value) => {
       const id = typeof value === "string" ? value : value?.channel?.id || value?.channelId || value?.id;
@@ -845,7 +867,8 @@ var plugin = (() => {
     function inspect(props) {
       if (!Array.isArray(props?.data) || !props.data.length || typeof props.renderItem !== "function" || props.horizontal || props.numColumns > 1 || props.searchQuery || props.stickyHeaderIndices?.length || props.inverted) return null;
       const ids = props.data.map(recordId), dmIds = ids.filter(Boolean), inbox = recent().filter((id) => [1, 3].includes(getChannel(id)?.type));
-      if (!dmIds.length || new Set(dmIds).size !== dmIds.length || dmIds.length !== inbox.length || !inbox.every((id) => dmIds.includes(id))) return null;
+      const messages = props.data.every((value, index) => !ids[index] || value?.kind === "channel");
+      if (!dmIds.length || new Set(dmIds).size !== dmIds.length || !dmIds.every((id) => inbox.includes(id)) || !messages && dmIds.length !== inbox.length) return null;
       const first = ids.findIndex(Boolean), last = ids.length - 1 - [...ids].reverse().findIndex(Boolean);
       if (ids.slice(first, last + 1).some((id) => !id)) return null;
       return { ids, first, last };
@@ -874,7 +897,7 @@ var plugin = (() => {
       if (shape) {
         const entries = props.data.map((item, index) => ({ item, index, id: shape.ids[index], key: String(props.keyExtractor ? props.keyExtractor(item, index) : item?.key ?? item?.id ?? index) }));
         const byId = new Map(entries.filter((e) => e.id).map((e) => [e.id, e]));
-        const sections = sectionsFor(data.categories(), store, shape.ids.filter(Boolean), selected(), (id) => byId.has(id));
+        const sections = sectionsFor(data.categories(), store, shape.ids.filter(Boolean), null, (id) => byId.has(id));
         rows.push(...entries.slice(0, shape.first));
         for (const section of sections) {
           const headerIndex = rows.length;
@@ -923,11 +946,17 @@ var plugin = (() => {
         ...sourceRef ? { ref: bridgeRef } : {},
         extraData: { host: props.extraData, pins: store.userBasedCategoryList, order: store.pinOrder, collapsed: store.dmSectionCollapsed },
         keyExtractor: (row) => row.key,
-        renderItem: (info) => info.item.header ? h(Header, { section: info.item.header }) : props.renderItem({ ...info, item: info.item.item, index: info.item.index }),
+        renderItem: (info) => info.item.header ? h(Header, { section: info.item.header }) : props.renderItem({ ...info, item: info.item.item, index: info.item.index, extraData: props.extraData }),
         getItemType: (row) => row.header ? "mime-pin-header" : props.getItemType?.(row.item, row.index, props.extraData) ?? "mime-original-row",
-        overrideItemLayout: props.overrideItemLayout ? (layout, row, _index, maxColumns) => row.header ? Object.assign(layout, { size: 48, span: 1 }) : props.overrideItemLayout(layout, row.item, row.index, maxColumns, props.extraData) : void 0,
+        overrideItemLayout: props.overrideItemLayout ? (layout, row, _index, maxColumns) => row.header ? Object.assign(layout, { size: HEADER_HEIGHT, span: 1 }) : props.overrideItemLayout(layout, row.item, row.index, maxColumns, props.extraData) : void 0,
+        // LegendList 2 calls (index, item, type); LegendList 3 calls (item, index, type).
+        getFixedItemSize: props.getFixedItemSize ? (a, b, type) => {
+          const row = typeof a === "number" ? b : a;
+          if (row.header) return HEADER_HEIGHT;
+          return typeof a === "number" ? props.getFixedItemSize(row.index, row.item, type) : props.getFixedItemSize(row.item, row.index, type);
+        } : void 0,
         getItemLayout: props.getItemLayout ? (_data, index) => {
-          const length = (row) => row.header ? 48 : props.getItemLayout(props.data, row.index).length;
+          const length = (row) => row.header ? HEADER_HEIGHT : props.getItemLayout(props.data, row.index).length;
           const gap = (row, next) => {
             if (row.header || next?.header || row.index + 1 >= props.data.length) return 0;
             const here = props.getItemLayout(props.data, row.index), after = props.getItemLayout(props.data, row.index + 1);
@@ -1084,15 +1113,21 @@ var plugin = (() => {
       );
     }
     function Header({ section }) {
-      const uncategorized = section.id === "uncategorized";
-      return h(RN.Pressable, {
-        accessibilityRole: "button",
-        accessibilityLabel: section.name,
-        accessibilityState: { expanded: !section.collapsed },
-        style: { height: 48, paddingHorizontal: 12, justifyContent: "center" },
-        onPress: guard(() => uncategorized ? store.canCollapseDmSection && r.set("dmSectionCollapsed", !store.dmSectionCollapsed) : data.collapse(section.id)),
-        onLongPress: uncategorized ? void 0 : () => r.open("category-actions", CategoryActions, { categoryId: section.id })
-      }, h(Text, { heading: true, style: section.color != null ? { color: "#" + section.color.toString(16).padStart(6, "0") } : void 0 }, `${section.collapsed ? "\u25B8" : "\u25BE"} ${section.name}`));
+      const uncategorized = section.id === "uncategorized", muted = "#B5BAC1";
+      return h(
+        RN.Pressable,
+        {
+          accessibilityRole: "button",
+          accessibilityLabel: section.name,
+          accessibilityState: { expanded: !section.collapsed },
+          style: { height: HEADER_HEIGHT, paddingLeft: 16, paddingRight: 22, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+          onPress: guard(() => uncategorized ? r.set("dmSectionCollapsed", !store.dmSectionCollapsed) : data.collapse(section.id)),
+          onLongPress: uncategorized ? void 0 : () => r.open("category-actions", CategoryActions, { categoryId: section.id })
+        },
+        h(Text, { heading: true, style: { color: section.color != null ? "#" + section.color.toString(16).padStart(6, "0") : muted, marginLeft: 0, marginBottom: 0 } }, section.name),
+        // Equicord's collapse arrow, drawn from two borders: right when collapsed, down when expanded.
+        h(RN.View, { style: { width: 7, height: 7, borderRightWidth: 2, borderBottomWidth: 2, borderColor: muted, transform: [{ rotate: section.collapsed ? "-45deg" : "45deg" }] } })
+      );
     }
     function DmRow({ id, close }) {
       const read = r.byStore("ReadStateStore");
@@ -1120,7 +1155,7 @@ var plugin = (() => {
         close ? h(Button, { text: "Close", onPress: close }) : null
       );
     }
-    const adaptList = createInboxAdapter(r, { data, recent, selected, getChannel, Header });
+    const adaptList = createInboxAdapter(r, { data, recent, getChannel, Header });
     function menuChannel(props) {
       if (props?.message) return null;
       const channel = props?.channel || getChannel(props?.channelId);
@@ -1131,7 +1166,7 @@ var plugin = (() => {
     function menuItem(props) {
       const channel = menuChannel(props);
       if (!channel) return null;
-      return { key: "mime-pin-dms", label: "Pin DMs", onPress: guard(() => r.open("channel-actions", ChannelActions, { channelId: channel.id })) };
+      return { key: "mime-pin-dms", label: "Pin DMs", iconName: "PinIcon", onPress: guard(() => r.open("channel-actions", ChannelActions, { channelId: channel.id })) };
     }
     function patchChannelMenu() {
       const module = r.byName("ChannelLongPressActionSheet", true);
@@ -1161,31 +1196,9 @@ var plugin = (() => {
         { title: "Pin DMs", close },
         h(Button, { text: "Open pinned DMs", onPress: () => r.open("pins", PinsPage, {}, { scrollable: false }) }),
         h(Button, { text: `Order: ${store.pinOrder === 1 ? "Custom" : "Most recent message"}`, onPress: () => r.set("pinOrder", store.pinOrder === 1 ? 0 : 1) }),
-        h(Toggle, { setting: "canCollapseDmSection", label: "Allow collapsing uncategorized DMs" }),
         h(Toggle, { setting: "nativeList", label: "Categories in compatible native DM lists" }),
-        h(Text, { muted: true }, `Hold a DM to add a category or pin it. ${r.status.nativeList ? "Categories are connected to your DM list." : "Open your DM list to connect categories; Open pinned DMs is also available."}`)
+        h(Text, { muted: true }, `Hold a DM and tap Pin DMs to add a category or pin it. ${r.status.nativeList ? "Categories are connected to your DM list." : "Open your DM list to connect categories; Open pinned DMs is also available."}`)
       );
-    }
-    function wrapDmRow(element, props = element.props) {
-      const channel = props?.channel;
-      if (!isDm(channel)) return;
-      const open = guard(() => r.open("channel-actions", ChannelActions, { channelId: channel.id }));
-      return h(RN.Pressable, {
-        ...element.key != null ? { key: element.key } : {},
-        onPress: (event) => {
-          event?.stopPropagation?.();
-          if (props.onPress) props.onPress(event);
-          else openDm(channel.id);
-        },
-        onLongPress: (event) => {
-          event?.stopPropagation?.();
-          open();
-        },
-        accessibilityActions: [{ name: "pin-dms", label: "Pin DMs" }],
-        onAccessibilityAction: (event) => {
-          if (event.nativeEvent.actionName === "pin-dms") open();
-        }
-      }, element);
     }
     return { Settings, PinsPage, ChannelActions, CategoryActions, Editor, data, sections, adaptList, start() {
       r.status.settingsEntry = registerSection(r, { name: "Pin DMs", items: [{ key: "MIME_PIN_DMS", title: () => "Pinned DMs", render: async () => ({ default: PinsPage }) }] });
@@ -1195,18 +1208,20 @@ var plugin = (() => {
       r.hook(["FlatList", "AnimatedFlatList", "FlashList"], adaptList);
       const FlashList = r.D.FlashList || r.find("FlashList")?.FlashList;
       if (FlashList) r.patch("after", React, "createElement", (args, result) => args[0] === FlashList ? adaptList(result) : void 0);
-      let rowModule;
-      try {
-        rowModule = r.B.metro.findByTypeName?.("MessagesItemChannelContent");
-      } catch {
+      const jsx = r.B.api?.react?.jsx, LegendList = r.find("AnimatedLegendList")?.AnimatedLegendList;
+      if (LegendList && jsx?.onJsxCreate && jsx.deleteJsxCreate) {
+        const adapt = (_type, element) => r.active ? adaptList(element) : void 0;
+        jsx.onJsxCreate(LegendList, adapt);
+        r.own(() => jsx.deleteJsxCreate(LegendList, adapt));
+        const redraw = () => r.byStore("UserGuildSettingsStore")?.emitChange?.();
+        redraw();
+        r.own(() => setTimeout(redraw));
       }
-      const rowPatched = r.patch("after", rowModule, "type", (args, result) => r.active && React.isValidElement(result) ? wrapDmRow(result, args[0]) : void 0);
-      if (!rowPatched) r.hook(["MessagesItemChannelContent"], (element) => wrapDmRow(element));
     } };
   }
-  PinDms.defaults = { pinOrder: 0, canCollapseDmSection: false, dmSectionCollapsed: false, userBasedCategoryList: {}, nativeList: true };
+  PinDms.defaults = { pinOrder: 0, dmSectionCollapsed: false, userBasedCategoryList: {}, nativeList: true };
 
   // PinDms.entry.js
-  var PinDms_entry_default = register({ "id": "mime.pindms", "name": "Pin DMs", "description": "Per-account DM categories, colors, ordering and collapsible sections for mobile.", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Aria" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "version": "1.0.2", "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PinDms" }, PinDms);
+  var PinDms_entry_default = register({ "id": "mime.pindms", "name": "Pin DMs", "description": "Per-account DM categories, colors, ordering and collapsible sections for mobile.", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Aria" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "version": "1.0.3", "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PinDms" }, PinDms);
   return __toCommonJS(PinDms_entry_exports);
 })();
