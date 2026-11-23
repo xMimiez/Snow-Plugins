@@ -90,6 +90,19 @@ test('NightyTab bundle adds one aligned button to a You bar built by a factory l
     }finally{await plugin.stop();}
 });
 
+test('GlobalBadges lists its badges in the badge directory as Ultimate with the reason they were given',async()=>{
+    const {directoryBadges,isDirectoryId,ULTIMATE_RARITY}=await import('../src/plugins/global-badges.js');
+    const extras=[{mod:'equicord',badge:'https://example.com/a.png',tooltip:'Equicord — Equicord Donor',reason:'Equicord Donor'},{mod:'badgevault',badge:'https://example.com/b.png',tooltip:'BadgeVault — yeet',reason:'yeet'}];
+    const all=directoryBadges(extras,true);
+    assert.deepEqual(all.map(b=>[b.name,b.description,b.rarity,b.owned]),[['Equicord Donor','unlocked by Equicord Donor',ULTIMATE_RARITY,true],['yeet','unlocked by yeet',ULTIMATE_RARITY,true]]);
+    assert(all.every(b=>isDirectoryId(b.badge_id)&&b.simple_icon_raster_url.startsWith('https://')));
+    assert.equal(new Set(all.map(b=>b.badge_id)).size,2);
+    assert.equal(isDirectoryId(18),false);
+    // BadgeVault stays out when Custom / BadgeVault is off, and the remaining ids do not shift.
+    assert.deepEqual(directoryBadges(extras,false).map(b=>b.badge_id),[all[0].badge_id]);
+    assert.deepEqual(directoryBadges(undefined,true),[]);
+});
+
 test('all Bunny spec-3 artifacts export definePlugin and match the hosted manifest', async()=>{
     const registry=JSON.parse(fs.readFileSync(path.join(root,'src/registry.json')));
     assert.equal(registry.length,24);

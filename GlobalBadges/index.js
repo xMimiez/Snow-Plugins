@@ -646,7 +646,7 @@ var plugin = (() => {
       const modName = serviceMap[String(mod).toLowerCase()] || mod;
       const tip = b.tooltip || b.name || b.label || modName;
       const label = showPrefix ? `${modName} \u2014 ${tip}` : tip;
-      return { mod, badge: url, tooltip: label, key: `${mod}-${idx}-${url}` };
+      return { mod, badge: url, tooltip: label, reason: tip, key: `${mod}-${idx}-${url}` };
     }).filter(Boolean);
   }
   function mergeUser(id, list) {
@@ -701,11 +701,42 @@ var plugin = (() => {
       mod: "badgevault",
       badge: b.badge,
       tooltip: showPrefix ? `BadgeVault \u2014 ${b.name}` : b.name,
+      reason: b.name,
       key: `vault-${idx}-${b.badge}`
     }));
   }
+  var ULTIMATE_RARITY = 99;
+  var ULTIMATE = { label: "Ultimate", border: "#f23f43", fill: "rgba(242, 63, 67, 0.24)", text: "#ff6b6e" };
+  var DIRECTORY_ID = -9e3;
+  var isDirectoryId = (id) => typeof id === "number" && id <= DIRECTORY_ID;
+  function directoryBadges(extras, showCustom) {
+    const list = [];
+    (extras || []).forEach((badge, idx) => {
+      if (!showCustom && String(badge.mod).toLowerCase() === "badgevault") return;
+      const reason = badge.reason || badge.tooltip;
+      list.push({
+        badge_id: DIRECTORY_ID - idx,
+        name: reason,
+        description: `unlocked by ${reason}`,
+        rarity: ULTIMATE_RARITY,
+        simple_icon_raster_url: badge.badge,
+        complex_icon_animated_url: badge.badge,
+        is_earnable: false,
+        owned: true,
+        hidden: false
+      });
+    });
+    return list;
+  }
   function GlobalBadges(r) {
-    const { h, React } = r, { Page, Text, Toggle } = ui(r);
+    const { h, React, RN } = r, { Page, Text, Toggle } = ui(r);
+    function UltimatePill() {
+      return h(
+        RN.View,
+        { style: { flexDirection: "row", alignItems: "center", paddingHorizontal: 6, minHeight: 20, borderRadius: 999, borderWidth: 1, backgroundColor: ULTIMATE.fill, borderColor: ULTIMATE.border } },
+        h(RN.Text, { style: { color: ULTIMATE.text, fontSize: 12, lineHeight: 16, fontWeight: "600", textTransform: "uppercase" } }, ULTIMATE.label)
+      );
+    }
     function applyBadgeProps(element) {
       const id = element?.props?.id;
       if (typeof id !== "string" || !id.startsWith("gb-")) return;
@@ -729,6 +760,21 @@ var plugin = (() => {
           refreshTimer = null;
         });
         r.hook(["ProfileBadge", "RenderBadge"], applyBadgeProps);
+        r.hook(["BadgeRarityPill"], (element) => element?.props?.rarity === ULTIMATE_RARITY ? h(UltimatePill) : void 0);
+        const directory = r.byStore("BadgeDirectoryStore");
+        if (directory) {
+          r.patch("after", directory, "getBadges", (args, result) => {
+            const userId = args?.[0];
+            if (!userId || !Array.isArray(result)) return;
+            const extra = directoryBadges(byUser[userId], r.store.showCustom);
+            return extra.length ? result.concat(extra) : void 0;
+          });
+          r.patch("after", directory, "getBadgeById", (args, result) => {
+            if (result || !isDirectoryId(args?.[0])) return;
+            const userId = args[1] || r.byStore("UserStore")?.getCurrentUser?.()?.id;
+            return directoryBadges(byUser[userId], r.store.showCustom).find((badge) => badge.badge_id === args[0]);
+          });
+        }
         const badgeModule = r.B.metro.findByName?.("useBadges", false);
         if (!badgeModule || typeof badgeModule.default !== "function") {
           r.B.logger?.warn?.("GlobalBadges: useBadges was not found");
@@ -772,6 +818,6 @@ var plugin = (() => {
   GlobalBadges.defaults = { showPrefix: true, showCustom: true, placeLeft: false };
 
   // GlobalBadges.entry.js
-  var GlobalBadges_entry_default = register({ "id": "mime.globalbadges", "name": "GlobalBadges", "description": "Profile badges from EquiBadges (all client mods) and ObaWorkshop BadgeVault.", "version": "1.1.2", "authors": [{ "name": "domi.btnr", "id": "354191516979429376" }, { "name": "Wolfie", "id": "347096063569559553" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/GlobalBadges" }, GlobalBadges);
+  var GlobalBadges_entry_default = register({ "id": "mime.globalbadges", "name": "GlobalBadges", "description": "Profile badges from EquiBadges (all client mods) and ObaWorkshop BadgeVault.", "version": "1.1.3", "authors": [{ "name": "domi.btnr", "id": "354191516979429376" }, { "name": "Wolfie", "id": "347096063569559553" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/GlobalBadges" }, GlobalBadges);
   return __toCommonJS(GlobalBadges_entry_exports);
 })();
