@@ -709,10 +709,16 @@ var plugin = (() => {
   var ULTIMATE = { label: "Ultimate", border: "#f23f43", fill: "rgba(242, 63, 67, 0.24)", text: "#ff6b6e" };
   var DIRECTORY_ID = -9e3;
   var isDirectoryId = (id) => typeof id === "number" && id <= DIRECTORY_ID;
-  function directoryBadges(extras, showCustom) {
+  function isShown(badge, userId, store) {
+    const mod = String(badge.mod).toLowerCase();
+    const vault = mod === "badgevault" || mod === "custom";
+    if (!vault && /donor|donator/i.test(badge.reason || "")) return store.showDonor !== false;
+    return !!store.showCustom || !(vault || String(badge.badge).includes(userId));
+  }
+  function directoryBadges(extras, userId, store) {
     const list = [];
     (extras || []).forEach((badge, idx) => {
-      if (!showCustom && String(badge.mod).toLowerCase() === "badgevault") return;
+      if (!isShown(badge, userId, store)) return;
       const reason = badge.reason || badge.tooltip;
       list.push({
         badge_id: DIRECTORY_ID - idx,
@@ -766,13 +772,13 @@ var plugin = (() => {
           r.patch("after", directory, "getBadges", (args, result) => {
             const userId = args?.[0];
             if (!userId || !Array.isArray(result)) return;
-            const extra = directoryBadges(byUser[userId], r.store.showCustom);
+            const extra = directoryBadges(byUser[userId], userId, r.store);
             return extra.length ? result.concat(extra) : void 0;
           });
           r.patch("after", directory, "getBadgeById", (args, result) => {
             if (result || !isDirectoryId(args?.[0])) return;
             const userId = args[1] || r.byStore("UserStore")?.getCurrentUser?.()?.id;
-            return directoryBadges(byUser[userId], r.store.showCustom).find((badge) => badge.badge_id === args[0]);
+            return directoryBadges(byUser[userId], userId, r.store).find((badge) => badge.badge_id === args[0]);
           });
         }
         const badgeModule = r.B.metro.findByName?.("useBadges", false);
@@ -790,7 +796,7 @@ var plugin = (() => {
           const seen = new Set(result.map((b) => b?.id).filter(Boolean));
           const next = result.slice();
           extras.forEach((badge, idx) => {
-            if (!r.store.showCustom && String(badge.mod).toLowerCase() === "badgevault") return;
+            if (!isShown(badge, userId, r.store)) return;
             const id = `gb-${userId}-${idx}`;
             if (seen.has(id)) return;
             badgeProps[id] = { id, source: { uri: badge.badge }, label: badge.tooltip, userId };
@@ -809,15 +815,16 @@ var plugin = (() => {
           { title: "GlobalBadges" },
           h(Toggle, { setting: "showPrefix", label: "Prefix", subLabel: "Show the client mod name in the badge label" }),
           h(Toggle, { setting: "placeLeft", label: "Place on the left", subLabel: "Insert badges at the start of the Discord badge bar" }),
-          h(Toggle, { setting: "showCustom", label: "Custom / BadgeVault", subLabel: "Include ObaWorkshop BadgeVault and custom URLs" }),
+          h(Toggle, { setting: "showCustom", label: "Custom / BadgeVault", subLabel: "Include ObaWorkshop BadgeVault and personal custom badges" }),
+          h(Toggle, { setting: "showDonor", label: "Donor badges", subLabel: "Include donor badges such as Equicord Donor" }),
           h(Text, { muted: true }, "Uses Discord\u2019s useBadges list plus ProfileBadge/RenderBadge JSX hooks (Rain/Bunny). Data from badges.equicord.org and plugins.obamabot.me/BadgeVault.")
         );
       }
     };
   }
-  GlobalBadges.defaults = { showPrefix: true, showCustom: true, placeLeft: false };
+  GlobalBadges.defaults = { showPrefix: true, showCustom: true, showDonor: true, placeLeft: false };
 
   // GlobalBadges.entry.js
-  var GlobalBadges_entry_default = register({ "id": "mime.globalbadges", "name": "GlobalBadges", "description": "Profile badges from EquiBadges (all client mods) and ObaWorkshop BadgeVault.", "version": "1.1.3", "authors": [{ "name": "domi.btnr", "id": "354191516979429376" }, { "name": "Wolfie", "id": "347096063569559553" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/GlobalBadges" }, GlobalBadges);
+  var GlobalBadges_entry_default = register({ "id": "mime.globalbadges", "name": "GlobalBadges", "description": "Profile badges from EquiBadges (all client mods) and ObaWorkshop BadgeVault.", "version": "1.1.4", "authors": [{ "name": "domi.btnr", "id": "354191516979429376" }, { "name": "Wolfie", "id": "347096063569559553" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "license": "MIT", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/GlobalBadges" }, GlobalBadges);
   return __toCommonJS(GlobalBadges_entry_exports);
 })();

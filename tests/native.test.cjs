@@ -91,16 +91,27 @@ test('NightyTab bundle adds one aligned button to a You bar built by a factory l
 });
 
 test('GlobalBadges lists its badges in the badge directory as Ultimate with the reason they were given',async()=>{
-    const {directoryBadges,isDirectoryId,ULTIMATE_RARITY}=await import('../src/plugins/global-badges.js');
+    const {directoryBadges,isDirectoryId,isShown,ULTIMATE_RARITY}=await import('../src/plugins/global-badges.js');
     const extras=[{mod:'equicord',badge:'https://example.com/a.png',tooltip:'Equicord — Equicord Donor',reason:'Equicord Donor'},{mod:'badgevault',badge:'https://example.com/b.png',tooltip:'BadgeVault — yeet',reason:'yeet'}];
-    const all=directoryBadges(extras,true);
+    const on={showCustom:true,showDonor:true},off={showCustom:false,showDonor:true};
+    const all=directoryBadges(extras,'1',on);
     assert.deepEqual(all.map(b=>[b.name,b.description,b.rarity,b.owned]),[['Equicord Donor','unlocked by Equicord Donor',ULTIMATE_RARITY,true],['yeet','unlocked by yeet',ULTIMATE_RARITY,true]]);
     assert(all.every(b=>isDirectoryId(b.badge_id)&&b.simple_icon_raster_url.startsWith('https://')));
     assert.equal(new Set(all.map(b=>b.badge_id)).size,2);
     assert.equal(isDirectoryId(18),false);
     // BadgeVault stays out when Custom / BadgeVault is off, and the remaining ids do not shift.
-    assert.deepEqual(directoryBadges(extras,false).map(b=>b.badge_id),[all[0].badge_id]);
-    assert.deepEqual(directoryBadges(undefined,true),[]);
+    assert.deepEqual(directoryBadges(extras,'1',off).map(b=>b.badge_id),[all[0].badge_id]);
+    assert.deepEqual(directoryBadges(undefined,'1',on),[]);
+    // Off leaves only developer and donor badges; donor badges have a switch of their own.
+    const badge=(mod,reason,url)=>({mod,reason,badge:url});
+    const donor=badge('equicord','Equicord Donor','https://badge.equicord.org/badges/1/a.webp');
+    const own=badge('equicord','blessed','https://badge.equicord.org/badges/1/b.png');
+    const dev=badge('vencord','Vencord Contributor','https://badges.equicord.org/public/badges/vencord.png');
+    const vault=badge('badgevault','donor','https://gb.obamabot.me/c.png');
+    assert.deepEqual([donor,own,dev,vault].map(b=>isShown(b,'1',off)),[true,false,true,false]);
+    assert.deepEqual([donor,own,dev,vault].map(b=>isShown(b,'1',on)),[true,true,true,true]);
+    assert.deepEqual([donor,own,dev,vault].map(b=>isShown(b,'1',{showCustom:true,showDonor:false})),[false,true,true,true]);
+    assert.equal(isShown(donor,'1',{showCustom:false}),true);
 });
 
 test('all Bunny spec-3 artifacts export definePlugin and match the hosted manifest', async()=>{
