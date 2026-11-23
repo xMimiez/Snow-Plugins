@@ -518,12 +518,26 @@ test('Pin DMs augments nested native channel menus and creates a category from h
     await Renderer.act(async()=>tree.root.findAllByType(ActionSheetRow)[1].props.onPress());await Renderer.act(async()=>tree.unmount());
     assert.equal(hooks.has('MessagesItemChannelContent'),false);
     await Renderer.act(async()=>{tree=Renderer.create(React.createElement([...sheets.values()][0]));});
+    assert.equal(tree.root.findByType('ActionSheet').props.startHeight,125+2*70);
     await Renderer.act(async()=>tree.root.findAllByType('Pressable').find(button=>button.props.accessibilityLabel==='New category').props.onPress());
     await Renderer.act(async()=>tree.unmount());
     await Renderer.act(async()=>{tree=Renderer.create(React.createElement([...sheets.values()][0]));});
     await Renderer.act(async()=>tree.root.findAllByType('RNInput')[0].props.onChangeText('Friends'));
     await Renderer.act(async()=>tree.root.findAllByType('Pressable').find(button=>button.props.accessibilityLabel==='Save').props.onPress());
     assert.equal(p.data.categories()[0].name,'Friends');assert.deepEqual(p.data.categories()[0].channels,['dm']);
+    await Renderer.act(async()=>tree.unmount());sheets.clear();
+    const press=label=>Renderer.act(async()=>tree.root.findAllByType('Pressable').find(button=>button.props.accessibilityLabel===label).props.onPress());
+    await Renderer.act(async()=>{tree=Renderer.create(module.default({channel}));});
+    await Renderer.act(async()=>tree.root.findAllByType(ActionSheetRow)[1].props.onPress());await Renderer.act(async()=>tree.unmount());
+    await Renderer.act(async()=>{tree=Renderer.create(React.createElement([...sheets.values()][0]));});
+    assert.equal(tree.root.findByType('ActionSheet').props.startHeight,125+4*70);await press('Edit Friends');await Renderer.act(async()=>tree.unmount());
+    await Renderer.act(async()=>{tree=Renderer.create(React.createElement([...sheets.values()][0]));});
+    assert.equal(tree.root.findAllByType('RNInput')[0].props.value,'Friends');await Renderer.act(async()=>tree.unmount());sheets.clear();
+    await Renderer.act(async()=>{tree=Renderer.create(React.createElement(p.Settings));});
+    assert.equal(tree.root.findAllByType('Pressable').some(button=>button.props.accessibilityLabel==='Open pinned DMs'),false);assert.equal(r.status.settingsEntry,undefined);
+    await press('Friends');await Renderer.act(async()=>tree.unmount());
+    await Renderer.act(async()=>{tree=Renderer.create(React.createElement([...sheets.values()][0]));});
+    assert(tree.root.findAllByType('Pressable').some(button=>button.props.accessibilityLabel==='Edit category'));
     await Renderer.act(async()=>tree.unmount());await r.dispose();assert.equal(module.default,original);
 });
 
@@ -574,6 +588,29 @@ test('Pin DMs sections the Messages LegendList, sizes headers for both call orde
     assert.match(JSON.stringify(header.toJSON()),/-45deg/);assert.equal(header.root.findByProps({accessibilityLabel:'Direct Messages'}).props.accessibilityState.expanded,false);
     await Renderer.act(async()=>p.data.collapse(p.data.categories()[0].id));assert.deepEqual(names(),['Friends','Direct Messages']);
     await Renderer.act(async()=>{header.unmount();tree.unmount();});await r.dispose();
+});
+
+test('Pin DMs category headers open the editor on hold and reorder categories on hold and drag',async()=>{
+    const {default:factory}=await import('../src/plugins/pin-dms.js');const channels={a:{id:'a',type:1},b:{id:'b',type:1}};
+    const pan={};for(const key of ['activateAfterLongPress','runOnJS','onStart','onUpdate','onEnd','onFinalize'])pan[key]=value=>{pan['$'+key]=value;return pan;};
+    const {r,sheets}=await harness(factory.defaults,[{GestureDetector:'GestureDetector',Gesture:{Pan:()=>pan}},{storeName:'ChannelStore',getChannel:id=>channels[id]},{storeName:'UserStore',getCurrentUser:()=>({id:'owner'})},{storeName:'PrivateChannelSortStore',getPrivateChannelIds:()=>['a','b']}]);
+    const p=factory(r);p.data.save(null,'One',1,'a');p.data.save(null,'Two',2,'b');
+    const element=React.createElement('LegendList',{data:[{kind:'channel',channelId:'a'},{kind:'channel',channelId:'b'}],renderItem:()=>null});
+    let tree,header;await Renderer.act(async()=>{tree=Renderer.create(p.adaptList(element));});
+    const list=()=>tree.root.findByType('LegendList'),order=()=>p.data.categories().map(c=>c.name);
+    await Renderer.act(async()=>{header=Renderer.create(list().props.renderItem({item:list().props.data[0]}));});
+    assert.equal(header.root.findByType('GestureDetector').props.gesture,pan);assert.equal(pan.$activateAfterLongPress,350);assert.equal(pan.$runOnJS,true);
+    await Renderer.act(async()=>pan.$onStart());assert.equal(list().props.scrollEnabled,false);
+    await Renderer.act(async()=>pan.$onUpdate({translationY:30}));assert.deepEqual(order(),['One','Two']);
+    await Renderer.act(async()=>pan.$onUpdate({translationY:45}));assert.deepEqual(order(),['Two','One']);
+    await Renderer.act(async()=>pan.$onUpdate({translationY:-5}));assert.deepEqual(order(),['One','Two']);
+    await Renderer.act(async()=>{pan.$onEnd();pan.$onFinalize();});assert.equal(sheets.size,0);assert.equal(list().props.scrollEnabled,undefined);
+    await Renderer.act(async()=>{pan.$onStart();pan.$onEnd();pan.$onFinalize();});assert.equal(sheets.size,1);
+    let editor;await Renderer.act(async()=>{editor=Renderer.create(React.createElement([...sheets.values()][0]));});
+    assert.equal(editor.root.findAllByType('RNInput')[0].props.value,'One');
+    await Renderer.act(async()=>editor.root.findAllByType('Pressable').find(button=>button.props.accessibilityLabel==='Delete category').props.onPress());
+    assert.deepEqual(order(),['Two']);
+    await Renderer.act(async()=>{editor.unmount();header.unmount();tree.unmount();});await r.dispose();
 });
 
 test('Pin DMs native list wraps only supported private-channel shapes and updates without mutating rows',async()=>{

@@ -391,7 +391,7 @@ var plugin = (() => {
             if (openSheets.get(id) === close) openSheets.delete(id);
             closed = true;
           }, []);
-          return r.h(ActionSheet, { scrollable: options.scrollable ?? true }, r.h(Boundary, null, r.h(Component, { ...props, close })));
+          return r.h(ActionSheet, { scrollable: options.scrollable ?? true, startHeight: options.height }, r.h(Boundary, null, r.h(Component, { ...props, close })));
         }
         openSheets.set(id, close);
         try {
@@ -621,110 +621,6 @@ var plugin = (() => {
     });
   }
 
-  // project:src/settings-section.js
-  function registerSection(r, section) {
-    const constants = r.find("SETTING_RENDERER_CONFIG");
-    const lists = r.find("createList");
-    if (!constants || !lists || !r.api.patcher?.before) return false;
-    const navigationRef = r.find("getRootNavigationRef");
-    const navigation = r.common.NavigationNative;
-    const routeName = "MIME_PLUGIN_SETTINGS_PAGE";
-    const canNavigate = navigationRef && navigation?.useRoute && navigation?.useNavigation;
-    const key = /* @__PURE__ */ Symbol.for("mime.snow.settingsSections.v2");
-    let hub = constants[key];
-    if (!hub) {
-      let CustomPageRenderer = function() {
-        const route = navigation.useRoute();
-        const nav = navigation.useNavigation();
-        r.React.useEffect(() => {
-          nav.setOptions({ title: route.params.title, headerShown: route.params.headerShown !== false });
-        }, [nav, route.params.title, route.params.headerShown]);
-        return route.params.render();
-      };
-      const descriptor = Object.getOwnPropertyDescriptor(constants, "SETTING_RENDERER_CONFIG");
-      if (!descriptor?.configurable) return false;
-      const entries = /* @__PURE__ */ new Map();
-      let value = constants.SETTING_RENDERER_CONFIG;
-      const get = () => {
-        const base = descriptor.get ? descriptor.get.call(constants) : value;
-        const extra = {};
-        if (canNavigate) extra[routeName] = {
-          type: "route",
-          useTitle: () => "Plugin",
-          screen: { route: routeName, getComponent: () => CustomPageRenderer }
-        };
-        for (const { runtime, section: s } of entries.values()) for (const row of s.items) {
-          extra[row.key] = {
-            type: "pressable",
-            icon: row.icon,
-            IconComponent: row.IconComponent || (() => null),
-            useTitle: row.title,
-            usePredicate: row.usePredicate,
-            useTrailing: row.useTrailing,
-            withArrow: true,
-            onPress: row.onPress || (async () => {
-              try {
-                const page = await row.render();
-                if (!runtime.active) return;
-                if (canNavigate) {
-                  const nav = navigationRef.getRootNavigationRef();
-                  nav.navigate(routeName, {
-                    title: row.title(),
-                    headerShown: row.headerShown,
-                    owner: runtime.meta.id,
-                    render: () => runtime.active ? runtime.h(page.default, { close: () => nav.goBack() }) : null
-                  });
-                } else runtime.open(row.key, page.default, {}, { scrollable: false });
-              } catch (error) {
-                if (runtime.active) runtime.error("Open settings page", error);
-              }
-            }),
-            ...row.rawTabsConfig
-          };
-        }
-        return { ...base, ...extra };
-      };
-      Object.defineProperty(constants, "SETTING_RENDERER_CONFIG", {
-        configurable: true,
-        enumerable: descriptor.enumerable,
-        get,
-        set: descriptor.set ? (v) => descriptor.set.call(constants, v) : (v) => {
-          value = v;
-        }
-      });
-      hub = { entries, close() {
-        if (Object.getOwnPropertyDescriptor(constants, "SETTING_RENDERER_CONFIG")?.get === get) {
-          Object.defineProperty(constants, "SETTING_RENDERER_CONFIG", descriptor.get ? descriptor : { ...descriptor, value });
-        }
-        delete constants[key];
-      } };
-      Object.defineProperty(constants, key, { value: hub, configurable: true });
-    }
-    const id = Symbol(section.name);
-    hub.entries.set(id, { runtime: r, section });
-    r.patch("before", lists, "createList", (args) => {
-      if (!r.active) return;
-      const config = args[0];
-      if (!config?.sections?.some((s) => s.settings?.includes("ACCOUNT"))) return;
-      const sections = config.sections.map((s) => ({ ...s, settings: s.settings ? [...s.settings] : s.settings }));
-      const keys = section.items.map((row) => row.key);
-      const existing = sections.find((s) => s.label === section.name);
-      if (existing) existing.settings = [.../* @__PURE__ */ new Set([...existing.settings || [], ...keys])];
-      else sections.unshift({ label: section.name, title: section.name, settings: keys });
-      args[0] = { ...config, sections };
-    });
-    r.own(() => {
-      if (canNavigate) {
-        const nav = navigationRef.getRootNavigationRef();
-        const current = nav?.getCurrentRoute?.();
-        if (current?.name === routeName && current.params?.owner === r.meta.id) nav.goBack();
-      }
-      hub.entries.delete(id);
-      if (!hub.entries.size) hub.close();
-    });
-    return true;
-  }
-
   // project:src/action-sheet.js
   function mapTree(React, node, transform) {
     const replacement = transform(node);
@@ -855,7 +751,7 @@ var plugin = (() => {
 
   // project:src/plugins/pin-dms-list.js
   var HEADER_HEIGHT = 40;
-  function createInboxAdapter(r, { data, recent, getChannel, Header }) {
+  function createInboxAdapter(r, { data, recent, getChannel, Header, dragging }) {
     const { React, h, store } = r;
     const recordId = (value) => {
       const id = typeof value === "string" ? value : value?.channel?.id || value?.channelId || value?.id;
@@ -946,6 +842,7 @@ var plugin = (() => {
         ...sourceRef ? { ref: bridgeRef } : {},
         extraData: { host: props.extraData, pins: store.userBasedCategoryList, order: store.pinOrder, collapsed: store.dmSectionCollapsed },
         keyExtractor: (row) => row.key,
+        scrollEnabled: dragging?.() ? false : props.scrollEnabled,
         renderItem: (info) => info.item.header ? h(Header, { section: info.item.header }) : props.renderItem({ ...info, item: info.item.item, index: info.item.index, extraData: props.extraData }),
         getItemType: (row) => row.header ? "mime-pin-header" : props.getItemType?.(row.item, row.index, props.extraData) ?? "mime-original-row",
         overrideItemLayout: props.overrideItemLayout ? (layout, row, _index, maxColumns) => row.header ? Object.assign(layout, { size: HEADER_HEIGHT, span: 1 }) : props.overrideItemLayout(layout, row.item, row.index, maxColumns, props.extraData) : void 0,
@@ -985,8 +882,13 @@ var plugin = (() => {
     const isDm = (channel) => channel && [1, 3].includes(channel.type);
     const getChannel = (id) => channelStore()?.getChannel?.(id);
     const recent = () => r.byStore("PrivateChannelSortStore")?.getPrivateChannelIds?.() || [];
-    const selected = () => r.byStore("SelectedChannelStore")?.getChannelId?.();
-    const sections = () => sectionsFor(data.categories(), store, recent(), selected(), (id) => isDm(getChannel(id)));
+    const sheet = (buttons) => ({ height: Math.min((RN.Dimensions?.get?.("window")?.height || 800) * 0.85, 125 + buttons * 70) });
+    const openEditor = (props) => r.open("category-edit", Editor, props, sheet(props.categoryId ? 9 : 8));
+    const openCategory = (categoryId) => r.open("category-actions", CategoryActions, { categoryId }, sheet(6));
+    const openChannel = (channelId) => {
+      const list = data.categories(), pinned = list.some((c) => c.channels.includes(channelId));
+      r.open("channel-actions", ChannelActions, { channelId }, sheet(list.length + 2 + (pinned ? (store.pinOrder === 1 ? 4 : 2) - 1 : 0)));
+    };
     const title = (id) => {
       const channel = getChannel(id);
       return channel?.name || channel?.recipients?.map((id2) => {
@@ -994,12 +896,6 @@ var plugin = (() => {
         return user?.globalName || user?.global_name || user?.username || "Unknown user";
       }).join(", ") || "Direct Message";
     };
-    function openDm(id, close) {
-      const navigation = r.find("transitionToChannel");
-      if (!isDm(getChannel(id)) || !navigation) return r.toast("This DM is unavailable.");
-      close?.();
-      navigation.transitionToChannel(id, {});
-    }
     function guard(action, owner = data.userId()) {
       return async () => {
         if (!r.active) return;
@@ -1015,7 +911,7 @@ var plugin = (() => {
       r.useRefresh();
       React.useEffect(() => {
         if (!r.active) return;
-        const stores = ["UserStore", "ChannelStore", "PrivateChannelSortStore", "SelectedChannelStore", "ReadStateStore"].map((name) => r.byStore(name)).filter(Boolean);
+        const stores = ["UserStore", "ChannelStore", "PrivateChannelSortStore"].map((name) => r.byStore(name)).filter(Boolean);
         const update = () => {
           if (r.active) r.changed();
         };
@@ -1062,7 +958,11 @@ var plugin = (() => {
             pending.current = false;
             if (r.active) setSaving(false);
           }
-        }) })
+        }) }),
+        categoryId ? h(Button, { text: "Delete category", variant: "secondary", onPress: guard(() => {
+          data.remove(categoryId);
+          close?.();
+        }) }) : null
       );
     }
     function CategoryActions({ categoryId, close }) {
@@ -1074,7 +974,7 @@ var plugin = (() => {
         { title: category.name, close },
         h(Button, { text: "Edit category", onPress: guard(() => {
           close?.();
-          r.open("category-edit", Editor, { categoryId });
+          openEditor({ categoryId });
         }) }),
         h(Button, { text: category.collapsed ? "Expand category" : "Collapse category", onPress: guard(() => data.collapse(categoryId)) }),
         h(Button, { text: "Move up", disabled: index === 0, onPress: guard(() => data.moveCategory(categoryId, -1)) }),
@@ -1096,6 +996,10 @@ var plugin = (() => {
           data.unpin(channelId);
           close?.();
         }) }) : null,
+        category ? h(Button, { text: `Edit ${category.name}`, onPress: guard(() => {
+          close?.();
+          openEditor({ categoryId: category.id });
+        }) }) : null,
         category && store.pinOrder === 1 ? h(
           RN.View,
           null,
@@ -1108,54 +1012,71 @@ var plugin = (() => {
         }) })),
         h(Button, { text: "New category", onPress: guard(() => {
           close?.();
-          r.open("category-edit", Editor, { channelId });
+          openEditor({ channelId });
         }) })
       );
     }
+    let dragId = null;
+    const setDrag = (id) => {
+      dragId = id;
+      r.changed();
+    };
+    function dragGesture(Gesture, live) {
+      let id = null, moved, base;
+      return Gesture.Pan().activateAfterLongPress(350).runOnJS(true).onStart(() => {
+        id = live.current.section.id;
+        moved = false;
+        base = 0;
+        setDrag(id);
+      }).onUpdate(({ translationY }) => {
+        const steps = Math.trunc((translationY - base) / HEADER_HEIGHT);
+        if (!steps || id == null) return;
+        moved = true;
+        base += steps * HEADER_HEIGHT;
+        guard(() => {
+          for (let n = Math.abs(steps); n--; ) data.moveCategory(id, Math.sign(steps));
+        })();
+      }).onEnd(() => {
+        if (!moved) live.current.edit();
+      }).onFinalize(() => {
+        if (id != null && dragId === id) setDrag(null);
+        id = null;
+      });
+    }
     function Header({ section }) {
+      r.useRefresh();
       const uncategorized = section.id === "uncategorized", muted = "#B5BAC1";
-      return h(
+      const collapse = guard(() => uncategorized ? r.set("dmSectionCollapsed", !store.dmSectionCollapsed) : data.collapse(section.id));
+      const edit = guard(() => openEditor({ categoryId: section.id }));
+      const live = React.useRef(null);
+      live.current = { section, edit };
+      const handler = React.useMemo(() => r.find("GestureDetector", "Gesture"), []);
+      const gesture = React.useMemo(() => handler?.Gesture?.Pan ? dragGesture(handler.Gesture, live) : null, [handler]);
+      React.useEffect(() => () => {
+        if (dragId === live.current.section.id) setDrag(null);
+      }, []);
+      const body = h(
         RN.Pressable,
         {
           accessibilityRole: "button",
           accessibilityLabel: section.name,
           accessibilityState: { expanded: !section.collapsed },
-          style: { height: HEADER_HEIGHT, paddingLeft: 16, paddingRight: 22, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-          onPress: guard(() => uncategorized ? r.set("dmSectionCollapsed", !store.dmSectionCollapsed) : data.collapse(section.id)),
-          onLongPress: uncategorized ? void 0 : () => r.open("category-actions", CategoryActions, { categoryId: section.id })
+          style: { height: HEADER_HEIGHT, paddingLeft: 16, paddingRight: 22, flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: dragId === section.id ? "#FFFFFF1A" : void 0 },
+          onPress: collapse,
+          ...uncategorized ? {} : {
+            onLongPress: gesture ? void 0 : edit,
+            accessibilityHint: "Hold to edit, hold and drag to reorder",
+            accessibilityActions: [{ name: "longpress", label: "Edit category" }],
+            onAccessibilityAction: edit
+          }
         },
         h(Text, { heading: true, style: { color: section.color != null ? "#" + section.color.toString(16).padStart(6, "0") : muted, marginLeft: 0, marginBottom: 0 } }, section.name),
         // Equicord's collapse arrow, drawn from two borders: right when collapsed, down when expanded.
         h(RN.View, { style: { width: 7, height: 7, borderRightWidth: 2, borderBottomWidth: 2, borderColor: muted, transform: [{ rotate: section.collapsed ? "-45deg" : "45deg" }] } })
       );
+      return gesture && !uncategorized ? h(handler.GestureDetector, { gesture }, body) : body;
     }
-    function DmRow({ id, close }) {
-      const read = r.byStore("ReadStateStore");
-      const unread = !!read?.hasUnread?.(id), count = read?.getMentionCount?.(id) || 0;
-      const label = `${title(id)}${count ? ` (${count})` : ""}${unread ? " \u2022" : ""}`;
-      const onPress = () => openDm(id, close), onLongPress = () => r.open("channel-actions", ChannelActions, { channelId: id });
-      return h(RN.Pressable, {
-        onPress,
-        onLongPress,
-        accessibilityRole: "button",
-        accessibilityState: { selected: id === selected() },
-        style: { padding: 12 }
-      }, h(Text, null, label));
-    }
-    function PinsPage({ close }) {
-      useStores();
-      const list = sections();
-      return h(
-        RN.View,
-        { style: { height: Math.max(420, (RN.Dimensions?.get("window")?.height || 640) * 0.75) } },
-        h(Text, { heading: true }, "Pin DMs"),
-        h(Text, { muted: true }, "Tap a category to collapse it. Hold a category or DM to edit, pin or reorder."),
-        h(Button, { text: "New category", onPress: () => r.open("category-edit", Editor) }),
-        RN.SectionList ? h(RN.SectionList, { sections: list, keyExtractor: (id) => id, renderItem: ({ item }) => h(DmRow, { id: item, close }), renderSectionHeader: ({ section }) => h(Header, { section }), stickySectionHeadersEnabled: false }) : h(RN.ScrollView || RN.View, null, ...list.map((s) => h(RN.View, { key: s.id }, h(Header, { section: s }), ...s.data.map((id) => h(DmRow, { key: id, id, close }))))),
-        close ? h(Button, { text: "Close", onPress: close }) : null
-      );
-    }
-    const adaptList = createInboxAdapter(r, { data, recent, getChannel, Header });
+    const adaptList = createInboxAdapter(r, { data, recent, getChannel, Header, dragging: () => dragId != null });
     function menuChannel(props) {
       if (props?.message) return null;
       const channel = props?.channel || getChannel(props?.channelId);
@@ -1166,7 +1087,7 @@ var plugin = (() => {
     function menuItem(props) {
       const channel = menuChannel(props);
       if (!channel) return null;
-      return { key: "mime-pin-dms", label: "Pin DMs", iconName: "PinIcon", onPress: guard(() => r.open("channel-actions", ChannelActions, { channelId: channel.id })) };
+      return { key: "mime-pin-dms", label: "Pin DMs", iconName: "PinIcon", onPress: guard(() => openChannel(channel.id)) };
     }
     function patchChannelMenu() {
       const module = r.byName("ChannelLongPressActionSheet", true);
@@ -1194,14 +1115,15 @@ var plugin = (() => {
       return h(
         Page,
         { title: "Pin DMs", close },
-        h(Button, { text: "Open pinned DMs", onPress: () => r.open("pins", PinsPage, {}, { scrollable: false }) }),
         h(Button, { text: `Order: ${store.pinOrder === 1 ? "Custom" : "Most recent message"}`, onPress: () => r.set("pinOrder", store.pinOrder === 1 ? 0 : 1) }),
         h(Toggle, { setting: "nativeList", label: "Categories in compatible native DM lists" }),
-        h(Text, { muted: true }, `Hold a DM and tap Pin DMs to add a category or pin it. ${r.status.nativeList ? "Categories are connected to your DM list." : "Open your DM list to connect categories; Open pinned DMs is also available."}`)
+        h(Text, { heading: true }, "Categories"),
+        ...data.categories().map((c) => h(Button, { key: c.id, text: c.name, variant: "secondary", onPress: guard(() => openCategory(c.id)) })),
+        h(Button, { text: "New category", onPress: guard(() => openEditor({})) }),
+        h(Text, { muted: true }, `Hold a DM and tap Pin DMs to add a category or pin it. ${r.status.nativeList ? "Categories are connected to your DM list." : "Open your DM list to connect categories."}`)
       );
     }
-    return { Settings, PinsPage, ChannelActions, CategoryActions, Editor, data, sections, adaptList, start() {
-      r.status.settingsEntry = registerSection(r, { name: "Pin DMs", items: [{ key: "MIME_PIN_DMS", title: () => "Pinned DMs", render: async () => ({ default: PinsPage }) }] });
+    return { Settings, ChannelActions, CategoryActions, Editor, data, adaptList, start() {
       r.status.channelMenu = !!patchChannelMenu();
       const lazyMenu = patchLazySheet(r, (_key, props) => menuItem(props));
       r.status.channelMenu = r.status.channelMenu || !!lazyMenu;
@@ -1222,6 +1144,6 @@ var plugin = (() => {
   PinDms.defaults = { pinOrder: 0, dmSectionCollapsed: false, userBasedCategoryList: {}, nativeList: true };
 
   // PinDms.entry.js
-  var PinDms_entry_default = register({ "id": "mime.pindms", "name": "Pin DMs", "description": "Per-account DM categories, colors, ordering and collapsible sections for mobile.", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Aria" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "version": "1.0.3", "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PinDms" }, PinDms);
+  var PinDms_entry_default = register({ "id": "mime.pindms", "name": "Pin DMs", "description": "Per-account DM categories, colors, ordering and collapsible sections for mobile.", "authors": [{ "name": "Vendicated", "id": "343383572805058560" }, { "name": "Aria" }, { "name": "Mime | N0_.q3", "id": "957164619061932045" }], "version": "1.0.4", "license": "GPL-3.0-or-later", "source": "https://github.com/xMimiez/Snow-Plugins/tree/main/PinDms" }, PinDms);
   return __toCommonJS(PinDms_entry_exports);
 })();

@@ -234,7 +234,7 @@ export function createRuntime(B, meta, defaults = {}) {
             }
             function Page() {
                 React.useEffect(() => () => { if (openSheets.get(id) === close) openSheets.delete(id); closed = true; }, []);
-                return r.h(ActionSheet, { scrollable: options.scrollable ?? true }, r.h(Boundary, null, r.h(Component, { ...props, close })));
+                return r.h(ActionSheet, { scrollable: options.scrollable ?? true, startHeight: options.height }, r.h(Boundary, null, r.h(Component, { ...props, close })));
             }
             openSheets.set(id, close);
             try { sheets.showSheet(id, Page); } catch (error) { close(); throw error; }

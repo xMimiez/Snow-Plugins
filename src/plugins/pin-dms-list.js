@@ -3,7 +3,7 @@ import { sectionsFor } from './pin-dms-data.js';
 
 export const HEADER_HEIGHT = 40;
 
-export function createInboxAdapter(r, { data, recent, getChannel, Header }) {
+export function createInboxAdapter(r, { data, recent, getChannel, Header, dragging }) {
     const { React, h, store } = r;
     const recordId = value => {
         const id = typeof value === 'string' ? value : value?.channel?.id || value?.channelId || value?.id;
@@ -87,6 +87,7 @@ export function createInboxAdapter(r, { data, recent, getChannel, Header }) {
         return React.cloneElement(original, {
             data: rows, ...(sourceRef ? { ref: bridgeRef } : {}), extraData: { host: props.extraData, pins: store.userBasedCategoryList, order: store.pinOrder, collapsed: store.dmSectionCollapsed },
             keyExtractor: row => row.key,
+            scrollEnabled: dragging?.() ? false : props.scrollEnabled,
             renderItem: info => info.item.header ? h(Header, { section: info.item.header }) : props.renderItem({ ...info, item: info.item.item, index: info.item.index, extraData: props.extraData }),
             getItemType: row => row.header ? 'mime-pin-header' : props.getItemType?.(row.item, row.index, props.extraData) ?? 'mime-original-row',
             overrideItemLayout: props.overrideItemLayout ? (layout, row, _index, maxColumns) => row.header ? Object.assign(layout, { size: HEADER_HEIGHT, span: 1 }) : props.overrideItemLayout(layout, row.item, row.index, maxColumns, props.extraData) : undefined,

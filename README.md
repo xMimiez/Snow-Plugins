@@ -30,7 +30,7 @@ These releases use **Bunny spec 3**. Install from the `manifest.json` URL, then 
 | [TokenUtils](TokenUtils/) | 1.0.2 | `/get-token` copy alert and `/token-info` username, display name, email, number. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/TokenUtils/manifest.json) |
 | [GlobalBadges](GlobalBadges/) | 1.1.4 | Profile badges from EquiBadges and ObaWorkshop BadgeVault. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/GlobalBadges/manifest.json) |
 | [NightyTab](NightyTab/) | 2.0.8 | Nighty in mobile settings, with an optional profile-bar button and Download Script replies. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/NightyTab/manifest.json) |
-| [PinDms](PinDms/) | 1.0.3 | Per-account DM categories, colors, ordering and collapsible sections for mobile. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/PinDms/manifest.json) |
+| [PinDms](PinDms/) | 1.0.4 | Per-account DM categories, colors, ordering and collapsible sections for mobile. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/PinDms/manifest.json) |
 | [IconThemer](IconThemer/) | 1.0.2 | Icon packs and per-icon colors. | [Install](https://raw.githubusercontent.com/xMimiez/Snow-Plugins/main/IconThemer/manifest.json) |
 
 ## Snow install links
