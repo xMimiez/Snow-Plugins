@@ -1,0 +1,19 @@
+{
+    "id": "mime.nitrosniper",
+    "name": "NitroSniper",
+    "description": "Process new gift links with a deduplicated queue, visible results, automated Accept/Confirm-button press (including the human-verification sheet) and hCaptcha solving.",
+    "version": "2.4.5",
+    "authors": [
+        {
+            "name": "neoarz",
+            "id": "218675193592283137"
+        },
+        {
+            "name": "Mime | N0_.q3",
+            "id": "957164619061932045"
+        }
+    ],
+    "license": "MIT",
+    "source": "https://github.com/xMimiez/SnowPlugins/tree/main/plugins/mime.nitrosniper",
+    "entry": "src/index.ts"
+}

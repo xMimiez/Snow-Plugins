@@ -5,7 +5,7 @@
   "version": "2.4.4",
   "display": {
     "name": "NitroSniper",
-    "description": "Process new gift links with a deduplicated queue, visible results, automated Accept-button press and hCaptcha solving.",
+    "description": "Process new gift links with a deduplicated queue, visible results, automated Accept/Confirm-button press (including the human-verification sheet) and hCaptcha solving.",
     "authors": [
       {
         "name": "neoarz",

@@ -830,10 +830,10 @@ var plugin = (() => {
     const solver = createCaptchaSolver(r, React);
     const seen = /* @__PURE__ */ new Map(), queue = [];
     let running = false, stopped = false, started = Date.now(), waitTimer, releaseWait;
-    const ACCEPT_BUTTON_RE = /^(accept|redeem(?: now)?|claim|get nitro)\b/i;
+    const ACCEPT_BUTTON_RE = /^(accept|redeem(?: now)?|claim|get nitro|confirm|i'?m not a robot|verify)\b/i;
     const autoPress = { armedUntil: 0, fired: false };
-    function armAutoPress() {
-      autoPress.armedUntil = Date.now() + 15e3;
+    function armAutoPress(ms = 6e4) {
+      autoPress.armedUntil = Date.now() + ms;
       autoPress.fired = false;
     }
     r.patch("after", React, "createElement", (args, result) => {
@@ -843,6 +843,7 @@ var plugin = (() => {
       if (typeof props?.onPress !== "function" || !ACCEPT_BUTTON_RE.test(label)) return result;
       autoPress.fired = true;
       const press = props.onPress;
+      r.toast("Pressing \u201C" + label.slice(0, 40) + "\u201D\u2026", "ShieldIcon");
       setTimeout(() => {
         if (r.active && !stopped) {
           try {
@@ -924,6 +925,7 @@ var plugin = (() => {
             }
             if (!success) {
               let captchaKey, captchaRqtoken;
+              armAutoPress();
               for (let attempt = 0; ; attempt++) {
                 try {
                   const payload = { channel_id: item.channelId || null };
@@ -942,6 +944,7 @@ var plugin = (() => {
                     const token = await solver.solve(cap.sitekey, cap.rqtoken);
                     captchaKey = token;
                     captchaRqtoken = cap.rqtoken;
+                    armAutoPress();
                     attempt--;
                     continue;
                   }
@@ -949,6 +952,7 @@ var plugin = (() => {
                   stats.lastResult = `Rate limited; retrying in ${Math.ceil(e.retryAfter)}s`;
                   r.changed();
                   await wait(e.retryAfter * 1e3 + 100);
+                  armAutoPress();
                   if (stopped || !r.active) return;
                 }
               }

@@ -1,0 +1,189 @@
+// Automated hCaptcha solving for gift redemption on Snow (mobile Discord).
+// Renders the real hCaptcha widget inside a mounted WebView sheet and
+// executes it programmatically. When hCaptcha serves its mobile TouchUI
+// interstitial ("Wait! Are you human?" + Confirm), the plugin's armed
+// auto-press handles the button.
+
+import type { Any, Runtime } from "../../../shared/runtime";
+
+export interface CaptchaChallenge {
+    service: string;
+    sitekey: string | null;
+    rqtoken: string | null;
+}
+
+export function captchaErrorInfo(e: Any): CaptchaChallenge | null {
+    const body = e?.body || {};
+    if (body.captcha_required || body.captcha_service || body.captcha_sitekey) {
+        return {
+            service: body.captcha_service || "hcaptcha",
+            sitekey: body.captcha_sitekey || body.captcha_site_key || null,
+            rqtoken: body.captcha_rqtoken || body.captcha_rq_token || null,
+        };
+    }
+    return null;
+}
+
+const CAPTCHA_HTML = [
+    '<!DOCTYPE html><html><head><meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    '<script src="https://js.hcaptcha.com/1/api.js?render=explicit" onload="window.__apiReady=true"><\/script>',
+    '</head><body style="margin:0">',
+    '<div id="box" style="position:fixed;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center"></div>',
+    '<script>',
+    'var widgetId = null, rqdata = null;',
+    'function post(type, data) {',
+    '  var payload = Object.assign({ type: type }, data || {});',
+    '  try { window.ReactNativeWebView.postMessage(JSON.stringify(payload)); } catch (e) {}',
+    '}',
+    'post("ready", { apiReady: !!window.__apiReady });',
+    'window.solveCaptcha = function (sk, rq) {',
+    '  try {',
+    '    rqdata = rq || null;',
+    '    if (window.hcaptcha && window.hcaptcha.setRqdata && rqdata) { try { hcaptcha.setRqdata(rqdata); } catch (e) {} }',
+    '    if (widgetId !== null) { try { hcaptcha.reset(widgetId); } catch (e) {} }',
+    '    else {',
+    '      var opts = {',
+    '        sitekey: sk,',
+    '        size: "invisible",',
+    '        callback: function (token) { post("token", { token: token }); },',
+    '        "error-callback": function (err) { post("error", { message: String(err) }); },',
+    '        "expired-callback": function () { post("error", { message: "captcha expired" }); },',
+    '        "chalexpired-callback": function () { post("error", { message: "challenge expired" }); },',
+    '        "open-callback": function () { post("challenge_opened", {}); },',
+    '        "close-callback": function () { post("challenge_closed", {}); }',
+    '      };',
+    '      if (rqdata) opts.rqdata = rqdata;',
+    '      widgetId = hcaptcha.render("box", opts);',
+    '    }',
+    '    hcaptcha.execute(widgetId);',
+    '  } catch (e) { post("error", { message: String(e && e.message || e) }); }',
+    '};',
+    '<\/script></body></html>',
+].join("");
+
+// Desktop UA: hCaptcha serves the invisible desktop flow instead of the
+// mobile TouchUI interstitial ("Are you a human?" + Confirm button), so
+// hcaptcha.execute() can pass passively. When it still interstitials, the
+// armed auto-press in nitro-sniper presses Confirm for us.
+const DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+
+const SOLVER_TIMEOUT = 60000;
+const MAX_AUTO_RETRY = 3;
+
+export function createCaptchaSolver(r: Runtime, React: Any) {
+    const WebView = r.find("WebView")?.WebView || r.byName("WebView");
+    let sheetClose: (() => void) | null = null;
+    let pending: Any = null;
+    let requestId = 0;
+    let epoch = 0; // bumped to force a WebView remount (fresh page, fresh widget)
+
+    function closeSheet() {
+        if (!sheetClose) return;
+        const close = sheetClose;
+        sheetClose = null;
+        try { close(); } catch { /* sheet may already be gone */ }
+    }
+
+    function mountHost() {
+        if (sheetClose || !React) return;
+        try {
+            // r.open mounts through Snow's real bottom-sheet API (showSheet)
+            // and returns its close function. The runtime tracks unmount itself.
+            sheetClose = r.open("captcha", function CaptchaHost() {
+                return element() || null;
+            }, {}, { scrollable: false });
+        } catch {
+            sheetClose = null;
+        }
+    }
+
+    function solve(sitekey: string, rqtoken: string | null): Promise<string> {
+        return new Promise((resolvePromise, rejectPromise) => {
+            const p: Any = { pending: true, resolvePromise, rejectPromise, sitekey, rqtoken: rqtoken || null, id: ++requestId };
+            const settle = (ok: boolean, value: Any) => { if (p.pending) { p.pending = false; ok ? p.resolvePromise(value) : p.rejectPromise(value); } };
+
+            startWidget();
+            function startWidget() {
+                if (!p.pending) return;
+                if (!WebView) { settle(false, new Error("WebView unavailable in this Snow build")); return; }
+                pending = p;
+                epoch++;
+                p.retries = 0;
+                mountHost();
+                if (!sheetClose) { settle(false, new Error("captcha sheet unavailable in this Snow build")); return; }
+                r.changed();
+                setTimeout(() => {
+                    if (pending === p && p.pending) {
+                        pending = null;
+                        closeSheet();
+                        settle(false, new Error("captcha solve timed out (widget did not return a token in 60s)"));
+                        r.changed();
+                    }
+                }, SOLVER_TIMEOUT);
+            }
+        });
+    }
+
+    function handleMessage(data: Any) {
+        let msg: Any;
+        try { msg = JSON.parse(data); } catch { return; }
+        const current = pending;
+        if (!current || !current.pending) return;
+        if (msg.type === "token") {
+            pending = null;
+            closeSheet();
+            current.pending = false;
+            current.resolvePromise(String(msg.token));
+            r.changed();
+        } else if (msg.type === "error") {
+            if (current.retries < MAX_AUTO_RETRY) {
+                // Remount the WebView (epoch bump -> new key -> fresh page) and re-execute.
+                current.retries++;
+                epoch++;
+                r.changed();
+                return;
+            }
+            pending = null;
+            closeSheet();
+            current.pending = false;
+            current.rejectPromise(new Error(`captcha widget: ${msg.message || "unknown error"}`));
+            r.changed();
+        } else if (msg.type === "challenge_opened") {
+            r.toast("hCaptcha needs one tap — finish the puzzle on screen", "ShieldIcon");
+            r.changed();
+        }
+    }
+
+    function element() {
+        if (!pending || !pending.pending || !WebView || !React) return null;
+        const sitekey = String(pending.sitekey || "");
+        const rq = pending.rqtoken ? JSON.stringify(pending.rqtoken) : "null";
+        const inject = "if (window.solveCaptcha) { window.solveCaptcha(" + JSON.stringify(sitekey) + ", " + rq + "); } else { setTimeout(function () { window.solveCaptcha && window.solveCaptcha(" + JSON.stringify(sitekey) + ", " + rq + "); }, 1500); }";
+        return React.createElement(WebView, {
+            key: `captcha-${pending.id}-${epoch}`,
+            source: { html: CAPTCHA_HTML, baseUrl: "https://discord.com" },
+            originWhitelist: ["*"],
+            javaScriptEnabled: true,
+            domStorageEnabled: true,
+            // Desktop UA makes hCaptcha serve the invisible desktop flow instead
+            // of the mobile TouchUI interstitial, so execute() can pass passively.
+            userAgent: DESKTOP_UA,
+            applicationUserAgent: DESKTOP_UA,
+            style: { height: "100%", width: "100%" },
+            injectedJavaScript: inject,
+            onMessage: (event: Any) => handleMessage(event?.nativeEvent?.data),
+        });
+    }
+
+    function dispose() {
+        closeSheet();
+        if (pending && pending.pending) {
+            pending.pending = false;
+            pending.rejectPromise(new Error("captcha solver disposed"));
+        }
+        pending = null;
+    }
+
+    return { solve, element, handleMessage, isPending: () => !!(pending && pending.pending), dispose };
+}
