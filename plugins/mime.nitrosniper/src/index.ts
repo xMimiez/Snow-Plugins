@@ -19,25 +19,208 @@ function NitroSniper(r: Runtime) {    const { h, React } = r, { Page, Text, Butt
     const seen = new Map<string, number>(), queue: Any[] = [];
     let running = false, stopped = false, started = Date.now(), waitTimer: Any, releaseWait: Any;
 
-    // --- Native Accept/Confirm-button automation -------------------------------
-    // Matches the gift sheet's Accept button AND hCaptcha's mobile TouchUI
-    // interstitial: "Wait! Are you human?" / "Please confirm you're not a robot."
-    // with a blue Confirm BaseButton. Armed for the whole claim window so a
-    // verification sheet that mounts mid-redeem still gets pressed.
-    const ACCEPT_BUTTON_RE = /^(accept|redeem(?: now)?|claim|get nitro|confirm|i'?m not a robot|verify)\b/i;
-    const autoPress = { armedUntil: 0, fired: false };
-    function armAutoPress(ms = 60000) { autoPress.armedUntil = Date.now() + ms; autoPress.fired = false; }
+    // Match committed buttons inside the two known sheets, not similarly named
+    // handlers on unrelated dialogs or elements that React hasn't mounted.
+    const SHEET_RE = /^(CaptchaModal|GiftCodeRedeemModal)$/;
+    const BUTTON_RE = /^(BaseTextButton|BaseButton|Pressable)$/;
+    const GIFT_HANDLER_RE = /^(redeemGiftCode|handleRedeem(?:GiftCode)?|handleAccept(?:Gift)?|handleConfirm)$/i;
+    const GIFT_LABEL_RE = /^(accept(?: gift)?|redeem(?: gift)?|claim(?: gift)?|get nitro|confirm)$/i;
+    function elementText(node: Any, depth = 0): string {
+        if (node == null || depth > 6) return "";
+        if (typeof node === "string" || typeof node === "number") return String(node);
+        if (Array.isArray(node)) return node.map((n: Any) => elementText(n, depth + 1)).join("");
+        if (typeof node === "object" && (node as Any).props) {
+            const p = (node as Any).props;
+            const own = typeof p?.text === "string" ? p.text : typeof p?.accessibilityLabel === "string" ? p.accessibilityLabel : typeof p?.label === "string" ? p.label : "";
+            return own + " " + elementText(p?.children, depth + 1);
+        }
+        return "";
+    }
     r.patch("after", React, "createElement", (args: Any[], result: Any) => {
-        if (!r.active || stopped || autoPress.fired || Date.now() > autoPress.armedUntil) return result;
-        const props = args && args[1];
-        const label = String(props?.accessibilityLabel ?? props?.label ?? props?.text ?? "");
-        if (typeof props?.onPress !== "function" || !ACCEPT_BUTTON_RE.test(label)) return result;
-        autoPress.fired = true;
-        const press = props.onPress;
-        r.toast(`Pressing "${label.slice(0, 40)}"…`, "ShieldIcon");
-        setTimeout(() => { if (r.active && !stopped) { try { press({}); } catch { /* sheet may have closed */ } } }, 350);
+        if (!r.active || stopped) return result;
+        const type = args && args[0];
+        const name = componentName(type);
+        if (SHEET_RE.test(name)) {
+            console.log("[NitroSniper] createElement saw", name);
+            armAutoPress(300000);
+        }
         return result;
     });
+
+    function findProp(target: Any, key: string): Any {
+        try {
+            const d = Object.getOwnPropertyDescriptor(target, key);
+            return d && "value" in d ? d.value : undefined;
+        } catch { return undefined; }
+    }
+    function componentName(type: Any): string {
+        for (let wrappers = 0; type && wrappers < 4; wrappers++) {
+            if (typeof type === "string") return type;
+            const name = findProp(type, "displayName") || findProp(type, "name");
+            if (typeof name === "string" && name) return name;
+            if (typeof type !== "object") break;
+            type = findProp(type, "type") ?? findProp(type, "render");
+        }
+        return "";
+    }
+    type Sheet = { fiber: object; name: string; depth: number };
+    function walkSheets(
+        visitSheet: (sheet: Sheet) => void,
+        visitButton: (sheet: Sheet, name: string, props: Any, depth: number) => void,
+    ) {
+        const hook = findProp(findProp(globalThis, "__REACT_DEVTOOLS__"), "hook")
+            ?? findProp(globalThis, "__REACT_DEVTOOLS_GLOBAL_HOOK__");
+        const registry = findProp(hook, "renderers");
+        const getFiberRoots = findProp(hook, "getFiberRoots");
+        const stats = { hook: !!hook, renderers: registry instanceof Map ? registry.size : 0, roots: 0, fibers: 0, depth: 0 };
+        if (typeof getFiberRoots !== "function" || !(registry instanceof Map)) return stats;
+
+        // Follow every committed root. An iterative walk reaches deep bottom
+        // sheets without recursive calls or a cap that favors the main app.
+        const stack: Array<{ fiber: Any; sheet?: Sheet; depth: number }> = [];
+        for (const [id] of Map.prototype.entries.call(registry)) {
+            let roots: Any;
+            try { roots = Reflect.apply(getFiberRoots, hook, [id]); } catch { continue; }
+            if (!(roots instanceof Set)) continue;
+            for (const root of Set.prototype.values.call(roots)) {
+                stack.push({ fiber: findProp(root, "current") ?? root, depth: 0 });
+                stats.roots++;
+            }
+        }
+        const seen = new Set<object>();
+        while (stack.length) {
+            let { fiber, sheet, depth } = stack.pop()!;
+            if (!fiber || typeof fiber !== "object" || seen.has(fiber)) continue;
+            seen.add(fiber);
+            stats.fibers++;
+            stats.depth = Math.max(stats.depth, depth);
+            const sibling = findProp(fiber, "sibling");
+            if (sibling) stack.push({ fiber: sibling, sheet, depth });
+            // React 19 Offscreen: a non-null memoized state means hidden.
+            if (findProp(fiber, "tag") === 22 && findProp(fiber, "memoizedState") != null) continue;
+            const resolvedName = componentName(findProp(fiber, "type"));
+            const name = SHEET_RE.test(resolvedName) || BUTTON_RE.test(resolvedName)
+                ? resolvedName : componentName(findProp(fiber, "elementType")) || resolvedName;
+            if (SHEET_RE.test(name)) {
+                sheet = { fiber, name, depth };
+                visitSheet(sheet);
+            }
+            if (sheet) {
+                const props = findProp(fiber, "memoizedProps");
+                if (typeof props?.onPress === "function") visitButton(sheet, name, props, depth);
+            }
+            const child = findProp(fiber, "child");
+            if (child) stack.push({ fiber: child, sheet, depth: depth + 1 });
+        }
+        return stats;
+    }
+    function scanReport(): string {
+        const sheets: string[] = [], handlers: string[] = [];
+        const stats = walkSheets(
+            ({ name, depth }) => sheets.push(`${name}@d${depth}`),
+            (sheet, name, props, depth) => {
+                if (handlers.length < 24) handlers.push(`${sheet.name}: ${name || "Anonymous"}@d${depth}: ${props.onPress.name || "(anonymous)"}`);
+            },
+        );
+        return [
+            `devtools hook: ${stats.hook ? "yes" : "NO"}`,
+            `renderers: ${stats.renderers}; roots: ${stats.roots}; fibers walked: ${stats.fibers}; max depth: ${stats.depth}`,
+            `sheets: ${sheets.join(", ") || "none"}`,
+            `onPress in sheets: ${handlers.join(", ") || "none"}`,
+        ].join("\n");
+    }
+    const pressedSheets = new WeakSet<object>(), loggedSheets = new WeakSet<object>();
+    const loggedHandlers = new WeakMap<object, Set<string>>();
+    function markSheet(set: WeakSet<object>, fiber: object) {
+        set.add(fiber);
+        const alternate = findProp(fiber, "alternate");
+        if (alternate) set.add(alternate);
+    }
+    function scanAndPress() {
+        type Candidate = { sheet: Sheet; handler: string; label: string; press: (event: Any) => Any; rank: number };
+        const candidates: Candidate[] = [];
+        const disabledHandlers = new Map<Sheet, Set<Any>>();
+        const stats = walkSheets(
+            sheet => {
+                if (loggedSheets.has(sheet.fiber)) return;
+                markSheet(loggedSheets, sheet.fiber);
+                console.log("[NitroSniper] fiber scan: entered", sheet.name, "subtree at depth", sheet.depth);
+            },
+            (sheet, name, props, depth) => {
+                if (pressedSheets.has(sheet.fiber) || pressedSheets.has(findProp(sheet.fiber, "alternate"))) return;
+                const handler = String(props.onPress.name || "(anonymous)");
+                let logged = loggedHandlers.get(sheet.fiber) ?? loggedHandlers.get(findProp(sheet.fiber, "alternate"));
+                if (!logged) { logged = new Set(); loggedHandlers.set(sheet.fiber, logged); }
+                const key = `${name}:${handler}`;
+                if (logged.size < 16 && !logged.has(key)) {
+                    logged.add(key);
+                    console.log("[NitroSniper] fiber in sheet has onPress:", handler, "fiber:", name || "Anonymous", "depth:", depth);
+                }
+                if (!BUTTON_RE.test(name)) return;
+                const press = props.onPress;
+                if (props.disabled || props.loading || props.submitting || props.accessibilityState?.disabled) {
+                    let handlers = disabledHandlers.get(sheet);
+                    if (!handlers) { handlers = new Set(); disabledHandlers.set(sheet, handlers); }
+                    handlers.add(press);
+                    return;
+                }
+                const knownHandler = sheet.name === "CaptchaModal" ? handler === "handleShowCaptcha" : GIFT_HANDLER_RE.test(handler);
+                const label = elementText({ props }).trim();
+                if (!knownHandler && (sheet.name !== "GiftCodeRedeemModal" || !GIFT_LABEL_RE.test(label))) return;
+                candidates.push({ sheet, handler, label, press, rank: (knownHandler ? 2 : 0) + (name === "BaseTextButton" ? 1 : 0) });
+            },
+        );
+        let best: Candidate | undefined;
+        for (const candidate of candidates) {
+            if (disabledHandlers.get(candidate.sheet)?.has(candidate.press)) continue;
+            if (!best || candidate.rank > best.rank) best = candidate;
+        }
+        if (!best || stopped || !r.active) return { ...stats, pressed: false };
+        const { sheet, handler, label, press } = best;
+        markSheet(pressedSheets, sheet.fiber); // Same mounted sheet across React's alternating commits.
+        const message = `Pressing "${(label || "confirm").slice(0, 40)}"…`;
+        console.log("[NitroSniper]", message, sheet.name, handler);
+        try {
+            const result = press({ nativeEvent: {}, currentTarget: null });
+            console.log("[NitroSniper] invoked", handler, "in", sheet.name);
+            if (result && typeof result.then === "function") {
+                Promise.resolve(result).catch(e => console.log("[NitroSniper] press rejected:", handler, String(e)));
+            }
+        } catch (e) {
+            console.log("[NitroSniper] press failed:", handler, String(e));
+            return { ...stats, pressed: false };
+        }
+        r.toast(message, "ShieldIcon");
+        return { ...stats, pressed: true };
+    }
+    // Stay armed after a press: a gift sheet can be followed by a separate
+    // verification sheet. A re-arm extends the deadline, not prior presses.
+    let armedUntil = 0, sweeps = 0;
+    let scanTimer: ReturnType<typeof setTimeout> | undefined;
+    function stopScan() {
+        if (scanTimer != null) clearTimeout(scanTimer);
+        scanTimer = undefined;
+    }
+    function startScan(delay: number) {
+        if (scanTimer != null || !r.active || stopped || Date.now() >= armedUntil) return;
+        scanTimer = setTimeout(() => {
+            scanTimer = undefined;
+            if (!r.active || stopped || Date.now() >= armedUntil) return;
+            try {
+                const { pressed, roots, fibers, depth } = scanAndPress();
+                if (pressed || sweeps < 4) console.log("[NitroSniper] fiber sweep", sweeps, "pressed:", pressed, "roots:", roots, "fibers:", fibers, "max depth:", depth);
+            } catch (e) { if (sweeps < 3) r.error("Fiber scan", e); }
+            sweeps++;
+            startScan(1000);
+        }, delay);
+    }
+    function armAutoPress(ms = 60000) {
+        armedUntil = Math.max(armedUntil, Date.now() + ms);
+        sweeps = 0;
+        console.log("[NitroSniper] armed autoPress for", ms, "ms");
+        startScan(350);
+    }
+    r.own(stopScan);
 
     function redeemViaActions(actions: Any, code: string): Promise<null | void> {
         // Calls the same module the native Accept button uses. Returns null when
@@ -173,7 +356,17 @@ function NitroSniper(r: Runtime) {    const { h, React } = r, { Page, Text, Butt
             h(Button, { text: "Send test webhook", variant: "secondary", onPress: () => webhook({ content: "NitroSniper Snow webhook test" }).then(() => r.toast(r.store.webhookUrl ? "Test sent" : "Set a webhook first")).catch(e => r.error("Webhook test", e)) }),
             h(Text, { muted: true }, "Claim cycle: claim link, auto-press the Accept and human-verification Confirm buttons, solve hCaptcha, and toast each result. Only new live messages are processed."));
     }
-    return { start() { started = Date.now(); r.subscribe("MESSAGE_CREATE", e => { try { receive(e); } catch (err) { r.error("Message handler", err); } }); }, stop() { stopped = true; solver.dispose(); queue.length = 0; clearTimeout(waitTimer); releaseWait?.(); }, Settings, receive, stats };
+    return { start() { started = Date.now(); r.subscribe("MESSAGE_CREATE", e => { try { receive(e); } catch (err) { r.error("Message handler", err); } });
+        try { console.log('[NitroSniper] start: arming fiber scanner for stuck sheet'); armAutoPress(300000); } catch (e) { console.log('[NitroSniper] start arm failed', String(e)); }
+        try {
+            r.command({ name: "nitrosniper-test", description: "Arm the confirm-button scanner and report fiber findings", async execute() {
+                armAutoPress(300000);
+                await new Promise<void>(res => { setTimeout(() => res(), 1600); });
+                const found = scanReport();
+                return `Scanner armed.\n${found}`;
+            } });
+        } catch (e) { r.error("Command registration", e); }
+    }, stop() { stopped = true; solver.dispose(); queue.length = 0; clearTimeout(waitTimer); releaseWait?.(); }, Settings, receive, stats };
 }
 NitroSniper.defaults = { ignoreOwnGiftLinks: false, webhookUrl: "" };
 
